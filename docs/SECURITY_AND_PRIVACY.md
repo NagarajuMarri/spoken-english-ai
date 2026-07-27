@@ -14,3 +14,6 @@ Doctor Visit is language practice, not medical advice. Content needs abuse and s
 
 Threat modeling, authentication, authorization, rate limiting, abuse prevention, backup/restore testing, incident response, and a privacy impact assessment are release gates, not Milestone 1 implementations.
 
+## Voice consent and lifecycle
+
+Consent changes are append-only records with policy version and timestamps. Processing and storage consent are distinct. Simulated media types are restricted, unsafe/traversal references are rejected, and errors expose no secrets. Production requires authenticated ownership, confirmed object deletion, background retries, monitoring, and provider legal/security review.

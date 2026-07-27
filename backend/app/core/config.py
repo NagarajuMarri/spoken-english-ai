@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     speech_to_text_provider: str = "disabled"
     text_to_speech_provider: str = "disabled"
     auto_create_tables: bool = True
+    temporary_audio_expiration_hours: int = 24
 
     model_config = SettingsConfigDict(
         env_prefix="SPOKEN_ENGLISH_",

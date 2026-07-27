@@ -16,6 +16,8 @@ Implemented: five-level curriculum, deterministic selection, lesson sessions, tr
 
 Daily-plan client contracts, curriculum expansion, score calibration, audio consent/retention lifecycle, and sandbox provider evaluations before choosing production vendors.
 
+Milestone 4 delivers the daily-plan contract, append-only consent, simulated voice sessions, metadata lifecycle, and synthetic pronunciation boundary. Milestone 5 should add authentication/authorization, signed-upload design, durable deletion jobs, privacy assessment, and provider sandbox benchmarks.
+
 ## Milestone 4 — Client MVP and subscriptions
 
 Responsive web client, mobile-ready API, voice UX, accessibility, entitlement enforcement, payment sandbox, analytics, and secure account lifecycle.

@@ -31,3 +31,7 @@ Message responses include tutor text, turn number, the persisted transcript entr
 ## Milestone 3 resources
 
 Curriculum is exposed at `/api/v1/curriculum/levels`, `/lessons`, and `/lessons/{lesson_id}`; learner selection at `/api/v1/learners/{id}/daily-lesson`; lesson sessions at `/api/v1/lesson-sessions`; and summaries at `/api/v1/learners/{id}/progress` and `/streak`. Lesson completion is idempotent and returns the stored evaluation.
+
+## Milestone 4 resources
+
+Consent uses `GET/PUT/DELETE /api/v1/learners/{id}/voice-consent`; voice practice uses `POST /api/v1/voice-sessions`, `GET /voice-sessions/{id}`, `POST /voice-sessions/{id}/turns`, and `POST /voice-sessions/{id}/complete`; `/api/v1/learners/{id}/daily-plan` is client-ready. Turn input is a safe simulated reference, not an upload, and synthetic assessment is clearly labeled.
