@@ -14,14 +14,16 @@ The API is JSON over HTTPS under a future `/v1` prefix; `/health` remains unvers
 }
 ```
 
-## Planned MVP resources
+## Milestone 2 resources
 
-- `POST /v1/learners` and `GET/PATCH /v1/learners/{id}/profile`
-- `GET /v1/lessons/daily?level=...`
-- `POST /v1/conversations`, `POST /v1/conversations/{id}/turns`, and `POST /v1/conversations/{id}/complete`
-- `GET /v1/conversations/{id}` for transcript and summary
-- `GET /v1/learners/{id}/progress`
-- `GET /v1/learners/{id}/entitlements`
+- `POST /api/v1/learners` creates a learner from `email` and `display_name`.
+- `GET /api/v1/learners/{learner_id}` returns the profile.
+- `PATCH /api/v1/learners/{learner_id}/onboarding` sets proficiency, learning goal, daily minutes, and native language.
+- `GET /api/v1/scenarios` returns the eight deterministic scenario definitions.
+- `POST /api/v1/conversations` starts a session from `learner_id` and `scenario_id`.
+- `POST /api/v1/conversations/{conversation_id}/messages` accepts `text` and optional `include_telugu_explanation`.
+- `GET /api/v1/conversations/{conversation_id}` returns the complete ordered transcript.
 
-Turn requests accept `text` or a future uploaded/streamed audio reference and include client turn IDs for idempotency. Responses carry tutor text, optional speech reference, correction checkpoint, and usage metadata. Authentication, pagination details, and streaming protocols are intentionally deferred.
+Errors use `{"error":{"code":"...","message":"...","details":[]?}}`. Stable codes cover missing resources, duplicate email, invalid onboarding selections, invalid daily goals, unsupported languages, and empty messages.
 
+Message responses include tutor text, turn number, the persisted transcript entry, and an optional correction. The original learner text is never rewritten. Audio references, authentication, idempotency keys, pagination, and streaming protocols remain deferred.

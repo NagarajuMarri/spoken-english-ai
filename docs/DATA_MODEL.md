@@ -1,19 +1,12 @@
-# Planned Data Model
+# Data Model
 
-No database models are implemented in Milestone 1. The planned relational model is:
+Milestone 2 implements four SQLAlchemy 2.x models with UUID strings and UTC timestamps:
 
-- **Learner:** id, email/identity reference, locale, timezone, status, created_at.
-- **LearnerProfile:** learner_id, selected_level, Telugu-explanation preference, goals.
-- **Lesson:** id, level, mode, objective, content version, active state.
-- **ConversationSession:** id, learner_id, lesson_id/mode, status, started_at, completed_at.
-- **ConversationTurn:** id, session_id, sequence, speaker, input modality, text, provider confidence, created_at.
-- **FeedbackItem:** id, session_id, source turn(s), category, priority, original text, corrected text, explanation, explanation locale, confidence.
-- **ProgressSnapshot:** id, learner_id, period, level, grammar/vocabulary/fluency measures, evidence version.
-- **DailyActivity:** learner_id, local date, qualifying activity count, streak contribution.
-- **Subscription:** learner_id, plan, status, period boundaries, external reference.
-- **Entitlement:** subscription/plan, feature key, allowance, reset period.
+- **Learner:** unique normalized email, display name, native language, proficiency level, learning goal, daily goal, and timestamps.
+- **Conversation:** learner foreign key, deterministic scenario identifier, and creation time.
+- **ConversationMessage:** conversation foreign key, unique per-conversation turn number, original learner text, tutor response, optional correction, and timestamp.
+- **ProgressRecord:** learner and optional conversation references, completed-turn count, and timestamp.
 
-Use UUID identifiers, UTC timestamps, explicit content/policy versions, and immutable event timestamps. Unique constraints protect turn sequence and one daily activity record per learner/date. Foreign keys keep ownership explicit. Sensitive identity data is separated from learning content, and deletion can cascade or anonymize according to retention policy.
+The initial Alembic revision is `0001_learner_onboarding`. SQLite supports local development and isolated tests; model types and constraints remain PostgreSQL-compatible. Foreign keys express ownership and turn uniqueness protects transcript order.
 
-Audio is object storage metadata, not a database blob, and is absent unless consent and retention rules allow it. Transcript edits and derived feedback retain provenance.
-
+Future models include lessons, richer feedback provenance, daily activity/streaks, progress snapshots, subscriptions, and entitlements. Audio remains object-storage metadata rather than a database blob.

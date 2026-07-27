@@ -1,4 +1,4 @@
-# Milestone 1 Acceptance Criteria
+# Product Acceptance Criteria
 
 ## Product definition
 
@@ -26,3 +26,15 @@ pytest
 
 All tests must pass. The work is committed on `product/milestone-1-mvp-foundation` with the requested commit message and proposed as a draft pull request to `main`.
 
+## Milestone 2
+
+- Learners can be created, retrieved, and onboarded using the five levels, five learning goals, 5–120 minute daily target, and Telugu/English native language.
+- Duplicate email and invalid inputs return structured errors.
+- All eight scenarios are listed deterministically.
+- A persisted conversation requires an existing learner and scenario.
+- Messages preserve original text and produce a positive natural reply; only clear high-value errors produce at most one deterministic correction.
+- Telugu explanation is added only when requested.
+- Learner, Conversation, ConversationMessage, and ProgressRecord use SQLAlchemy 2.x UUID-string models.
+- Alembic can apply the initial schema; tests use separate temporary SQLite files.
+- No route owns business rules and no external integration is called.
+- `python -m pytest` passes without the former TestClient compatibility warning.

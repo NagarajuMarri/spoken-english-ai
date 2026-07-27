@@ -1,2 +1,8 @@
-"""SQLAlchemy models will be introduced after the documented model is validated."""
+from backend.app.models.entities import (
+    Conversation,
+    ConversationMessage,
+    Learner,
+    ProgressRecord,
+)
 
+__all__ = ["Learner", "Conversation", "ConversationMessage", "ProgressRecord"]

@@ -1,0 +1,22 @@
+from enum import StrEnum
+
+
+class ProficiencyLevel(StrEnum):
+    STARTER = "STARTER"
+    BEGINNER = "BEGINNER"
+    ELEMENTARY = "ELEMENTARY"
+    PRE_INTERMEDIATE = "PRE_INTERMEDIATE"
+    INTERMEDIATE = "INTERMEDIATE"
+
+
+class LearningGoal(StrEnum):
+    DAILY_CONVERSATION = "DAILY_CONVERSATION"
+    JOB_INTERVIEW = "JOB_INTERVIEW"
+    WORKPLACE = "WORKPLACE"
+    TRAVEL = "TRAVEL"
+    GENERAL_FLUENCY = "GENERAL_FLUENCY"
+
+
+class NativeLanguage(StrEnum):
+    TELUGU = "Telugu"
+    ENGLISH = "English"

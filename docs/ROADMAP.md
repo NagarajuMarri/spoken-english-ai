@@ -6,11 +6,11 @@ Product decisions, modular-monolith architecture, provider boundaries, repositor
 
 ## Milestone 2 — Text learning loop
 
-Learner identity and profile foundation, proficiency onboarding, PostgreSQL/Alembic models, curated daily lessons, deterministic text conversation sessions, transcript persistence, delayed feedback rules, progress history, and streak calculation.
+Implemented: learner identity/profile foundation, proficiency onboarding, SQLAlchemy/Alembic persistence, eight scenarios, deterministic text conversations, transcript persistence, priority correction rules, Telugu-on-request explanations, and basic progress records. Curated daily lesson selection and streak calculation move to the next learning-focused increment.
 
-## Milestone 3 — AI and voice adapters
+## Milestone 3 — Daily curriculum, progress, and voice adapters
 
-Evaluated LLM prompts, speech-to-text and text-to-speech adapters, confidence-aware pronunciation feedback, consent/retention controls, resilience, cost controls, and provider test doubles.
+Curated daily lesson selection, streaks and progress summaries, evaluated LLM interface/test double, speech-to-text and text-to-speech interfaces/test doubles, confidence-aware pronunciation design, consent/retention controls, resilience, and cost controls. Paid providers remain gated behind explicit evaluation.
 
 ## Milestone 4 — Client MVP and subscriptions
 
@@ -21,4 +21,3 @@ Responsive web client, mobile-ready API, voice UX, accessibility, entitlement en
 Placement support, adaptive practice, spaced review, safety evaluation, learner experiments, native mobile decisions, operational hardening, and broader language research.
 
 Each milestone requires privacy, accessibility, reliability, learning-quality, and cost review. Multiple Indian languages, social features, live tutors, and institutional dashboards remain later hypotheses.
-

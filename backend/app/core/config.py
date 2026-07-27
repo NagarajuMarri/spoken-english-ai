@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     llm_provider: str = "disabled"
     speech_to_text_provider: str = "disabled"
     text_to_speech_provider: str = "disabled"
+    auto_create_tables: bool = True
 
     model_config = SettingsConfigDict(
         env_prefix="SPOKEN_ENGLISH_",
@@ -24,4 +25,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

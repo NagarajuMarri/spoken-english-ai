@@ -1,2 +1,1 @@
 """Persistence ports and adapters."""
-

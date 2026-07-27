@@ -4,7 +4,7 @@ Spoken English AI is a voice-first learning product for Indian learners, initial
 
 ## Milestone 1 boundary
 
-This milestone defines the product and establishes a small executable backend. It includes product, learning, conversation, correction, architecture, data, API, privacy, subscription, roadmap, and acceptance documentation plus a FastAPI health endpoint. It deliberately excludes authentication, persistence models, frontends, paid AI/speech/payment services, and production infrastructure.
+Milestone 1 defined the product and backend foundation. Milestone 2 adds learner profiles, proficiency onboarding, SQLite/PostgreSQL-ready persistence, eight scenarios, and a deterministic text conversation. Authentication, frontends, and paid AI/speech/payment services remain excluded.
 
 ## Architecture
 
@@ -29,6 +29,14 @@ uvicorn backend.app.main:app --reload
 
 Open `http://127.0.0.1:8000/health`.
 
+Apply database migrations:
+
+```powershell
+alembic upgrade head
+```
+
+The default local database is SQLite. Set `SPOKEN_ENGLISH_DATABASE_URL` to a PostgreSQL SQLAlchemy URL for a PostgreSQL deployment. Automatic table creation is convenient for local development and tests; deployed environments should set `SPOKEN_ENGLISH_AUTO_CREATE_TABLES=false` and use Alembic.
+
 Run tests:
 
 ```powershell
@@ -37,5 +45,4 @@ pytest
 
 ## Roadmap
 
-Milestone 2 should implement learner identity, proficiency onboarding, conversation session domain models, and a deterministic text-only lesson loop. Later milestones add provider-backed voice, progress intelligence, subscriptions, and client applications. See [ROADMAP.md](docs/ROADMAP.md).
-
+Milestone 2 implements the learner onboarding and deterministic text lesson loop. Milestone 3 should introduce evaluated provider adapters, voice processing, and stronger progress intelligence while preserving local test doubles. See [ROADMAP.md](docs/ROADMAP.md).
