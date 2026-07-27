@@ -20,3 +20,10 @@ class LearningGoal(StrEnum):
 class NativeLanguage(StrEnum):
     TELUGU = "Telugu"
     ENGLISH = "English"
+
+
+class LessonSessionStatus(StrEnum):
+    STARTED = "STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    ABANDONED = "ABANDONED"

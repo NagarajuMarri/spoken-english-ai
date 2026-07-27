@@ -3,15 +3,16 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.errors import AppError
 from backend.app.domain.scenarios import SCENARIOS_BY_ID
-from backend.app.domain.tutor import respond
-from backend.app.repositories.conversations import ConversationRepository
+from backend.app.integrations.llm import RuleBasedLLMProvider
+from backend.app.repositories.conversations import ConversationRepository, TurnSequenceConflict
 from backend.app.repositories.learners import LearnerRepository
 
 
 class ConversationService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, provider=None) -> None:
         self.repository = ConversationRepository(session)
         self.learners = LearnerRepository(session)
+        self.provider = provider or RuleBasedLLMProvider()
 
     def create(self, learner_id: str, scenario_id: str):
         if self.learners.get(learner_id) is None:
@@ -33,7 +34,14 @@ class ConversationService:
         cleaned = text.strip()
         if not cleaned:
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "empty_message", "Message cannot be empty.")
-        tutor_turn = respond(cleaned, include_telugu)
-        return self.repository.add_message(
-            conversation_id, text, tutor_turn.response, tutor_turn.correction
-        )
+        tutor_turn = self.provider.generate_tutor_response(cleaned, include_telugu)
+        try:
+            return self.repository.add_message(
+                conversation_id, text, tutor_turn.response, tutor_turn.correction
+            )
+        except TurnSequenceConflict as exc:
+            raise AppError(
+                status.HTTP_409_CONFLICT,
+                "turn_sequence_conflict",
+                "The conversation changed concurrently; retry the message.",
+            ) from exc

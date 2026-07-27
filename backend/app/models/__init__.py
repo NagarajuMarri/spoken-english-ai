@@ -1,8 +1,17 @@
 from backend.app.models.entities import (
     Conversation,
     ConversationMessage,
+    ConversationEvaluation,
     Learner,
+    LessonSession,
     ProgressRecord,
 )
 
-__all__ = ["Learner", "Conversation", "ConversationMessage", "ProgressRecord"]
+__all__ = [
+    "Learner",
+    "Conversation",
+    "ConversationMessage",
+    "ProgressRecord",
+    "LessonSession",
+    "ConversationEvaluation",
+]

@@ -18,3 +18,4 @@ Interfaces should expose provider-independent requests, results, confidence, lan
 
 Require explicit microphone permission and clear recording state. Default to deleting raw audio after transcription unless a learner explicitly opts into retention for review. Enforce duration and size limits, redact sensitive logs, and make provider region/retention terms a launch criterion.
 
+Milestone 3 formalizes `SpeechToTextProvider.transcribe()` and `TextToSpeechProvider.synthesize()`. The fake implementations are local test doubles only. No audio is uploaded, retained, or used for pronunciation scoring.

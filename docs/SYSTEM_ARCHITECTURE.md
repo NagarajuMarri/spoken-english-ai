@@ -28,3 +28,4 @@ Identity and learner profile; curriculum and lessons; conversation sessions and 
 
 Use PostgreSQL and Alembic when persistence begins. Add an asynchronous job mechanism only for demonstrably slow work. Keep payment and object storage behind future ports. Avoid service extraction until independent scaling, availability, or team ownership provides measurable value.
 
+Provider protocols now isolate tutor/evaluation, transcription, and synthesis. Runtime behavior uses local deterministic implementations. PostgreSQL turn sequencing locks the parent conversation row, calculates the next number, and relies on the unique constraint with bounded retry; SQLite remains deterministic for sequential tests.

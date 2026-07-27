@@ -10,3 +10,5 @@ Milestone 2 implements four SQLAlchemy 2.x models with UUID strings and UTC time
 The initial Alembic revision is `0001_learner_onboarding`. SQLite supports local development and isolated tests; model types and constraints remain PostgreSQL-compatible. Foreign keys express ownership and turn uniqueness protects transcript order.
 
 Future models include lessons, richer feedback provenance, daily activity/streaks, progress snapshots, subscriptions, and entitlements. Audio remains object-storage metadata rather than a database blob.
+
+Milestone 3 adds `LessonSession` and `ConversationEvaluation`, and extends `ProgressRecord` with lesson, UTC practice date, duration, score, scenario, and proficiency dimensions. Static curriculum remains a version-controlled domain catalogue because it is small and not runtime-administered. Revision `0002_curriculum_progress` applies these changes.

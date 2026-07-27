@@ -12,3 +12,6 @@ Learners progress through repeated cycles: model a goal, practise in conversatio
 
 Vocabulary ranges are directional receptive/working targets, not hard gates. Advancement uses a rolling portfolio: scenario completion, comprehensibility, independence, recurring-error improvement, vocabulary use, and fluency. Accent conformity is never a criterion.
 
+## Daily selection and evaluation
+
+The catalogue contains two initial lessons per level. Selection matches level, then prefers goal-aligned scenarios, incomplete lessons, and lessons outside the three most recent sessions. Ties are sorted by ID and indexed by UTC date. Text evaluation transparently scores grammar, vocabulary variety, response length, completed turns, and participation; it is a coaching proxy and never a pronunciation assessment.

@@ -38,3 +38,12 @@ All tests must pass. The work is committed on `product/milestone-1-mvp-foundatio
 - Alembic can apply the initial schema; tests use separate temporary SQLite files.
 - No route owns business rules and no external integration is called.
 - `python -m pytest` passes without the former TestClient compatibility warning.
+
+## Milestone 3
+
+- Five-level lessons contain all required teaching metadata and deterministic selection considers level, goal, completion, recent history, and UTC date.
+- Lesson sessions persist completion and bounded text-only evaluations.
+- Progress and UTC streaks deduplicate same-day practice, reset across gaps, and retain the longest run.
+- Provider protocols and local doubles make no network calls and never claim pronunciation accuracy.
+- PostgreSQL message sequencing uses parent-row locking, uniqueness, and bounded retry.
+- Revision `0002_curriculum_progress`, isolated tests, compilation, and diff checks pass.

@@ -27,3 +27,7 @@ The API is JSON over HTTPS under a future `/v1` prefix; `/health` remains unvers
 Errors use `{"error":{"code":"...","message":"...","details":[]?}}`. Stable codes cover missing resources, duplicate email, invalid onboarding selections, invalid daily goals, unsupported languages, and empty messages.
 
 Message responses include tutor text, turn number, the persisted transcript entry, and an optional correction. The original learner text is never rewritten. Audio references, authentication, idempotency keys, pagination, and streaming protocols remain deferred.
+
+## Milestone 3 resources
+
+Curriculum is exposed at `/api/v1/curriculum/levels`, `/lessons`, and `/lessons/{lesson_id}`; learner selection at `/api/v1/learners/{id}/daily-lesson`; lesson sessions at `/api/v1/lesson-sessions`; and summaries at `/api/v1/learners/{id}/progress` and `/streak`. Lesson completion is idempotent and returns the stored evaluation.

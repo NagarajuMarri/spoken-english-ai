@@ -4,7 +4,7 @@ Spoken English AI is a voice-first learning product for Indian learners, initial
 
 ## Milestone 1 boundary
 
-Milestone 1 defined the product and backend foundation. Milestone 2 adds learner profiles, proficiency onboarding, SQLite/PostgreSQL-ready persistence, eight scenarios, and a deterministic text conversation. Authentication, frontends, and paid AI/speech/payment services remain excluded.
+Milestone 1 defined the foundation; Milestone 2 added onboarding and persisted text conversations. Milestone 3 adds a five-level curriculum, deterministic daily lessons, evaluation, progress and UTC streaks, plus provider-neutral AI/voice interfaces with local doubles. Authentication, frontends, and paid providers remain excluded.
 
 ## Architecture
 
@@ -45,4 +45,4 @@ pytest
 
 ## Roadmap
 
-Milestone 2 implements the learner onboarding and deterministic text lesson loop. Milestone 3 should introduce evaluated provider adapters, voice processing, and stronger progress intelligence while preserving local test doubles. See [ROADMAP.md](docs/ROADMAP.md).
+Milestone 3 implements curriculum, progress, evaluation, and local provider boundaries. Next comes evaluation calibration and consent-aware audio lifecycle work before any paid integration. See [ROADMAP.md](docs/ROADMAP.md).

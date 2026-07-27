@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from backend.app.api.routes.conversations import router as conversations_router
 from backend.app.api.routes.health import router as health_router
 from backend.app.api.routes.learners import router as learners_router
+from backend.app.api.routes.learning import router as learning_router
 from backend.app.core.config import get_settings
 from backend.app.core.errors import install_error_handlers
 from backend.app.db.base import Base
@@ -26,6 +27,7 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(health_router)
     application.include_router(learners_router)
     application.include_router(conversations_router)
+    application.include_router(learning_router)
     return application
 
 

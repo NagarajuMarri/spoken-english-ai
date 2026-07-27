@@ -8,9 +8,13 @@ Product decisions, modular-monolith architecture, provider boundaries, repositor
 
 Implemented: learner identity/profile foundation, proficiency onboarding, SQLAlchemy/Alembic persistence, eight scenarios, deterministic text conversations, transcript persistence, priority correction rules, Telugu-on-request explanations, and basic progress records. Curated daily lesson selection and streak calculation move to the next learning-focused increment.
 
-## Milestone 3 — Daily curriculum, progress, and voice adapters
+## Milestone 3 — Daily curriculum, progress, and provider boundaries
 
-Curated daily lesson selection, streaks and progress summaries, evaluated LLM interface/test double, speech-to-text and text-to-speech interfaces/test doubles, confidence-aware pronunciation design, consent/retention controls, resilience, and cost controls. Paid providers remain gated behind explicit evaluation.
+Implemented: five-level curriculum, deterministic selection, lesson sessions, transparent evaluation, UTC streaks/progress, provider protocols/local doubles, and hardened turn sequencing.
+
+## Milestone 4 — Experience and provider evaluation
+
+Daily-plan client contracts, curriculum expansion, score calibration, audio consent/retention lifecycle, and sandbox provider evaluations before choosing production vendors.
 
 ## Milestone 4 — Client MVP and subscriptions
 
