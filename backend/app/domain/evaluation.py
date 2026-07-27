@@ -10,9 +10,9 @@ class EvaluationResult:
     task_completion_score: int
     confidence_score: int
     overall_score: int
-    strengths: list[str]
-    priority_improvements: list[str]
-    corrected_examples: list[str]
+    strengths: tuple[str, ...]
+    priority_improvements: tuple[str, ...]
+    corrected_examples: tuple[str, ...]
 
 
 def evaluate(messages) -> EvaluationResult:
@@ -31,4 +31,7 @@ def evaluate(messages) -> EvaluationResult:
     if len(set(words)) >= 8:
         strengths.append("You used a useful range of words.")
     improvements = ["Practise the corrected sentence once more."] if corrections else ["Add more detail to each answer."]
-    return EvaluationResult(grammar, vocabulary, fluency, task, confidence, overall, strengths, improvements, corrections[:2])
+    return EvaluationResult(
+        grammar, vocabulary, fluency, task, confidence, overall,
+        tuple(strengths), tuple(improvements), tuple(corrections[:2]),
+    )

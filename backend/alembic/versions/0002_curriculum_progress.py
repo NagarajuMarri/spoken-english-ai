@@ -49,6 +49,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("conversation_evaluations")
+    op.drop_index("ix_lesson_sessions_lesson_id", table_name="lesson_sessions")
+    op.drop_index("ix_lesson_sessions_learner_id", table_name="lesson_sessions")
     op.drop_table("lesson_sessions")
     with op.batch_alter_table("progress_records") as batch:
         for column in ("proficiency_level", "scenario_id", "score", "duration_seconds", "practice_date", "lesson_id"):

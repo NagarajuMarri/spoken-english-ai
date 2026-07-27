@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from backend.app.domain.curriculum import LESSONS
 from backend.app.domain.evaluation import evaluate
 from backend.app.integrations.llm import RuleBasedLLMProvider
 from backend.app.integrations.speech_to_text import FakeSpeechToTextProvider
@@ -61,6 +62,12 @@ def test_deterministic_evaluation():
 
     assert evaluate([Message()]) == evaluate([Message()])
     assert "pronunciation" not in evaluate([Message()]).__dict__
+    assert isinstance(evaluate([Message()]).strengths, tuple)
+
+
+def test_curriculum_ids_are_unique():
+    ids = [lesson.id for lesson in LESSONS]
+    assert len(ids) == len(set(ids))
 
 
 def test_progress_and_same_day_streak(client, learner):
@@ -80,6 +87,20 @@ def test_progress_and_same_day_streak(client, learner):
     assert streak["current_streak"] == 1
     assert streak["longest_streak"] == 1
     assert streak["timezone"] == "UTC"
+
+
+def test_completion_is_idempotent_and_progress_not_double_counted(client, learner):
+    created = client.post("/api/v1/lesson-sessions", json={
+        "learner_id": learner["id"], "lesson_id": "starter-introductions"
+    }).json()
+    endpoint = f"/api/v1/lesson-sessions/{created['id']}/complete"
+    first = client.post(endpoint, json={"duration_seconds": 300})
+    second = client.post(endpoint, json={"duration_seconds": 900})
+    assert first.status_code == second.status_code == 200
+    assert second.json()["duration_seconds"] == 300
+    progress = client.get(f"/api/v1/learners/{learner['id']}/progress").json()
+    assert progress["completed_lessons"] == 1
+    assert progress["total_practice_minutes"] == 5
 
 
 def test_streak_increment_reset_and_longest(client, learner):
