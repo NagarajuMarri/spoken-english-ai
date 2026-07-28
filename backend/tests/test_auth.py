@@ -4,7 +4,7 @@ import jwt
 from sqlalchemy import select
 
 from backend.app.core.security import hash_refresh_token
-from backend.app.models import Learner, RefreshToken, UserAccount
+from backend.app.models import Learner, RefreshToken, SecurityAuditEvent, UserAccount
 
 
 PASSWORD = "StrongPassword123!"
@@ -37,6 +37,11 @@ def test_duplicate_email_and_weak_password(client):
     weak = register(client, "other@example.com", "short")
     assert weak.status_code == 422
     assert weak.json()["error"]["code"] == "weak_password"
+    too_long_value = "é" * 40
+    too_long = register(client, "long@example.com", too_long_value)
+    assert too_long.status_code == 422
+    assert too_long.json()["error"]["code"] == "password_too_long"
+    assert too_long_value not in too_long.text
 
 
 def test_login_success_invalid_credentials_and_disabled_account(client):
@@ -80,6 +85,20 @@ def test_access_token_wrong_issuer_audience_and_expired(client):
         token = jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
         response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert response.status_code == 401
+    unexpected_algorithm = jwt.encode(
+        {**base, "iss": settings.jwt_issuer, "aud": settings.jwt_audience},
+        settings.jwt_secret,
+        algorithm="HS384",
+    )
+    assert client.get(
+        "/api/v1/auth/me", headers={"Authorization": f"Bearer {unexpected_algorithm}"}
+    ).status_code == 401
+    none_token = jwt.encode(
+        {**base, "iss": settings.jwt_issuer, "aud": settings.jwt_audience},
+        key="",
+        algorithm="none",
+    )
+    assert client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {none_token}"}).status_code == 401
 
 
 def test_refresh_rotation_reuse_logout_and_logout_all(client):
@@ -91,6 +110,14 @@ def test_refresh_rotation_reuse_logout_and_logout_all(client):
     reused = client.post("/api/v1/auth/refresh", json={"refresh_token": first})
     assert reused.status_code == 401
     assert reused.json()["error"]["code"] == "refresh_token_reused"
+    with client.app.state.session_factory() as db:
+        family = list(db.scalars(select(RefreshToken).order_by(RefreshToken.issued_at)))
+        assert len({token.family_id for token in family}) == 1
+        assert family[1].parent_token_id == family[0].id
+        assert family[1].revoked_at is not None
+        audit = db.scalar(select(SecurityAuditEvent))
+        assert audit.event_type == "REFRESH_TOKEN_REUSE_DETECTED"
+        assert audit.metadata_json == {"family_revoked": True}
     access = rotated.json()["access_token"]
     logout = client.post(
         "/api/v1/auth/logout",
@@ -106,6 +133,39 @@ def test_refresh_rotation_reuse_logout_and_logout_all(client):
         assert db.scalar(select(RefreshToken).where(
             RefreshToken.token_hash == hash_refresh_token(login["refresh_token"])
         )).revoked_at is not None
+
+
+def test_locked_and_deleted_accounts_cannot_authenticate(client):
+    for index, account_status in enumerate(("LOCKED", "DELETED")):
+        email = f"status-{index}@example.com"
+        registered = register(client, email).json()
+        with client.app.state.session_factory() as db:
+            account = db.get(UserAccount, registered["id"])
+            account.status = account_status
+            db.commit()
+        assert client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD}).status_code == 401
+        assert client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {registered['tokens']['access_token']}"},
+        ).status_code == 401
+        assert client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": registered["tokens"]["refresh_token"]},
+        ).status_code == 401
+
+
+def test_login_network_throttle_is_privacy_safe(client):
+    for index in range(client.app.state.settings.login_attempt_limit):
+        response = client.post("/api/v1/auth/login", json={
+            "email": f"unknown-{index}@example.com", "password": "wrong-password",
+        })
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "invalid_credentials"
+    throttled = client.post("/api/v1/auth/login", json={
+        "email": "another-unknown@example.com", "password": "wrong-password",
+    })
+    assert throttled.status_code == 429
+    assert throttled.json()["error"]["code"] == "login_throttled"
 
 
 def test_cross_user_ownership_is_privacy_safe_404(client):

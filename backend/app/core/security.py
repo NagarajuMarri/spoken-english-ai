@@ -36,6 +36,11 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def privacy_minimised_network_key(request: Request) -> str:
+    host = request.client.host if request.client else "unknown"
+    return hashlib.sha256(f"network-throttle:{host}".encode()).hexdigest()
+
+
 def create_access_token(settings, user_id: str, now: datetime | None = None) -> str:
     if len(settings.jwt_secret) < 32:
         raise AppError(

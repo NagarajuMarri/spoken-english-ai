@@ -51,6 +51,10 @@ class RefreshToken(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    family_id: Mapped[str] = mapped_column(String(36), index=True)
+    parent_token_id: Mapped[str | None] = mapped_column(
+        ForeignKey("refresh_tokens.id", ondelete="SET NULL"), unique=True, nullable=True
+    )
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -59,6 +63,27 @@ class RefreshToken(Base):
     )
     user_agent: Mapped[str | None] = mapped_column(String(200), nullable=True)
     ip_metadata: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class SecurityAuditEvent(Base):
+    __tablename__ = "security_audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    learner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("learners.id", ondelete="SET NULL"), nullable=True
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    outcome: Mapped[str] = mapped_column(String(20))
+    reason_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    privacy_minimised_network_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent_summary: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class Conversation(Base):

@@ -12,10 +12,12 @@ from backend.app.core.security import (
     hash_password,
     hash_refresh_token,
     normalize_email,
+    privacy_minimised_network_key,
     utc_now,
     verify_password,
 )
-from backend.app.models import Learner, RefreshToken, UserAccount
+from backend.app.models import Learner, RefreshToken, SecurityAuditEvent, UserAccount
+from backend.app.models.entities import new_id
 
 
 class AuthService:
@@ -30,6 +32,8 @@ class AuthService:
         token = RefreshToken(
             user_id=user.id,
             token_hash=hash_refresh_token(raw),
+            family_id=previous.family_id if previous is not None else new_id(),
+            parent_token_id=previous.id if previous is not None else None,
             issued_at=now,
             expires_at=now + timedelta(days=self.settings.refresh_token_lifetime_days),
             user_agent=(self.request.headers.get("user-agent") or "")[:200] or None,
@@ -52,6 +56,8 @@ class AuthService:
         email = normalize_email(str(data.email))
         if len(data.password) < self.settings.password_minimum_length:
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "weak_password", "Password does not meet requirements.")
+        if len(data.password.encode("utf-8")) > self.settings.password_maximum_bytes:
+            raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "password_too_long", "Password does not meet requirements.")
         user = UserAccount(email=email, password_hash=hash_password(data.password))
         try:
             self.session.add(user)
@@ -67,31 +73,72 @@ class AuthService:
 
     def login(self, data):
         email = normalize_email(str(data.email))
-        key = hashlib_key(email)
+        keys = (hashlib_key(email), privacy_minimised_network_key(self.request))
         throttler = self.request.app.state.login_throttler
-        throttler.check(key)
+        for key in keys:
+            throttler.check(key)
         user = self.session.scalar(select(UserAccount).where(UserAccount.email == email))
         if user is None or user.status != "ACTIVE" or not verify_password(data.password, user.password_hash):
-            throttler.failed(key)
+            for key in keys:
+                throttler.failed(key)
             raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_credentials", "Invalid email or password.")
-        throttler.succeeded(key)
+        for key in keys:
+            throttler.succeeded(key)
         user.last_login_at = utc_now()
         self.session.commit()
         return self._pair(user)
 
     def refresh(self, raw: str):
-        token = self.session.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw)))
+        token = self.session.scalar(
+            select(RefreshToken)
+            .where(RefreshToken.token_hash == hash_refresh_token(raw))
+            .with_for_update()
+        )
         now = utc_now()
         if token is None:
             raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_refresh_token", "Invalid refresh token.")
         if token.revoked_at is not None:
+            if token.replaced_by_token_id is not None:
+                self._revoke_family_for_reuse(token, now)
             raise AppError(status.HTTP_401_UNAUTHORIZED, "refresh_token_reused", "Refresh token has already been used.")
         if token.expires_at.replace(tzinfo=token.expires_at.tzinfo or now.tzinfo) <= now:
             raise AppError(status.HTTP_401_UNAUTHORIZED, "refresh_token_expired", "Refresh token expired.")
         user = self.session.get(UserAccount, token.user_id)
         if user is None or user.status != "ACTIVE":
             raise AppError(status.HTTP_401_UNAUTHORIZED, "account_unavailable", "Account is unavailable.")
-        return self._pair(user, token)
+        try:
+            return self._pair(user, token)
+        except IntegrityError:
+            self.session.rollback()
+            token = self.session.scalar(
+                select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw)).with_for_update()
+            )
+            if token is not None:
+                self._revoke_family_for_reuse(token, utc_now())
+            raise AppError(
+                status.HTTP_401_UNAUTHORIZED,
+                "refresh_token_reused",
+                "Refresh token has already been used.",
+            )
+
+    def _revoke_family_for_reuse(self, token: RefreshToken, now) -> None:
+        family = list(self.session.scalars(
+            select(RefreshToken).where(RefreshToken.family_id == token.family_id).with_for_update()
+        ))
+        for member in family:
+            if member.revoked_at is None:
+                member.revoked_at = now
+        self.session.add(SecurityAuditEvent(
+            event_type="REFRESH_TOKEN_REUSE_DETECTED",
+            user_id=token.user_id,
+            occurred_at=now,
+            outcome="BLOCKED",
+            reason_code="refresh_token_reused",
+            privacy_minimised_network_key=privacy_minimised_network_key(self.request),
+            user_agent_summary=(self.request.headers.get("user-agent") or "")[:100] or None,
+            metadata_json={"family_revoked": True},
+        ))
+        self.session.commit()
 
     def logout(self, raw: str, user_id: str):
         token = self.session.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw)))

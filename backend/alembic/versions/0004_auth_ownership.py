@@ -63,6 +63,8 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("user_id", sa.String(36), sa.ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False),
         sa.Column("token_hash", sa.String(64), nullable=False),
+        sa.Column("family_id", sa.String(36), nullable=False),
+        sa.Column("parent_token_id", sa.String(36), sa.ForeignKey("refresh_tokens.id", ondelete="SET NULL")),
         sa.Column("issued_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
@@ -70,10 +72,30 @@ def upgrade() -> None:
         sa.Column("user_agent", sa.String(200), nullable=True),
         sa.Column("ip_metadata", sa.String(80), nullable=True),
         sa.UniqueConstraint("token_hash", name="uq_refresh_tokens_token_hash"),
+        sa.UniqueConstraint("parent_token_id", name="uq_refresh_tokens_parent_token_id"),
     )
     op.create_index("ix_refresh_tokens_user_id", "refresh_tokens", ["user_id"])
     op.create_index("ix_refresh_tokens_token_hash", "refresh_tokens", ["token_hash"])
     op.create_index("ix_refresh_tokens_expires_at", "refresh_tokens", ["expires_at"])
+    op.create_index("ix_refresh_tokens_family_id", "refresh_tokens", ["family_id"])
+    op.create_table(
+        "security_audit_events",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("event_type", sa.String(50), nullable=False),
+        sa.Column("user_id", sa.String(36), sa.ForeignKey("user_accounts.id", ondelete="SET NULL")),
+        sa.Column("learner_id", sa.String(36), sa.ForeignKey("learners.id", ondelete="SET NULL")),
+        sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("request_id", sa.String(64)),
+        sa.Column("correlation_id", sa.String(64)),
+        sa.Column("outcome", sa.String(20), nullable=False),
+        sa.Column("reason_code", sa.String(80)),
+        sa.Column("privacy_minimised_network_key", sa.String(64)),
+        sa.Column("user_agent_summary", sa.String(100)),
+        sa.Column("metadata_json", sa.JSON(), nullable=False),
+    )
+    op.create_index("ix_security_audit_events_event_type", "security_audit_events", ["event_type"])
+    op.create_index("ix_security_audit_events_user_id", "security_audit_events", ["user_id"])
+    op.create_index("ix_security_audit_events_occurred_at", "security_audit_events", ["occurred_at"])
     with op.batch_alter_table("learners", copy_from=learners_table()) as batch:
         batch.add_column(sa.Column("user_account_id", sa.String(36), nullable=True))
         batch.create_foreign_key(
@@ -87,11 +109,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.drop_index("ix_security_audit_events_occurred_at", table_name="security_audit_events")
+    op.drop_index("ix_security_audit_events_user_id", table_name="security_audit_events")
+    op.drop_index("ix_security_audit_events_event_type", table_name="security_audit_events")
+    op.drop_table("security_audit_events")
     with op.batch_alter_table("learners", copy_from=owned_learners_table()) as batch:
         batch.drop_index("ix_learners_user_account_id")
         batch.drop_constraint("fk_learners_user_account_id", type_="foreignkey")
         batch.drop_column("user_account_id")
     op.drop_index("ix_refresh_tokens_expires_at", table_name="refresh_tokens")
+    op.drop_index("ix_refresh_tokens_family_id", table_name="refresh_tokens")
     op.drop_index("ix_refresh_tokens_token_hash", table_name="refresh_tokens")
     op.drop_index("ix_refresh_tokens_user_id", table_name="refresh_tokens")
     op.drop_table("refresh_tokens")

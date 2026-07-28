@@ -11,6 +11,7 @@ from backend.app.models.entities import (
     AudioAsset,
     UserAccount,
     RefreshToken,
+    SecurityAuditEvent,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "AudioAsset",
     "UserAccount",
     "RefreshToken",
+    "SecurityAuditEvent",
 ]

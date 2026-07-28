@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     access_token_lifetime_minutes: int = 15
     refresh_token_lifetime_days: int = 30
     password_minimum_length: int = 12
+    password_maximum_bytes: int = 72
     login_attempt_limit: int = 5
 
     model_config = SettingsConfigDict(
