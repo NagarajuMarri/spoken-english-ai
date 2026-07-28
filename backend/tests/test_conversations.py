@@ -26,14 +26,14 @@ def test_conversation_creation(client, learner):
     assert response.json()["opening_prompt"]
 
 
-def test_conversation_creation_rejects_missing_learner(client):
+def test_conversation_creation_rejects_missing_learner(client, learner):
     response = client.post(
         "/api/v1/conversations",
         json={"learner_id": "missing", "scenario_id": "travel"},
     )
 
     assert response.status_code == 404
-    assert response.json()["error"]["code"] == "learner_not_found"
+    assert response.json()["error"]["code"] == "resource_not_found"
 
 
 def test_conversation_creation_rejects_invalid_scenario(client, learner):
@@ -94,7 +94,7 @@ def test_empty_message_is_structured_error(client, conversation):
     assert response.json()["error"]["code"] == "empty_message"
 
 
-def test_missing_conversation(client):
+def test_missing_conversation(client, learner):
     response = client.get("/api/v1/conversations/missing")
 
     assert response.status_code == 404

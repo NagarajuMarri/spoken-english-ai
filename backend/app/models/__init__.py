@@ -9,6 +9,8 @@ from backend.app.models.entities import (
     VoiceSession,
     VoiceTurn,
     AudioAsset,
+    UserAccount,
+    RefreshToken,
 )
 
 __all__ = [
@@ -22,4 +24,6 @@ __all__ = [
     "VoiceSession",
     "VoiceTurn",
     "AudioAsset",
+    "UserAccount",
+    "RefreshToken",
 ]

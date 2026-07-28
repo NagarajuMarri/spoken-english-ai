@@ -35,3 +35,8 @@ Curriculum is exposed at `/api/v1/curriculum/levels`, `/lessons`, and `/lessons/
 ## Milestone 4 resources
 
 Consent uses `GET/PUT/DELETE /api/v1/learners/{id}/voice-consent`; voice practice uses `POST /api/v1/voice-sessions`, `GET /voice-sessions/{id}`, `POST /voice-sessions/{id}/turns`, and `POST /voice-sessions/{id}/complete`; `/api/v1/learners/{id}/daily-plan` is client-ready. Turn input is a safe simulated reference, not an upload, and synthetic assessment is clearly labeled.
+## Authentication and ownership
+
+`POST /api/v1/auth/register`, `/login`, `/refresh`, `/logout`, `/logout-all`, and `GET /me` implement the authentication lifecycle. Access tokens are bearer JWTs; refresh tokens are opaque and rotate on every successful refresh. Reuse, expiry, invalid issuer, invalid audience, and inactive accounts produce structured authentication errors.
+
+All learner-specific endpoints require authentication. A caller may address only the learner linked to their account and resources owned by that learner. Cross-account access consistently returns `404 resource_not_found`; anonymous access returns `401 authentication_required`. Public catalog and health endpoints remain anonymous.
