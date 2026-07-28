@@ -61,6 +61,8 @@ class VoiceService:
 
     def withdraw(self, learner_id):
         current = self.consent(learner_id)
+        if current["consent_withdrawn_at"] is not None:
+            return current
         record = self.repository.withdraw(learner_id, current["consent_version"])
         return {**record.__dict__, "active": False}
 
@@ -90,7 +92,14 @@ class VoiceService:
         if data.media_type not in ALLOWED_MEDIA_TYPES:
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsupported_media_type", "Unsupported audio media type.")
         key = data.simulated_audio_reference
-        if not SAFE_STORAGE_KEY.fullmatch(key) or ".." in key or key.startswith("/"):
+        if (
+            not SAFE_STORAGE_KEY.fullmatch(key)
+            or ".." in key
+            or key.startswith("/")
+            or "\\" in key
+            or ":" in key
+            or "//" in key
+        ):
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsafe_storage_key", "Unsafe simulated audio reference.")
         transcript = FakeSpeechToTextProvider(data.fake_transcript or "Local test transcript.").transcribe(b"")
         tutor_turn = self.llm.generate_tutor_response(transcript, data.include_telugu_explanation)

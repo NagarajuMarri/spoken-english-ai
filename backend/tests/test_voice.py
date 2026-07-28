@@ -102,6 +102,27 @@ def test_retained_asset_and_withdrawal_marks_deletion(client, learner):
     assert create_voice_session(client, learner).status_code == 403
 
 
+def test_repeated_withdrawal_is_idempotent(client, learner):
+    set_consent(client, learner)
+    first = client.delete(f"/api/v1/learners/{learner['id']}/voice-consent")
+    second = client.delete(f"/api/v1/learners/{learner['id']}/voice-consent")
+    assert second.status_code == 200
+    assert second.json()["consent_withdrawn_at"] == first.json()["consent_withdrawn_at"]
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(func.count(ConsentRecord.id))) == 2
+
+
+def test_voice_session_completion_is_idempotent(client, learner):
+    set_consent(client, learner)
+    session_id = create_voice_session(client, learner).json()["id"]
+    first = client.post(f"/api/v1/voice-sessions/{session_id}/complete")
+    second = client.post(f"/api/v1/voice-sessions/{session_id}/complete")
+    assert second.status_code == 200
+    first_completed = datetime.fromisoformat(first.json()["completed_at"].replace("Z", "+00:00"))
+    second_completed = datetime.fromisoformat(second.json()["completed_at"].replace("Z", "+00:00"))
+    assert second_completed.replace(tzinfo=None) == first_completed.replace(tzinfo=None)
+
+
 def test_cleanup_service_deletes_expired_and_pending(client, learner):
     set_consent(client, learner)
     session_id = create_voice_session(client, learner).json()["id"]
@@ -127,6 +148,21 @@ def test_media_type_and_storage_key_validation(client, learner):
     })
     assert bad_media.json()["error"]["code"] == "unsupported_media_type"
     assert unsafe_key.json()["error"]["code"] == "unsafe_storage_key"
+    for key in ("/absolute.wav", r"folder\audio.wav", "C:/audio.wav", "folder//audio.wav"):
+        response = add_turn(client, session_id, key=key)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "unsafe_storage_key"
+
+
+def test_cleanup_preserves_retained_asset_with_active_storage_consent(client, learner):
+    set_consent(client, learner, storage=True)
+    session_id = create_voice_session(client, learner).json()["id"]
+    add_turn(client, session_id)
+    with client.app.state.session_factory() as db:
+        assert VoiceService(db).cleanup(datetime.now(timezone.utc) + timedelta(days=30)) == 0
+    asset = client.get(f"/api/v1/voice-sessions/{session_id}").json()["audio_assets"][0]
+    assert asset["status"] == "RETAINED"
+    assert asset["deleted_at"] is None
 
 
 def test_daily_plan_consent_flags(client, learner):
