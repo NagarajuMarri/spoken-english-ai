@@ -19,3 +19,7 @@ Interfaces should expose provider-independent requests, results, confidence, lan
 Require explicit microphone permission and clear recording state. Default to deleting raw audio after transcription unless a learner explicitly opts into retention for review. Enforce duration and size limits, redact sensitive logs, and make provider region/retention terms a launch criterion.
 
 Milestone 3 formalizes `SpeechToTextProvider.transcribe()` and `TextToSpeechProvider.synthesize()`. The fake implementations are local test doubles only. No audio is uploaded, retained, or used for pronunciation scoring.
+
+## Consent-aware simulated workflow
+
+Active versioned processing consent is required. Storage consent is separate: assets are `TEMPORARY` with configurable expiry or `RETAINED`; withdrawal blocks processing and marks outstanding metadata `PENDING_DELETION`; cleanup moves it to `DELETED`. No raw bytes are stored. Fake pronunciation always reports `assessment_type: synthetic_test_double` and never enters progress.

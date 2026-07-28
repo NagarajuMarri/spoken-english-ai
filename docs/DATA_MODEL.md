@@ -12,3 +12,5 @@ The initial Alembic revision is `0001_learner_onboarding`. SQLite supports local
 Future models include lessons, richer feedback provenance, daily activity/streaks, progress snapshots, subscriptions, and entitlements. Audio remains object-storage metadata rather than a database blob.
 
 Milestone 3 adds `LessonSession` and `ConversationEvaluation`, and extends `ProgressRecord` with lesson, UTC practice date, duration, score, scenario, and proficiency dimensions. Static curriculum remains a version-controlled domain catalogue because it is small and not runtime-administered. Revision `0002_curriculum_progress` applies these changes.
+
+Milestone 4 adds append-only `ConsentRecord`, `VoiceSession`, `VoiceTurn`, and `AudioAsset` metadata in revision `0003_voice_foundation`. Assets store media type, safe logical key, lifecycle state, expiry, and deletion time—never raw bytes.

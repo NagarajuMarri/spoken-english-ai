@@ -47,3 +47,12 @@ All tests must pass. The work is committed on `product/milestone-1-mvp-foundatio
 - Provider protocols and local doubles make no network calls and never claim pronunciation accuracy.
 - PostgreSQL message sequencing uses parent-row locking, uniqueness, and bounded retry.
 - Revision `0002_curriculum_progress`, isolated tests, compilation, and diff checks pass.
+
+## Milestone 4
+
+- Versioned processing/storage consent is auditable; withdrawal blocks processing and queues metadata deletion.
+- Voice sessions persist fake transcription, tutor/correction text, fake synthesis references, and ordered turns without raw audio.
+- Media/reference validation returns structured privacy errors.
+- Lifecycle cleanup and retained/temporary behavior are tested.
+- Pronunciation is explicitly synthetic and excluded from progress.
+- Daily plan combines lesson, scenario, minutes, streak, progress, and consent-aware voice availability.

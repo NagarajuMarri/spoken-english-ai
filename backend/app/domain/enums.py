@@ -27,3 +27,10 @@ class LessonSessionStatus(StrEnum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     ABANDONED = "ABANDONED"
+
+
+class AudioAssetStatus(StrEnum):
+    TEMPORARY = "TEMPORARY"
+    RETAINED = "RETAINED"
+    PENDING_DELETION = "PENDING_DELETION"
+    DELETED = "DELETED"

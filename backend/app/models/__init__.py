@@ -5,6 +5,10 @@ from backend.app.models.entities import (
     Learner,
     LessonSession,
     ProgressRecord,
+    ConsentRecord,
+    VoiceSession,
+    VoiceTurn,
+    AudioAsset,
 )
 
 __all__ = [
@@ -14,4 +18,8 @@ __all__ = [
     "ProgressRecord",
     "LessonSession",
     "ConversationEvaluation",
+    "ConsentRecord",
+    "VoiceSession",
+    "VoiceTurn",
+    "AudioAsset",
 ]

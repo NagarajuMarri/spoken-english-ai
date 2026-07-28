@@ -109,3 +109,62 @@ class ConversationEvaluation(Base):
     corrected_examples: Mapped[list[str]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     lesson_session: Mapped[LessonSession] = relationship(back_populates="evaluation")
+
+
+class ConsentRecord(Base):
+    __tablename__ = "consent_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    voice_processing_consent: Mapped[bool] = mapped_column(default=False)
+    audio_storage_consent: Mapped[bool] = mapped_column(default=False)
+    consent_version: Mapped[str] = mapped_column(String(30))
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consent_withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class VoiceSession(Base):
+    __tablename__ = "voice_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    scenario_id: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="STARTED")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    turns: Mapped[list["VoiceTurn"]] = relationship(
+        back_populates="voice_session", cascade="all, delete-orphan", order_by="VoiceTurn.turn_number"
+    )
+    assets: Mapped[list["AudioAsset"]] = relationship(back_populates="voice_session")
+
+
+class VoiceTurn(Base):
+    __tablename__ = "voice_turns"
+    __table_args__ = (UniqueConstraint("voice_session_id", "turn_number"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    voice_session_id: Mapped[str] = mapped_column(ForeignKey("voice_sessions.id", ondelete="CASCADE"), index=True)
+    turn_number: Mapped[int] = mapped_column(Integer)
+    audio_asset_id: Mapped[str] = mapped_column(ForeignKey("audio_assets.id"))
+    transcript: Mapped[str] = mapped_column(Text)
+    tutor_text: Mapped[str] = mapped_column(Text)
+    correction_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synthetic_audio_reference: Mapped[str] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    voice_session: Mapped[VoiceSession] = relationship(back_populates="turns")
+
+
+class AudioAsset(Base):
+    __tablename__ = "audio_assets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    voice_session_id: Mapped[str] = mapped_column(ForeignKey("voice_sessions.id", ondelete="CASCADE"), index=True)
+    media_type: Mapped[str] = mapped_column(String(50))
+    storage_key: Mapped[str] = mapped_column(String(200), unique=True)
+    status: Mapped[str] = mapped_column(String(30))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    voice_session: Mapped[VoiceSession] = relationship(back_populates="assets")
