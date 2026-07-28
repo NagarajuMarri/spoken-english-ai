@@ -51,3 +51,7 @@ Milestone 4 implements the local voice/privacy foundation. Next comes authentica
 Milestone 5 adds email/password registration, bcrypt password hashing, short-lived JWT access tokens, rotated opaque refresh tokens stored only as SHA-256 hashes, and owner-scoped learner APIs. Configure every `SPOKEN_ENGLISH_JWT_*` setting in deployment; the `.env.example` values are placeholders, not production secrets.
 
 Register with `POST /api/v1/auth/register`, then send `Authorization: Bearer <access_token>`. Refresh tokens rotate through `/api/v1/auth/refresh` and can be revoked individually or account-wide.
+
+## Operations
+
+Every request receives `X-Request-ID` and a validated/generated `X-Correlation-ID`. JSON-compatible completion logs exclude request bodies and credentials. Operational probes are `/health/live`, `/health/ready`, and `/health/version`. Run scheduled simulated-audio cleanup with `python -m backend.app.cli.cleanup_audio`.

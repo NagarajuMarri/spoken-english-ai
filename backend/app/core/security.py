@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.errors import AppError
 from backend.app.db.session import get_db
-from backend.app.models import Learner, RefreshToken, UserAccount
+from backend.app.models import Learner, RefreshToken, SecurityAuditEvent, UserAccount
 
 
 def utc_now() -> datetime:
@@ -42,7 +42,9 @@ def privacy_minimised_network_key(request: Request) -> str:
 
 
 def create_access_token(settings, user_id: str, now: datetime | None = None) -> str:
-    if len(settings.jwt_secret) < 32:
+    try:
+        keys = settings.signing_keys()
+    except (ValueError, TypeError):
         raise AppError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "authentication_unavailable",
@@ -58,7 +60,15 @@ def create_access_token(settings, user_id: str, now: datetime | None = None) -> 
         "iss": settings.jwt_issuer,
         "aud": settings.jwt_audience,
     }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    active_key = keys[settings.jwt_active_key_id]
+    if len(active_key) < 32:
+        raise AppError(status.HTTP_503_SERVICE_UNAVAILABLE, "authentication_unavailable", "Authentication signing is not configured.")
+    return jwt.encode(
+        payload,
+        active_key,
+        algorithm=settings.jwt_algorithm,
+        headers={"kid": settings.jwt_active_key_id},
+    )
 
 
 class LoginThrottler(Protocol):
@@ -87,9 +97,35 @@ class InMemoryLoginThrottler:
 class Principal:
     user: UserAccount
     learner: Learner
+    session: Session
+    request_id: str | None
+    correlation_id: str | None
+    network_key: str
+    user_agent: str | None
 
 
 bearer = HTTPBearer(auto_error=False)
+
+
+def _audit_access_block(
+    session: Session,
+    request: Request,
+    event_type: str,
+    reason: str,
+    user: UserAccount | None = None,
+) -> None:
+    session.add(SecurityAuditEvent(
+        event_type=event_type,
+        user_id=user.id if user else None,
+        outcome="BLOCKED",
+        reason_code=reason,
+        request_id=getattr(request.state, "request_id", None),
+        correlation_id=getattr(request.state, "correlation_id", None),
+        privacy_minimised_network_key=privacy_minimised_network_key(request),
+        user_agent_summary=(request.headers.get("user-agent") or "")[:100] or None,
+        metadata_json={},
+    ))
+    session.commit()
 
 
 def current_principal(
@@ -98,9 +134,22 @@ def current_principal(
     session: Session = Depends(get_db),
 ) -> Principal:
     if credentials is None or credentials.scheme.lower() != "bearer":
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "authentication_required")
         raise AppError(status.HTTP_401_UNAUTHORIZED, "authentication_required", "Authentication required.")
     settings = request.app.state.settings
-    if len(settings.jwt_secret) < 32:
+    try:
+        keys = settings.signing_keys()
+        header = jwt.get_unverified_header(credentials.credentials)
+    except (ValueError, TypeError, jwt.PyJWTError) as exc:
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "invalid_access_token")
+        raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_access_token", "Invalid access token.") from exc
+    kid = header.get("kid")
+    if kid is None:
+        kid = "legacy"
+    if kid not in keys or header.get("alg") != settings.jwt_algorithm:
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "unknown_key_or_algorithm")
+        raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_access_token", "Invalid access token.")
+    if len(keys[kid]) < 32:
         raise AppError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "authentication_unavailable",
@@ -109,33 +158,54 @@ def current_principal(
     try:
         claims = jwt.decode(
             credentials.credentials,
-            settings.jwt_secret,
+            keys[kid],
             algorithms=[settings.jwt_algorithm],
             issuer=settings.jwt_issuer,
             audience=settings.jwt_audience,
             options={"require": ["sub", "exp", "iat", "iss", "aud", "type"]},
         )
     except jwt.ExpiredSignatureError as exc:
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "access_token_expired")
         raise AppError(status.HTTP_401_UNAUTHORIZED, "access_token_expired", "Access token expired.") from exc
     except jwt.PyJWTError as exc:
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "invalid_access_token")
         raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_access_token", "Invalid access token.") from exc
     if claims.get("type") != "access":
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "invalid_token_type")
         raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_access_token", "Invalid access token.")
     user = session.get(UserAccount, claims["sub"])
     if user is None or user.status != "ACTIVE":
+        _audit_access_block(session, request, "ACCOUNT_STATUS_BLOCKED", "account_unavailable", user)
         raise AppError(status.HTTP_401_UNAUTHORIZED, "account_unavailable", "Account is unavailable.")
     learner = session.scalar(select(Learner).where(Learner.user_account_id == user.id))
     if learner is None:
         raise AppError(status.HTTP_401_UNAUTHORIZED, "account_unavailable", "Account is unavailable.")
-    return Principal(user, learner)
+    request.state.authenticated_user_id = user.id
+    request.state.learner_id = learner.id
+    return Principal(
+        user,
+        learner,
+        session,
+        getattr(request.state, "request_id", None),
+        getattr(request.state, "correlation_id", None),
+        privacy_minimised_network_key(request),
+        (request.headers.get("user-agent") or "")[:100] or None,
+    )
 
 
 def require_learner_owner(learner_id: str, principal: Principal = Depends(current_principal)) -> Principal:
-    if learner_id != principal.learner.id:
-        raise AppError(status.HTTP_404_NOT_FOUND, "resource_not_found", "Resource not found.")
+    ensure_owner(learner_id, principal)
     return principal
 
 
 def ensure_owner(resource_learner_id: str, principal: Principal) -> None:
     if resource_learner_id != principal.learner.id:
+        from backend.app.core.operations import audit_event
+        audit_event(
+            principal.session,
+            "CROSS_USER_ACCESS_BLOCKED",
+            principal=principal,
+            outcome="BLOCKED",
+            reason_code="resource_not_found",
+        )
         raise AppError(status.HTTP_404_NOT_FOUND, "resource_not_found", "Resource not found.")

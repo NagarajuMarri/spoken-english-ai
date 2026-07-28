@@ -65,3 +65,14 @@ All tests must pass. The work is committed on `product/milestone-1-mvp-foundatio
 - Learner-specific resources require authentication and enforce a consistent privacy-safe `404` ownership policy.
 - Responses and example configuration expose no password hashes, raw refresh tokens at rest, or deployed secrets.
 - Production limitations and the legacy development-data ownership migration are documented.
+
+## Milestone 6
+
+- Every response has a request ID; validated correlation IDs propagate.
+- Structured logs and errors exclude credentials, tokens, hashes, secrets, raw IPs, and audio.
+- Security audit events are durable, append-only through application boundaries, and metadata allow-listed.
+- Liveness, readiness, and version probes expose no sensitive dependency details.
+- Provider-neutral metrics and rate-limit interfaces have deterministic in-memory implementations and a Redis adapter boundary.
+- JWT active/previous key IDs support rotation while rejecting unknown keys and unexpected algorithms.
+- Audio cleanup is deterministic, batched, repeat-safe, scheduled-job compatible, and indexed.
+- Administrative account, session, audit, and pending-deletion operations remain outside learner HTTP APIs.

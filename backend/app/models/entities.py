@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base
@@ -84,6 +84,12 @@ class SecurityAuditEvent(Base):
     privacy_minimised_network_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent_summary: Mapped[str | None] = mapped_column(String(100), nullable=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+@event.listens_for(SecurityAuditEvent, "before_update")
+@event.listens_for(SecurityAuditEvent, "before_delete")
+def _security_audit_events_are_append_only(*_) -> None:
+    raise ValueError("Security audit events are append-only.")
 
 
 class Conversation(Base):
@@ -224,4 +230,7 @@ class AudioAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cleanup_retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    cleanup_failure_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    deletion_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voice_session: Mapped[VoiceSession] = relationship(back_populates="assets")

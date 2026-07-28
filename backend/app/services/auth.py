@@ -26,6 +26,21 @@ class AuthService:
         self.request = request
         self.settings = request.app.state.settings
 
+    def _audit(self, event_type, user=None, outcome="SUCCEEDED", reason=None):
+        event = SecurityAuditEvent(
+            event_type=event_type,
+            user_id=user.id if user else None,
+            outcome=outcome,
+            reason_code=reason,
+            request_id=getattr(self.request.state, "request_id", None),
+            correlation_id=getattr(self.request.state, "correlation_id", None),
+            privacy_minimised_network_key=privacy_minimised_network_key(self.request),
+            user_agent_summary=(self.request.headers.get("user-agent") or "")[:100] or None,
+            metadata_json={},
+        )
+        self.session.add(event)
+        self.session.commit()
+
     def _pair(self, user: UserAccount, previous: RefreshToken | None = None) -> dict:
         now = utc_now()
         raw = secrets.token_urlsafe(48)
@@ -69,23 +84,34 @@ class AuthService:
             self.session.rollback()
             raise AppError(status.HTTP_409_CONFLICT, "duplicate_email", "An account with this email exists.") from exc
         tokens = self._pair(user)
+        self._audit("ACCOUNT_REGISTERED", user)
+        self.request.app.state.metrics.increment("registrations")
         return self.account_payload(user, learner, tokens)
 
     def login(self, data):
         email = normalize_email(str(data.email))
         keys = (hashlib_key(email), privacy_minimised_network_key(self.request))
         throttler = self.request.app.state.login_throttler
-        for key in keys:
-            throttler.check(key)
+        try:
+            for key in keys:
+                throttler.check(key)
+        except AppError:
+            self._audit("LOGIN_THROTTLED", outcome="BLOCKED", reason="login_throttled")
+            self.request.app.state.metrics.increment("login_throttled")
+            raise
         user = self.session.scalar(select(UserAccount).where(UserAccount.email == email))
         if user is None or user.status != "ACTIVE" or not verify_password(data.password, user.password_hash):
             for key in keys:
                 throttler.failed(key)
+            self._audit("LOGIN_FAILED", user, "FAILED", "invalid_credentials")
+            self.request.app.state.metrics.increment("login_failed")
             raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_credentials", "Invalid email or password.")
         for key in keys:
             throttler.succeeded(key)
         user.last_login_at = utc_now()
         self.session.commit()
+        self._audit("LOGIN_SUCCEEDED", user)
+        self.request.app.state.metrics.increment("login_succeeded")
         return self._pair(user)
 
     def refresh(self, raw: str):
@@ -107,7 +133,10 @@ class AuthService:
         if user is None or user.status != "ACTIVE":
             raise AppError(status.HTTP_401_UNAUTHORIZED, "account_unavailable", "Account is unavailable.")
         try:
-            return self._pair(user, token)
+            result = self._pair(user, token)
+            self._audit("REFRESH_TOKEN_ROTATED", user)
+            self.request.app.state.metrics.increment("refresh_rotations")
+            return result
         except IntegrityError:
             self.session.rollback()
             token = self.session.scalar(
@@ -139,12 +168,14 @@ class AuthService:
             metadata_json={"family_revoked": True},
         ))
         self.session.commit()
+        self.request.app.state.metrics.increment("refresh_reuse_detections")
 
     def logout(self, raw: str, user_id: str):
         token = self.session.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw)))
         if token is not None and token.user_id == user_id and token.revoked_at is None:
             token.revoked_at = utc_now()
             self.session.commit()
+        self._audit("LOGOUT_COMPLETED", self.session.get(UserAccount, user_id))
 
     def logout_all(self, user_id: str):
         now = utc_now()
@@ -154,6 +185,7 @@ class AuthService:
         for token in tokens:
             token.revoked_at = now
         self.session.commit()
+        self._audit("LOGOUT_ALL_COMPLETED", self.session.get(UserAccount, user_id))
 
     @staticmethod
     def account_payload(user, learner, tokens=None):
