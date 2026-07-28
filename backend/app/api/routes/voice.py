@@ -22,7 +22,11 @@ router = APIRouter(prefix="/api/v1", tags=["voice"])
 
 
 def service(request: Request, session: Session) -> VoiceService:
-    return VoiceService(session, request.app.state.settings.temporary_audio_expiration_hours)
+    return VoiceService(
+        session,
+        request.app.state.settings.temporary_audio_expiration_hours,
+        request.app.state.metrics,
+    )
 
 
 def session_payload(item):

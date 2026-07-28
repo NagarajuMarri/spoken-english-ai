@@ -20,6 +20,13 @@ class AdministrativeService:
         if account is None:
             raise LookupError("Account not found.")
         account.status = status
+        self.session.add(SecurityAuditEvent(
+            event_type="ACCOUNT_STATUS_CHANGED",
+            user_id=user_id,
+            outcome="SUCCEEDED",
+            reason_code="internal_administration",
+            metadata_json={"status": status},
+        ))
         self.session.commit()
         return account
 
@@ -39,6 +46,14 @@ class AdministrativeService:
         now = utc_now()
         for token in tokens:
             token.revoked_at = now
+        self.session.add(SecurityAuditEvent(
+            event_type="TOKEN_FAMILY_REVOKED",
+            user_id=user_id,
+            occurred_at=now,
+            outcome="SUCCEEDED",
+            reason_code="internal_administration",
+            metadata_json={"family_revoked": True},
+        ))
         self.session.commit()
         return len(tokens)
 

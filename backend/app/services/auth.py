@@ -167,6 +167,14 @@ class AuthService:
             user_agent_summary=(self.request.headers.get("user-agent") or "")[:100] or None,
             metadata_json={"family_revoked": True},
         ))
+        self.session.add(SecurityAuditEvent(
+            event_type="TOKEN_FAMILY_REVOKED",
+            user_id=token.user_id,
+            occurred_at=now,
+            outcome="SUCCEEDED",
+            reason_code="refresh_token_reuse",
+            metadata_json={"family_revoked": True},
+        ))
         self.session.commit()
         self.request.app.state.metrics.increment("refresh_reuse_detections")
 
