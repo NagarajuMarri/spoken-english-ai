@@ -5,6 +5,8 @@ from backend.app.api.routes.health import router as health_router
 from backend.app.api.routes.learners import router as learners_router
 from backend.app.api.routes.learning import router as learning_router
 from backend.app.api.routes.voice import router as voice_router
+from backend.app.api.routes.auth import router as auth_router
+from backend.app.core.security import InMemoryLoginThrottler
 from backend.app.core.config import get_settings
 from backend.app.core.errors import install_error_handlers
 from backend.app.db.base import Base
@@ -22,6 +24,7 @@ def create_app(settings=None) -> FastAPI:
     engine = build_engine(settings.database_url)
     application.state.engine = engine
     application.state.settings = settings
+    application.state.login_throttler = InMemoryLoginThrottler(settings.login_attempt_limit)
     application.state.session_factory = build_session_factory(engine)
     if settings.auto_create_tables:
         Base.metadata.create_all(engine)
@@ -31,6 +34,7 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(conversations_router)
     application.include_router(learning_router)
     application.include_router(voice_router)
+    application.include_router(auth_router)
     return application
 
 

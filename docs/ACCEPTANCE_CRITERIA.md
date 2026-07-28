@@ -56,3 +56,12 @@ All tests must pass. The work is committed on `product/milestone-1-mvp-foundatio
 - Lifecycle cleanup and retained/temporary behavior are tested.
 - Pronunciation is explicitly synthetic and excluded from progress.
 - Daily plan combines lesson, scenario, minutes, streak, progress, and consent-aware voice availability.
+## Milestone 5
+
+- Registration normalizes unique email, enforces password length, hashes passwords, and creates one learner foundation.
+- Login returns generic credential failures and blocks inactive accounts.
+- Access tokens are short lived and validate issuer, audience, signature, expiry, and type.
+- Refresh tokens are hashed at rest, rotate on use, reject reuse/expiry, and support logout and logout-all.
+- Learner-specific resources require authentication and enforce a consistent privacy-safe `404` ownership policy.
+- Responses and example configuration expose no password hashes, raw refresh tokens at rest, or deployed secrets.
+- Production limitations and the legacy development-data ownership migration are documented.

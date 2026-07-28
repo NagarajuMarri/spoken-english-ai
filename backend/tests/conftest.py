@@ -11,6 +11,7 @@ def client(tmp_path):
     settings = Settings(
         database_url=f"sqlite:///{database_path.as_posix()}",
         environment="test",
+        jwt_secret="test-signing-secret-at-least-32-bytes-long",
         auto_create_tables=True,
         _env_file=None,
     )
@@ -22,12 +23,15 @@ def client(tmp_path):
 
 @pytest.fixture
 def learner(client):
-    response = client.post(
-        "/api/v1/learners",
-        json={"email": "learner@example.com", "display_name": "Anusha"},
-    )
+    response = client.post("/api/v1/auth/register", json={
+        "email": "learner@example.com",
+        "password": "StrongPassword123!",
+        "display_name": "Anusha",
+    })
     assert response.status_code == 201
-    return response.json()
+    body = response.json()
+    client.headers["Authorization"] = f"Bearer {body['tokens']['access_token']}"
+    return client.get(f"/api/v1/learners/{body['learner_id']}").json()
 
 
 @pytest.fixture

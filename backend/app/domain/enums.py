@@ -34,3 +34,10 @@ class AudioAssetStatus(StrEnum):
     RETAINED = "RETAINED"
     PENDING_DELETION = "PENDING_DELETION"
     DELETED = "DELETED"
+
+
+class AccountStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+    LOCKED = "LOCKED"
+    DELETED = "DELETED"

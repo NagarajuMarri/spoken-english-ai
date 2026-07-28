@@ -15,6 +15,7 @@ from backend.app.schemas.voice import (
 )
 from backend.app.services.learning import LearningService
 from backend.app.services.voice import VoiceService
+from backend.app.core.security import Principal, current_principal, ensure_owner, require_learner_owner
 
 router = APIRouter(prefix="/api/v1", tags=["voice"])
 
@@ -32,43 +33,50 @@ def session_payload(item):
 
 
 @router.get("/learners/{learner_id}/voice-consent", response_model=VoiceConsentRead)
-def get_consent(learner_id: str, request: Request, session: Session = Depends(get_db)):
+def get_consent(learner_id: str, request: Request, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     return service(request, session).consent(learner_id)
 
 
 @router.put("/learners/{learner_id}/voice-consent", response_model=VoiceConsentRead)
-def put_consent(learner_id: str, data: VoiceConsentUpdate, request: Request, session: Session = Depends(get_db)):
+def put_consent(learner_id: str, data: VoiceConsentUpdate, request: Request, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     return service(request, session).update_consent(learner_id, data)
 
 
 @router.delete("/learners/{learner_id}/voice-consent", response_model=VoiceConsentRead)
-def delete_consent(learner_id: str, request: Request, session: Session = Depends(get_db)):
+def delete_consent(learner_id: str, request: Request, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     return service(request, session).withdraw(learner_id)
 
 
 @router.post("/voice-sessions", response_model=VoiceSessionRead, status_code=status.HTTP_201_CREATED)
-def create_voice_session(data: VoiceSessionCreate, request: Request, session: Session = Depends(get_db)):
+def create_voice_session(data: VoiceSessionCreate, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    ensure_owner(data.learner_id, principal)
     return session_payload(service(request, session).create_session(data.learner_id, data.scenario_id))
 
 
 @router.get("/voice-sessions/{session_id}", response_model=VoiceSessionRead)
-def get_voice_session(session_id: str, request: Request, session: Session = Depends(get_db)):
-    return session_payload(service(request, session).get_session(session_id))
+def get_voice_session(session_id: str, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    item = service(request, session).get_session(session_id)
+    ensure_owner(item.learner_id, principal)
+    return session_payload(item)
 
 
 @router.post("/voice-sessions/{session_id}/turns", response_model=VoiceTurnRead)
-def add_voice_turn(session_id: str, data: VoiceTurnCreate, request: Request, session: Session = Depends(get_db)):
-    turn, assessment = service(request, session).add_turn(session_id, data)
+def add_voice_turn(session_id: str, data: VoiceTurnCreate, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    voice = service(request, session)
+    ensure_owner(voice.get_session(session_id).learner_id, principal)
+    turn, assessment = voice.add_turn(session_id, data)
     return {**turn.__dict__, "pronunciation_assessment": asdict(assessment)}
 
 
 @router.post("/voice-sessions/{session_id}/complete", response_model=VoiceSessionRead)
-def complete_voice_session(session_id: str, request: Request, session: Session = Depends(get_db)):
-    return session_payload(service(request, session).complete(session_id))
+def complete_voice_session(session_id: str, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    voice = service(request, session)
+    ensure_owner(voice.get_session(session_id).learner_id, principal)
+    return session_payload(voice.complete(session_id))
 
 
 @router.get("/learners/{learner_id}/daily-plan", response_model=DailyPlanRead)
-def daily_plan(learner_id: str, request: Request, session: Session = Depends(get_db)):
+def daily_plan(learner_id: str, request: Request, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     learning = LearningService(session)
     voice = service(request, session)
     lesson = learning.daily_lesson(learner_id)

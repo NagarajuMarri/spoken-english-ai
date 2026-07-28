@@ -17,3 +17,12 @@ Threat modeling, authentication, authorization, rate limiting, abuse prevention,
 ## Voice consent and lifecycle
 
 Consent changes are append-only records with policy version and timestamps. Processing and storage consent are distinct. Simulated media types are restricted, unsafe/traversal references are rejected, and errors expose no secrets. Production requires authenticated ownership, confirmed object deletion, background retries, monitoring, and provider legal/security review.
+## Authentication controls
+
+Passwords are hashed with bcrypt and must meet the configured minimum length. JWT access tokens validate signature, algorithm, expiration, issuer, audience, subject, and token type. Signing secrets come from deployment environment configuration and must be high-entropy and rotated through an operational secret manager.
+
+Refresh tokens are random opaque values, stored only as SHA-256 hashes, and linked by a family identifier plus a unique parent. Rotation locks the source row on PostgreSQL, revokes it, and creates exactly one replacement. Reuse of a replaced token revokes every active family descendant and records a durable security event, requiring login again. SQLite tests verify constraints and sequential behaviour but do not model PostgreSQL row-lock concurrency.
+
+Passwords have configured minimum length and a 72-byte maximum so bcrypt never silently truncates input. Validation error details omit submitted values. Login errors are generic; throttling uses both a normalized-email hash and a privacy-minimized network hash, and successful login resets both in-memory counters.
+
+Ownership checks use a privacy-safe `404` for cross-user resources. User-agent metadata is bounded; raw IP addresses are not stored. Before production, replace in-memory throttling with a distributed rate limiter, add secret rotation procedures, audit logging, HTTPS enforcement, breached-password screening, and token-family reuse response.

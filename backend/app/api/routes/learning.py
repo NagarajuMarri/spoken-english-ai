@@ -7,6 +7,7 @@ from backend.app.domain.curriculum import LESSONS, LESSONS_BY_ID
 from backend.app.domain.enums import ProficiencyLevel
 from backend.app.schemas.curriculum import CurriculumLessonRead, LessonComplete, LessonSessionCreate, LessonSessionRead, ProgressRead, StreakRead
 from backend.app.services.learning import LearningService
+from backend.app.core.security import Principal, current_principal, ensure_owner, require_learner_owner
 
 router = APIRouter(prefix="/api/v1", tags=["learning"])
 
@@ -35,30 +36,35 @@ def lesson(lesson_id: str):
 
 
 @router.get("/learners/{learner_id}/daily-lesson", response_model=CurriculumLessonRead)
-def daily_lesson(learner_id: str, session: Session = Depends(get_db)):
+def daily_lesson(learner_id: str, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     return LearningService(session).daily_lesson(learner_id)
 
 
 @router.post("/lesson-sessions", response_model=LessonSessionRead, status_code=status.HTTP_201_CREATED)
-def create_lesson_session(data: LessonSessionCreate, session: Session = Depends(get_db)):
+def create_lesson_session(data: LessonSessionCreate, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    ensure_owner(data.learner_id, principal)
     return LearningService(session).create_session(data.learner_id, data.lesson_id, data.conversation_id)
 
 
 @router.get("/lesson-sessions/{session_id}", response_model=LessonSessionRead)
-def get_lesson_session(session_id: str, session: Session = Depends(get_db)):
-    return LearningService(session).get_session(session_id)
+def get_lesson_session(session_id: str, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    item = LearningService(session).get_session(session_id)
+    ensure_owner(item.learner_id, principal)
+    return item
 
 
 @router.post("/lesson-sessions/{session_id}/complete", response_model=LessonSessionRead)
-def complete_lesson_session(session_id: str, data: LessonComplete, session: Session = Depends(get_db)):
-    return LearningService(session).complete(session_id, data.duration_seconds)
+def complete_lesson_session(session_id: str, data: LessonComplete, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    service = LearningService(session)
+    ensure_owner(service.get_session(session_id).learner_id, principal)
+    return service.complete(session_id, data.duration_seconds)
 
 
 @router.get("/learners/{learner_id}/progress", response_model=ProgressRead)
-def progress(learner_id: str, session: Session = Depends(get_db)):
+def progress(learner_id: str, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     return LearningService(session).progress(learner_id)
 
 
 @router.get("/learners/{learner_id}/streak", response_model=StreakRead)
-def streak(learner_id: str, session: Session = Depends(get_db)):
+def streak(learner_id: str, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
     return LearningService(session).streak(learner_id)

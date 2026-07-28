@@ -11,6 +11,7 @@ from backend.app.schemas.conversations import (
     ScenarioRead,
 )
 from backend.app.services.conversations import ConversationService
+from backend.app.core.security import Principal, current_principal, ensure_owner
 
 router = APIRouter(prefix="/api/v1", tags=["conversation"])
 
@@ -21,7 +22,12 @@ def list_scenarios():
 
 
 @router.post("/conversations", response_model=ConversationRead, status_code=status.HTTP_201_CREATED)
-def create_conversation(data: ConversationCreate, session: Session = Depends(get_db)):
+def create_conversation(
+    data: ConversationCreate,
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_db),
+):
+    ensure_owner(data.learner_id, principal)
     conversation = ConversationService(session).create(data.learner_id, data.scenario_id)
     return {
         **conversation.__dict__,
@@ -34,9 +40,12 @@ def create_conversation(data: ConversationCreate, session: Session = Depends(get
 def add_message(
     conversation_id: str,
     data: LearnerMessageCreate,
+    principal: Principal = Depends(current_principal),
     session: Session = Depends(get_db),
 ):
-    message = ConversationService(session).add_message(
+    service = ConversationService(session)
+    ensure_owner(service.get(conversation_id).learner_id, principal)
+    message = service.add_message(
         conversation_id, data.text, data.include_telugu_explanation
     )
     return {
@@ -48,8 +57,13 @@ def add_message(
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationRead)
-def get_conversation(conversation_id: str, session: Session = Depends(get_db)):
+def get_conversation(
+    conversation_id: str,
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_db),
+):
     conversation = ConversationService(session).get(conversation_id)
+    ensure_owner(conversation.learner_id, principal)
     return {
         **conversation.__dict__,
         "opening_prompt": SCENARIOS_BY_ID[conversation.scenario_id].opening_prompt,

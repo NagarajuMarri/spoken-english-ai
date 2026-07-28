@@ -11,8 +11,10 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
   "alembic>=1.13,<2",
+  "bcrypt>=4.2,<5",
   "email-validator>=2.2,<3",
   "fastapi>=0.115,<0.116",
+  "PyJWT>=2.10,<3",
   "pydantic-settings>=2.6,<3",
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.30,<1",

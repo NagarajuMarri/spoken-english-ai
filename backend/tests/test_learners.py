@@ -1,10 +1,11 @@
 def test_learner_creation(client):
-    response = client.post(
-        "/api/v1/learners",
-        json={"email": "RAVI@EXAMPLE.COM", "display_name": "Ravi"},
-    )
+    registered = client.post("/api/v1/auth/register", json={
+        "email": "RAVI@EXAMPLE.COM", "password": "StrongPassword123!", "display_name": "Ravi",
+    }).json()
+    client.headers["Authorization"] = f"Bearer {registered['tokens']['access_token']}"
+    response = client.get(f"/api/v1/learners/{registered['learner_id']}")
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     body = response.json()
     assert body["email"] == "ravi@example.com"
     assert body["proficiency_level"] == "STARTER"
@@ -14,10 +15,11 @@ def test_learner_creation(client):
 
 
 def test_duplicate_email_prevention(client, learner):
-    response = client.post(
-        "/api/v1/learners",
-        json={"email": learner["email"].upper(), "display_name": "Duplicate"},
-    )
+    response = client.post("/api/v1/auth/register", json={
+        "email": learner["email"].upper(),
+        "password": "StrongPassword123!",
+        "display_name": "Duplicate",
+    })
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "duplicate_email"
@@ -30,11 +32,11 @@ def test_learner_retrieval(client, learner):
     assert response.json()["id"] == learner["id"]
 
 
-def test_missing_learner(client):
+def test_missing_learner(client, learner):
     response = client.get("/api/v1/learners/not-a-real-id")
 
     assert response.status_code == 404
-    assert response.json()["error"]["code"] == "learner_not_found"
+    assert response.json()["error"]["code"] == "resource_not_found"
 
 
 def test_onboarding_update(client, learner):
@@ -83,17 +85,26 @@ def test_learner_persists_across_clients(tmp_path):
     from backend.app.main import create_app
 
     url = f"sqlite:///{(tmp_path / 'persistent.db').as_posix()}"
-    first_app = create_app(Settings(database_url=url, _env_file=None))
+    first_app = create_app(Settings(
+        database_url=url, jwt_secret="test-signing-secret-at-least-32-bytes-long", _env_file=None
+    ))
     with TestClient(first_app) as first:
-        learner = first.post(
-            "/api/v1/learners",
-            json={"email": "persist@example.com", "display_name": "Persistent"},
-        ).json()
+        registered = first.post("/api/v1/auth/register", json={
+            "email": "persist@example.com", "password": "StrongPassword123!",
+            "display_name": "Persistent",
+        }).json()
+        learner_id = registered["learner_id"]
     first_app.state.engine.dispose()
 
-    second_app = create_app(Settings(database_url=url, _env_file=None))
+    second_app = create_app(Settings(
+        database_url=url, jwt_secret="test-signing-secret-at-least-32-bytes-long", _env_file=None
+    ))
     with TestClient(second_app) as second:
-        response = second.get(f"/api/v1/learners/{learner['id']}")
+        tokens = second.post("/api/v1/auth/login", json={
+            "email": "persist@example.com", "password": "StrongPassword123!",
+        }).json()
+        second.headers["Authorization"] = f"Bearer {tokens['access_token']}"
+        response = second.get(f"/api/v1/learners/{learner_id}")
     second_app.state.engine.dispose()
 
     assert response.status_code == 200

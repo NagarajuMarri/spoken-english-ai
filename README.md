@@ -46,3 +46,8 @@ pytest
 ## Roadmap
 
 Milestone 4 implements the local voice/privacy foundation. Next comes authentication, real-upload threat modeling, provider evaluation, and durable deletion jobs. See [ROADMAP.md](docs/ROADMAP.md).
+## Authentication
+
+Milestone 5 adds email/password registration, bcrypt password hashing, short-lived JWT access tokens, rotated opaque refresh tokens stored only as SHA-256 hashes, and owner-scoped learner APIs. Configure every `SPOKEN_ENGLISH_JWT_*` setting in deployment; the `.env.example` values are placeholders, not production secrets.
+
+Register with `POST /api/v1/auth/register`, then send `Authorization: Bearer <access_token>`. Refresh tokens rotate through `/api/v1/auth/refresh` and can be revoked individually or account-wide.

@@ -37,7 +37,14 @@ def install_error_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": codes.get(field, "validation_error"),
                     "message": f"Invalid value for {field}.",
-                    "details": exc.errors(),
+                    "details": [
+                        {
+                            "type": error["type"],
+                            "loc": [str(item) for item in error["loc"]],
+                            "msg": error["msg"],
+                        }
+                        for error in exc.errors()
+                    ],
                 }
             },
         )
