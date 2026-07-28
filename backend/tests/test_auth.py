@@ -115,7 +115,9 @@ def test_refresh_rotation_reuse_logout_and_logout_all(client):
         assert len({token.family_id for token in family}) == 1
         assert family[1].parent_token_id == family[0].id
         assert family[1].revoked_at is not None
-        audit = db.scalar(select(SecurityAuditEvent))
+        audit = db.scalar(select(SecurityAuditEvent).where(
+            SecurityAuditEvent.event_type == "REFRESH_TOKEN_REUSE_DETECTED"
+        ))
         assert audit.event_type == "REFRESH_TOKEN_REUSE_DETECTED"
         assert audit.metadata_json == {"family_revoked": True}
     access = rotated.json()["access_token"]

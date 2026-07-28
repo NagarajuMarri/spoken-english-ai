@@ -16,12 +16,17 @@ from backend.app.schemas.voice import (
 from backend.app.services.learning import LearningService
 from backend.app.services.voice import VoiceService
 from backend.app.core.security import Principal, current_principal, ensure_owner, require_learner_owner
+from backend.app.core.operations import audit_event, enforce_rate_limit
 
 router = APIRouter(prefix="/api/v1", tags=["voice"])
 
 
 def service(request: Request, session: Session) -> VoiceService:
-    return VoiceService(session, request.app.state.settings.temporary_audio_expiration_hours)
+    return VoiceService(
+        session,
+        request.app.state.settings.temporary_audio_expiration_hours,
+        request.app.state.metrics,
+    )
 
 
 def session_payload(item):
@@ -39,18 +44,26 @@ def get_consent(learner_id: str, request: Request, _: Principal = Depends(requir
 
 @router.put("/learners/{learner_id}/voice-consent", response_model=VoiceConsentRead)
 def put_consent(learner_id: str, data: VoiceConsentUpdate, request: Request, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
-    return service(request, session).update_consent(learner_id, data)
+    result = service(request, session).update_consent(learner_id, data)
+    audit_event(session, "CONSENT_GRANTED" if data.voice_processing_consent else "CONSENT_UPDATED", principal=_)
+    return result
 
 
 @router.delete("/learners/{learner_id}/voice-consent", response_model=VoiceConsentRead)
 def delete_consent(learner_id: str, request: Request, _: Principal = Depends(require_learner_owner), session: Session = Depends(get_db)):
-    return service(request, session).withdraw(learner_id)
+    result = service(request, session).withdraw(learner_id)
+    audit_event(session, "CONSENT_WITHDRAWN", principal=_)
+    return result
 
 
 @router.post("/voice-sessions", response_model=VoiceSessionRead, status_code=status.HTTP_201_CREATED)
 def create_voice_session(data: VoiceSessionCreate, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    enforce_rate_limit(request, "authenticated_burst", principal.user.id)
     ensure_owner(data.learner_id, principal)
-    return session_payload(service(request, session).create_session(data.learner_id, data.scenario_id))
+    result = session_payload(service(request, session).create_session(data.learner_id, data.scenario_id))
+    request.app.state.metrics.increment("voice_sessions_started")
+    request.app.state.metrics.gauge("active_voice_sessions", 1)
+    return result
 
 
 @router.get("/voice-sessions/{session_id}", response_model=VoiceSessionRead)
@@ -62,6 +75,7 @@ def get_voice_session(session_id: str, request: Request, principal: Principal = 
 
 @router.post("/voice-sessions/{session_id}/turns", response_model=VoiceTurnRead)
 def add_voice_turn(session_id: str, data: VoiceTurnCreate, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
+    enforce_rate_limit(request, "voice_turn", principal.user.id)
     voice = service(request, session)
     ensure_owner(voice.get_session(session_id).learner_id, principal)
     turn, assessment = voice.add_turn(session_id, data)
@@ -72,7 +86,10 @@ def add_voice_turn(session_id: str, data: VoiceTurnCreate, request: Request, pri
 def complete_voice_session(session_id: str, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
     voice = service(request, session)
     ensure_owner(voice.get_session(session_id).learner_id, principal)
-    return session_payload(voice.complete(session_id))
+    result = session_payload(voice.complete(session_id))
+    request.app.state.metrics.increment("voice_sessions_completed")
+    request.app.state.metrics.gauge("active_voice_sessions", 0)
+    return result
 
 
 @router.get("/learners/{learner_id}/daily-plan", response_model=DailyPlanRead)

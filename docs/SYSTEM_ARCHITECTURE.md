@@ -34,3 +34,5 @@ Voice routes validate transport, `VoiceService` enforces consent/privacy, reposi
 ## Authentication boundary
 
 FastAPI security dependencies validate access tokens and resolve an account plus its single learner identity before learner-specific route logic executes. Authentication services own password verification, access-token creation, refresh rotation, and revocation. Resource routes apply owner checks before returning learner, conversation, lesson-session, progress, consent, voice-session, turn, audio metadata, daily-lesson, or daily-plan data.
+
+Request middleware establishes request/correlation context, records provider-neutral metrics, and emits redacted structured completion logs. Append-only security audit writes are separated from learner APIs. Rate limiting and metrics use interfaces with local implementations; production composition may supply Redis and monitoring adapters without changing domain routes.

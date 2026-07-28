@@ -26,3 +26,7 @@ Refresh tokens are random opaque values, stored only as SHA-256 hashes, and link
 Passwords have configured minimum length and a 72-byte maximum so bcrypt never silently truncates input. Validation error details omit submitted values. Login errors are generic; throttling uses both a normalized-email hash and a privacy-minimized network hash, and successful login resets both in-memory counters.
 
 Ownership checks use a privacy-safe `404` for cross-user resources. User-agent metadata is bounded; raw IP addresses are not stored. Before production, replace in-memory throttling with a distributed rate limiter, add secret rotation procedures, audit logging, HTTPS enforcement, breached-password screening, and token-family reuse response.
+
+JWTs carry an explicit `kid`. New tokens use the configured active symmetric key; configured previous keys verify older tokens. Unknown keys and unexpected algorithms are rejected. Tokens without `kid` use only the documented `legacy` migration key. Keys never appear in probes, logs, metrics, or API payloads.
+
+Logs never include request bodies, authorization headers, passwords, tokens, hashes, audio, connection strings, or signing keys. Network identifiers are one-way privacy-minimized before throttling or audit persistence.

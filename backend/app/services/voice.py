@@ -10,7 +10,7 @@ from backend.app.integrations.llm import RuleBasedLLMProvider
 from backend.app.integrations.pronunciation import FakePronunciationAssessmentProvider
 from backend.app.integrations.speech_to_text import FakeSpeechToTextProvider
 from backend.app.integrations.text_to_speech import FakeTextToSpeechProvider
-from backend.app.models import AudioAsset
+from backend.app.models import AudioAsset, SecurityAuditEvent
 from backend.app.repositories.learners import LearnerRepository
 from backend.app.repositories.voice import VoiceRepository
 
@@ -19,11 +19,12 @@ SAFE_STORAGE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 
 
 class VoiceService:
-    def __init__(self, session: Session, expiration_hours: int = 24) -> None:
+    def __init__(self, session: Session, expiration_hours: int = 24, metrics=None) -> None:
         self.session = session
         self.repository = VoiceRepository(session)
         self.learners = LearnerRepository(session)
         self.expiration_hours = expiration_hours
+        self.metrics = metrics
         self.llm = RuleBasedLLMProvider()
         self.tts = FakeTextToSpeechProvider()
         self.pronunciation = FakePronunciationAssessmentProvider()
@@ -119,5 +120,19 @@ class VoiceService:
     def complete(self, session_id):
         return self.repository.complete(self.get_session(session_id))
 
-    def cleanup(self, now=None):
-        return self.repository.cleanup(now or datetime.now(timezone.utc))
+    def cleanup(self, now=None, batch_size=100):
+        cleanup_time = now or datetime.now(timezone.utc)
+        count = self.repository.cleanup(cleanup_time, batch_size)
+        if count:
+            self.session.add(SecurityAuditEvent(
+                event_type="AUDIO_DELETION_BATCH_COMPLETED",
+                occurred_at=cleanup_time,
+                outcome="SUCCEEDED",
+                metadata_json={"asset_count": count},
+            ))
+            self.session.commit()
+        if self.metrics is not None:
+            self.metrics.increment("audio_cleanup_deleted", count)
+            pending = self.repository.pending_cleanup_count(cleanup_time)
+            self.metrics.gauge("pending_audio_deletions", pending)
+        return count

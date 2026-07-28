@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.models import AudioAsset, ConsentRecord, VoiceSession, VoiceTurn
@@ -73,13 +73,23 @@ class VoiceRepository:
             self.session.commit()
         return self.get_session(item.id)
 
-    def cleanup(self, now):
+    def cleanup(self, now, batch_size=100):
+        if batch_size < 1:
+            raise ValueError("Cleanup batch size must be positive.")
         assets = list(self.session.scalars(select(AudioAsset).where(
             (AudioAsset.status == "PENDING_DELETION")
             | ((AudioAsset.status == "TEMPORARY") & (AudioAsset.expires_at <= now))
-        )))
+        ).order_by(AudioAsset.created_at, AudioAsset.id).limit(batch_size)))
         for asset in assets:
             asset.status = "DELETED"
             asset.deleted_at = now
+            asset.deletion_confirmed_at = now
+            asset.cleanup_failure_reason = None
         self.session.commit()
         return len(assets)
+
+    def pending_cleanup_count(self, now) -> int:
+        return self.session.scalar(select(func.count()).select_from(AudioAsset).where(
+            (AudioAsset.status == "PENDING_DELETION")
+            | ((AudioAsset.status == "TEMPORARY") & (AudioAsset.expires_at <= now))
+        )) or 0

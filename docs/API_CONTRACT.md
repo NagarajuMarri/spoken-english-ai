@@ -40,3 +40,5 @@ Consent uses `GET/PUT/DELETE /api/v1/learners/{id}/voice-consent`; voice practic
 `POST /api/v1/auth/register`, `/login`, `/refresh`, `/logout`, `/logout-all`, and `GET /me` implement the authentication lifecycle. Access tokens are bearer JWTs; refresh tokens are opaque and rotate on every successful refresh. Reuse, expiry, invalid issuer, invalid audience, and inactive accounts produce structured authentication errors.
 
 All learner-specific endpoints require authentication. A caller may address only the learner linked to their account and resources owned by that learner. Cross-account access consistently returns `404 resource_not_found`; anonymous access returns `401 authentication_required`. Public catalog and health endpoints remain anonymous.
+
+Operational endpoints: `GET /health/live` never touches the database; `GET /health/ready` checks database and signing configuration and returns 503 when unavailable; `GET /health/version` returns non-sensitive build metadata. A disabled-by-default `/internal/metrics` exposes only the in-memory development snapshot. Rate-limited responses use `429 rate_limited` and a safe `Retry-After` header.

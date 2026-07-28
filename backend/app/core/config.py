@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     auto_create_tables: bool = True
     temporary_audio_expiration_hours: int = 24
     jwt_secret: str = ""
+    jwt_active_key_id: str = "legacy"
+    jwt_verification_keys_json: str = "{}"
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "spoken-english-ai"
     jwt_audience: str = "spoken-english-ai-api"
@@ -23,6 +25,39 @@ class Settings(BaseSettings):
     password_minimum_length: int = 12
     password_maximum_bytes: int = 72
     login_attempt_limit: int = 5
+    build_identifier: str = "development"
+    expose_development_metrics: bool = False
+    audio_cleanup_batch_size: int = 100
+
+    def signing_keys(self) -> dict[str, str]:
+        import json
+        def reject_duplicates(pairs):
+            keys = {}
+            for key, value in pairs:
+                if key in keys:
+                    raise ValueError("Duplicate JWT key IDs are not allowed.")
+                keys[key] = value
+            return keys
+
+        keys = json.loads(self.jwt_verification_keys_json, object_pairs_hook=reject_duplicates)
+        if not isinstance(keys, dict) or not all(
+            isinstance(key, str) and key and isinstance(value, str)
+            for key, value in keys.items()
+        ):
+            raise ValueError("JWT verification keys must be a string map.")
+        if self.jwt_secret:
+            keys.setdefault("legacy", self.jwt_secret)
+        if self.jwt_active_key_id not in keys:
+            raise ValueError("Active JWT key ID is not configured.")
+        return keys
+
+    def providers_ready(self) -> bool:
+        allowed = {"disabled", "fake", "rule_based"}
+        return all(provider in allowed for provider in (
+            self.llm_provider,
+            self.speech_to_text_provider,
+            self.text_to_speech_provider,
+        ))
 
     model_config = SettingsConfigDict(
         env_prefix="SPOKEN_ENGLISH_",
