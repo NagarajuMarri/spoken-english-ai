@@ -6,6 +6,7 @@ from backend.app.api.routes.learners import router as learners_router
 from backend.app.api.routes.learning import router as learning_router
 from backend.app.api.routes.voice import router as voice_router
 from backend.app.api.routes.auth import router as auth_router
+from backend.app.api.routes.ai import router as ai_router
 from backend.app.core.security import InMemoryLoginThrottler
 from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, request_context_middleware
 from backend.app.core.config import get_settings
@@ -39,6 +40,7 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(learning_router)
     application.include_router(voice_router)
     application.include_router(auth_router)
+    application.include_router(ai_router)
     return application
 
 

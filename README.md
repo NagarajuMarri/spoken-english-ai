@@ -55,3 +55,14 @@ Register with `POST /api/v1/auth/register`, then send `Authorization: Bearer <ac
 ## Operations
 
 Every request receives `X-Request-ID` and a validated/generated `X-Correlation-ID`. JSON-compatible completion logs exclude request bodies and credentials. Operational probes are `/health/live`, `/health/ready`, and `/health/version`. Run scheduled simulated-audio cleanup with `python -m backend.app.cli.cleanup_audio`.
+
+## Deterministic AI tutor
+
+Milestone 7 adds provider-neutral AI conversation, STT, TTS, synthetic pronunciation, learner memory, usage controls, and idempotent voice orchestration. No external key is required:
+
+```powershell
+python examples/deterministic_ai_conversation.py
+python examples/deterministic_voice_tutor.py
+```
+
+See `docs/PROVIDER_ARCHITECTURE.md` and `docs/VOICE_TUTOR_PIPELINE.md`. The next milestone is the learner-facing frontend consuming these authenticated APIs.

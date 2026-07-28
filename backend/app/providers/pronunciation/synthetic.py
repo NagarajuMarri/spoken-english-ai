@@ -1,0 +1,3 @@
+from backend.app.providers.pronunciation.deterministic import DeterministicPronunciationProvider
+
+SyntheticPronunciationProvider = DeterministicPronunciationProvider

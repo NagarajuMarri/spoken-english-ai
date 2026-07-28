@@ -36,3 +36,9 @@ Recommended next: Milestone 6 — production operations and observability, inclu
 ## Milestone 6 — Production Operations, Audit and Observability
 
 Implemented structured request context/logging, durable security events, readiness probes, metrics/rate-limit interfaces, signing-key rotation, operational errors, deterministic cleanup jobs, and internal administrative services. Next recommended: Milestone 7 — production infrastructure validation, PostgreSQL/Redis integration tests, incident runbooks, backup/restore drills, and release automation.
+
+## Product Milestone 7 — Provider-Neutral AI Conversation and Voice Tutor
+
+Implemented validated provider contracts, deterministic LLM/STT/TTS/synthetic-pronunciation providers, injected OpenAI-compatible boundaries, adaptive feedback policy, learner memory, usage controls, idempotent voice orchestration, authenticated APIs, migrations, examples, and privacy documentation.
+
+Next: Product Milestone 8 — Learner Web Experience and Accessible Voice Practice.

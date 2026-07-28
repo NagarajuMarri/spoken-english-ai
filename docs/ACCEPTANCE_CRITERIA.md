@@ -76,3 +76,14 @@ All tests must pass. The work is committed on `product/milestone-1-mvp-foundatio
 - JWT active/previous key IDs support rotation while rejecting unknown keys and unexpected algorithms.
 - Audio cleanup is deterministic, batched, repeat-safe, scheduled-job compatible, and indexed.
 - Administrative account, session, audit, and pending-deletion operations remain outside learner HTTP APIs.
+
+## Milestone 7
+
+- AI, STT, TTS, and pronunciation providers are replaceable and deterministic by default.
+- Provider output is structured, bounded, and rejected when unsafe.
+- Voice processing enforces authentication, ownership, consent, rate limits, usage limits, and idempotency.
+- Pronunciation demonstrations are labelled synthetic and never claim acoustic accuracy.
+- Learner memory is deduplicated, exportable, deletable, versioned, and ownership-scoped.
+- No raw audio, provider credential, or raw provider payload is stored in relational tables or returned by APIs.
+- Migrations are reversible on SQLite and use portable SQLAlchemy types.
+- At least 100 meaningful tests pass without external services or credentials.
