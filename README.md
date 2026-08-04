@@ -66,3 +66,7 @@ python examples/deterministic_voice_tutor.py
 ```
 
 See `docs/PROVIDER_ARCHITECTURE.md` and `docs/VOICE_TUTOR_PIPELINE.md`. The next milestone is the learner-facing frontend consuming these authenticated APIs.
+
+## Interactive avatar tutors
+
+Milestone 8 serves the learner experience at `/`, with Ananya and Arjun as configuration-driven Indian-English tutors. It includes tutor onboarding and Settings, browser microphone input, spoken replies, animated listening/thinking/speaking states, conversation coaching, optional Telugu preferences, progress and streaks, and a subscription-ready boundary. Run `python examples/deterministic_tutor_experience.py` for the offline tutor-catalogue example. See `docs/AVATAR_TUTOR_EXPERIENCE.md`.

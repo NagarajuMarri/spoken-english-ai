@@ -21,6 +21,7 @@ from backend.app.repositories.conversations import ConversationRepository
 from backend.app.usage.service import UsageService
 from backend.app.voice.models import VoiceTutorResult
 from backend.app.voice.orchestration import VoiceTutorOrchestrationService
+from backend.app.tutors import get_tutor
 
 router = APIRouter(prefix="/api/v1", tags=["ai-tutor"])
 
@@ -58,11 +59,19 @@ def ai_turn(
     ensure_owner(conversation.learner_id, principal)
     usage = UsageService(session)
     usage.enforce(principal.learner.id, principal.user.id)
+    tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
     response = AIConversationService(DeterministicAIProvider()).generate(AIConversationRequest(
         learner_id=principal.learner.id,
         conversation_id=conversation.id,
         learner_level=principal.learner.proficiency_level,
-        preferred_language=principal.learner.native_language,
+        preferred_language=(
+            principal.learner.native_language
+            if principal.learner.telugu_explanations_enabled
+            else "English"
+        ),
+        tutor_id=tutor.tutor_id,
+        tutor_prompt_profile=tutor.prompt_profile,
+        tutor_vocabulary_profile=tutor.vocabulary_profile,
         scenario=conversation.scenario_id,
         topic=SCENARIOS_BY_ID[conversation.scenario_id].name,
         conversation_history=[
