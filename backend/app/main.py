@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.routes.conversations import router as conversations_router
 from backend.app.api.routes.health import router as health_router
@@ -7,6 +11,7 @@ from backend.app.api.routes.learning import router as learning_router
 from backend.app.api.routes.voice import router as voice_router
 from backend.app.api.routes.auth import router as auth_router
 from backend.app.api.routes.ai import router as ai_router
+from backend.app.api.routes.tutors import router as tutors_router
 from backend.app.core.security import InMemoryLoginThrottler
 from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, request_context_middleware
 from backend.app.core.config import get_settings
@@ -41,6 +46,16 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(voice_router)
     application.include_router(auth_router)
     application.include_router(ai_router)
+    application.include_router(tutors_router)
+    frontend = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if frontend.is_dir():
+        application.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")
+        application.mount("/tutors", StaticFiles(directory=frontend / "tutors"), name="tutors")
+
+        @application.get("/", include_in_schema=False)
+        def learner_experience():
+            return FileResponse(frontend / "index.html")
+
     return application
 
 

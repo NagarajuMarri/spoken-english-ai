@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.errors import AppError
 from backend.app.repositories.learners import DuplicateEmailError, LearnerRepository
 from backend.app.schemas.learners import LearnerCreate, OnboardingUpdate
+from backend.app.tutors import get_tutor
 
 
 class LearnerService:
@@ -23,5 +24,9 @@ class LearnerService:
         return learner
 
     def update_onboarding(self, learner_id: str, data: OnboardingUpdate):
+        try:
+            get_tutor(data.preferred_tutor_id)
+        except KeyError as error:
+            raise AppError(422, "unknown_tutor", "Select an enabled tutor.") from error
         learner = self.get(learner_id)
         return self.repository.update_onboarding(learner, **data.model_dump(mode="json"))

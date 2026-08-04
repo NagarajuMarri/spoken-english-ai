@@ -15,6 +15,8 @@ class OnboardingUpdate(BaseModel):
     learning_goal: LearningGoal
     daily_goal_minutes: int = Field(ge=5, le=120)
     native_language: NativeLanguage
+    preferred_tutor_id: str = Field(default="ananya", min_length=1, max_length=50)
+    telugu_explanations_enabled: bool = False
 
 
 class LearnerRead(BaseModel):
@@ -27,5 +29,7 @@ class LearnerRead(BaseModel):
     proficiency_level: ProficiencyLevel
     learning_goal: LearningGoal
     daily_goal_minutes: int
+    preferred_tutor_id: str
+    telugu_explanations_enabled: bool
     created_at: datetime
     updated_at: datetime
