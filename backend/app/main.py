@@ -13,6 +13,7 @@ from backend.app.api.routes.auth import router as auth_router
 from backend.app.api.routes.ai import router as ai_router
 from backend.app.api.routes.tutors import router as tutors_router
 from backend.app.api.routes.intelligent_learning import router as intelligent_learning_router
+from backend.app.api.routes.commercial import router as commercial_router
 from backend.app.core.security import InMemoryLoginThrottler
 from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, request_context_middleware
 from backend.app.core.config import get_settings
@@ -20,6 +21,9 @@ from backend.app.core.errors import install_error_handlers
 from backend.app.db.base import Base
 from backend.app.db.session import build_engine, build_session_factory
 from backend.app.intelligent_learning import IntelligentLearningEngine
+from backend.app.commercial.models import CommercialConfig
+from backend.app.commercial.payments import RazorpayBoundary
+from backend.app.commercial.service import CommercialService
 import backend.app.models  # noqa: F401
 
 
@@ -38,6 +42,24 @@ def create_app(settings=None) -> FastAPI:
     application.state.rate_limiter = InMemoryRateLimiter()
     application.state.session_factory = build_session_factory(engine)
     application.state.learning_engine = IntelligentLearningEngine()
+    commercial_config = CommercialConfig(
+        settings.commercial_monthly_price_inr,
+        settings.commercial_yearly_price_inr,
+        settings.commercial_trial_days,
+        settings.commercial_free_daily_conversations,
+        settings.commercial_free_daily_voice_minutes,
+        settings.commercial_free_daily_grammar_checks,
+        settings.commercial_free_daily_pronunciation_checks,
+        settings.commercial_premium_fair_use_daily_requests,
+        settings.commercial_premium_voice_minutes,
+        settings.commercial_monthly_ai_cost_limit_usd,
+        settings.commercial_advertisements_enabled,
+        settings.commercial_premium_tutors_enabled,
+    )
+    application.state.commercial_service = CommercialService(
+        commercial_config,
+        RazorpayBoundary(settings.razorpay_webhook_secret or None),
+    )
     if settings.auto_create_tables:
         Base.metadata.create_all(engine)
     install_error_handlers(application)
@@ -51,6 +73,7 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(ai_router)
     application.include_router(tutors_router)
     application.include_router(intelligent_learning_router)
+    application.include_router(commercial_router)
     frontend = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend.is_dir():
         application.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")

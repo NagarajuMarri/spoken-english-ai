@@ -356,3 +356,44 @@ class AICostMetricEvent(Base):
     model_used: Mapped[str] = mapped_column(String(100))
     cost_classification: Mapped[str] = mapped_column(String(40), default="ESTIMATE_NOT_PROVIDER_BILLING")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class CommercialSubscription(Base):
+    __tablename__ = "commercial_subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[str] = mapped_column(String(40), index=True)
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    provider_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    provider_reference: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True)
+    trial_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class CommercialPaymentEvent(Base):
+    __tablename__ = "commercial_payment_events"
+
+    event_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("commercial_subscriptions.id", ondelete="CASCADE"), index=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(50), index=True)
+    provider_id: Mapped[str] = mapped_column(String(40))
+    provider_reference: Mapped[str] = mapped_column(String(160))
+    payload_digest: Mapped[str] = mapped_column(String(64))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class CommercialRefundRecord(Base):
+    __tablename__ = "commercial_refund_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    subscription_id: Mapped[str] = mapped_column(ForeignKey("commercial_subscriptions.id", ondelete="CASCADE"), index=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    reason: Mapped[str] = mapped_column(String(300))
+    requested_by: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(30), default="REQUESTED")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

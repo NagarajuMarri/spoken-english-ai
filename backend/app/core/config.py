@@ -36,6 +36,20 @@ class Settings(BaseSettings):
     provider_sandbox_per_user_requests: int = 10
     provider_sandbox_token_limit: int = 4096
     provider_sandbox_audio_seconds_limit: float = 120
+    commercial_monthly_price_inr: int = 299
+    commercial_yearly_price_inr: int = 2999
+    commercial_trial_days: int = 7
+    commercial_free_daily_conversations: int = 5
+    commercial_free_daily_voice_minutes: int = 5
+    commercial_free_daily_grammar_checks: int = 5
+    commercial_free_daily_pronunciation_checks: int = 3
+    commercial_premium_fair_use_daily_requests: int = 200
+    commercial_premium_voice_minutes: int = 120
+    commercial_monthly_ai_cost_limit_usd: float = 20
+    commercial_advertisements_enabled: bool = False
+    commercial_premium_tutors_enabled: bool = True
+    razorpay_enabled: bool = False
+    razorpay_webhook_secret: str = ""
 
     def signing_keys(self) -> dict[str, str]:
         import json
