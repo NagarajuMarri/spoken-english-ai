@@ -1,0 +1,19 @@
+{
+  "package_id":"spoken-english-ai-pm9-provider-decision-v1",
+  "status":"WAITING_FOR_HUMAN_REVIEW",
+  "automatic_selection":false,
+  "evidence_as_of":"2026-08-04T00:00:00+00:00",
+  "recommendations":{
+    "llm":"Evaluate OpenAI and Groq through the same OpenAI-compatible structured-response corpus; no selection yet.",
+    "stt":"Evaluate Deepgram Nova-3 en-IN first, with Groq Whisper large-v3/turbo as the OpenAI-compatible comparator.",
+    "female_voice":"Evaluate Azure en-IN-NeerjaNeural against eligible Google en-IN voices; listening approval required.",
+    "male_voice":"Evaluate Azure en-IN-PrabhatNeural against eligible Google en-IN voices; listening approval required.",
+    "avatar_timing":"Use provider-neutral viseme/audio-offset events when verified for en-IN, otherwise the existing approximate lip-sync fallback.",
+    "pilot_budget":"USD 150 monthly hard ceiling for a 20-person internal sandbox cohort; revise only with current LLM/TTS quotes.",
+    "usage_limits":"15 minutes per learner/day, 20 practice days, 120 audio seconds/request, 4096 tokens/request, provider kill switch and hard monthly stop.",
+    "supported_browsers":"Current Chrome, Edge, Firefox and Safari after microphone/playback acceptance testing.",
+    "go_no_go":"NO_GO until credentials, retention, current quotes, cohort quality, latency, browser support and incident controls are human-approved."
+  },
+  "required_decisions":["chosen LLM provider/model","chosen STT provider/model","chosen female TTS voice","chosen male TTS voice","monthly sandbox budget","per-user pilot limit","audio retention duration","supported browsers","acceptable response latency","acceptable transcription quality"],
+  "evidence_ids":["E-LLM-OPENAI","E-LLM-GROQ","E-STT-DEEPGRAM","E-STT-GROQ","E-TTS-AZURE","E-TTS-GOOGLE","E-AVATAR-AZURE"]
+}
