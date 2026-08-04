@@ -28,6 +28,14 @@ class Settings(BaseSettings):
     build_identifier: str = "development"
     expose_development_metrics: bool = False
     audio_cleanup_batch_size: int = 100
+    provider_sandbox_enabled: bool = False
+    provider_sandbox_daily_budget_usd: float = 10
+    provider_sandbox_monthly_budget_usd: float = 150
+    provider_sandbox_per_user_budget_usd: float = 7.5
+    provider_sandbox_daily_requests: int = 100
+    provider_sandbox_per_user_requests: int = 10
+    provider_sandbox_token_limit: int = 4096
+    provider_sandbox_audio_seconds_limit: float = 120
 
     def signing_keys(self) -> dict[str, str]:
         import json
