@@ -313,6 +313,7 @@ class LessonCacheEntry(Base):
     content: Mapped[str] = mapped_column(Text)
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class TTSAudioCacheEntry(Base):
@@ -320,8 +321,11 @@ class TTSAudioCacheEntry(Base):
 
     cache_key: Mapped[str] = mapped_column(String(64), primary_key=True)
     tutor_voice: Mapped[str] = mapped_column(String(100), index=True)
+    privacy_scope: Mapped[str] = mapped_column(String(100), index=True)
     audio_reference: Mapped[str] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(20), default="COMPLETED")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
 class ConversationSummaryRecord(Base):
@@ -345,8 +349,10 @@ class AICostMetricEvent(Base):
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
     prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
     completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, default=0)
     response_latency_ms: Mapped[float] = mapped_column(Float, default=0)
     cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
     model_used: Mapped[str] = mapped_column(String(100))
+    cost_classification: Mapped[str] = mapped_column(String(40), default="ESTIMATE_NOT_PROVIDER_BILLING")
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

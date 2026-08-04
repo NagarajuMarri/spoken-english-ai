@@ -24,9 +24,15 @@ class RequestClassifier:
     def classify(self, text: str) -> RequestCategory:
         normalised = re.sub(r"\s+", " ", text.strip().lower())
         for category, markers in self._rules:
-            if any(normalised == marker or marker in normalised for marker in markers):
+            if any(self._matches(normalised, marker) for marker in markers):
                 return category
         return RequestCategory.CONVERSATION_PRACTICE
+
+    @staticmethod
+    def _matches(text: str, marker: str) -> bool:
+        if marker.endswith(":"):
+            return text.startswith(marker)
+        return re.search(rf"(?<!\w){re.escape(marker)}(?!\w)", text) is not None
 
 
 class ModelRouter:

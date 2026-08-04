@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from backend.app.intelligent_learning.cache import TTSAudioCache, VersionedLessonCache
@@ -16,6 +18,10 @@ from backend.app.intelligent_learning.routing import ModelRouter, RequestClassif
 ])
 def test_all_locked_request_categories(text, expected):
     assert RequestClassifier().classify(text) is expected
+
+
+def test_classifier_uses_word_boundaries_not_substrings():
+    assert RequestClassifier().classify("Is this grammar correct?") is RequestCategory.GRAMMAR_EXPLANATION
 
 
 def test_only_reasoning_categories_use_model():
@@ -41,6 +47,25 @@ def test_tts_cache_reuses_normalized_text_for_same_voice():
     cache.store("Welcome   learner", "ananya-en-in", "audio://one")
     assert cache.resolve("Welcome learner", "ANANYA-EN-IN") == "audio://one"
     assert cache.resolve("Welcome learner", "arjun-en-in") is None
+
+
+def test_caches_expire_and_are_bounded():
+    now = [datetime(2026, 8, 4, tzinfo=UTC)]
+    cache = VersionedLessonCache(max_entries=1, ttl=timedelta(minutes=5), clock=lambda: now[0])
+    cache.put("one", CacheKind.EXERCISE, "first")
+    cache.put("two", CacheKind.EXERCISE, "second")
+    assert cache.get("one", CacheKind.EXERCISE) is None
+    now[0] += timedelta(minutes=6)
+    assert cache.get("two", CacheKind.EXERCISE) is None
+
+
+def test_tts_cache_is_privacy_scoped_and_only_caches_success():
+    cache = TTSAudioCache()
+    assert cache.store("Private feedback", "ananya", "audio://one", privacy_scope="learner-1")
+    assert cache.resolve("Private feedback", "ananya", privacy_scope="learner-2") is None
+    assert not cache.store("Failed", "ananya", "audio://failed", completed=False)
+    assert not cache.store("Cancelled", "ananya", "audio://cancelled", cancelled=True)
+    assert not cache.store("No consent", "ananya", "audio://private", consent=False)
 
 
 def test_prompt_is_bounded_and_excludes_complete_history():
@@ -76,7 +101,8 @@ def test_engine_routes_reasoning_and_records_cost_metrics():
     assert result.decision.requires_llm
     dashboard = engine.metrics.dashboard(learner_id="l1")
     assert dashboard["requests"] == 1
-    assert dashboard["total_cost_usd"] > 0
+    assert dashboard["estimated_total_cost_usd"] > 0
+    assert dashboard["cost_classification"] == "ESTIMATE_NOT_PROVIDER_BILLING"
     assert dashboard["average_latency_ms"] == 125.0
 
 
@@ -84,7 +110,7 @@ def test_engine_avoids_model_for_greeting():
     engine = IntelligentLearningEngine(model_call=lambda *_: pytest.fail("model must not be called"))
     result = engine.handle(message="Hello", context=_context(), learner_id="l1", lesson_id="lesson-1", conversation_id="c1")
     assert result.metadata["source"] == "deterministic"
-    assert engine.metrics.dashboard()["total_cost_usd"] == 0
+    assert engine.metrics.dashboard()["estimated_total_cost_usd"] == 0
 
 
 def _context():

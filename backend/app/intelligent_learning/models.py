@@ -80,6 +80,8 @@ class CostEvent:
     response_latency_ms: float
     cache_hit: bool
     model_used: str
+    cached_tokens: int = 0
+    cost_classification: str = "ESTIMATE_NOT_PROVIDER_BILLING"
 
 
 @dataclass

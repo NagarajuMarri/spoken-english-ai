@@ -21,4 +21,20 @@ class CostMetrics:
             by_lesson[event.lesson_id] += event.estimated_cost_usd
             by_conversation[event.conversation_id] += event.estimated_cost_usd
         total_cost = sum(event.estimated_cost_usd for event in events)
-        return {"requests": count, "cache_effectiveness": sum(event.cache_hit for event in events) / count if count else 0.0, "average_prompt_size": sum(event.prompt_tokens for event in events) / count if count else 0.0, "average_response_size": sum(event.completion_tokens for event in events) / count if count else 0.0, "average_latency_ms": sum(event.response_latency_ms for event in events) / count if count else 0.0, "total_cost_usd": round(total_cost, 6), "cost_per_learner": dict(by_learner), "cost_per_lesson": dict(by_lesson), "cost_per_conversation": dict(by_conversation), "estimated_monthly_cost_usd": round(total_cost * 30, 6), "models_used": sorted({event.model_used for event in events})}
+        return {
+            "requests": count,
+            "cache_hits": sum(event.cache_hit for event in events),
+            "cache_misses": sum(not event.cache_hit for event in events),
+            "cache_effectiveness": sum(event.cache_hit for event in events) / count if count else 0.0,
+            "average_prompt_size": sum(event.prompt_tokens for event in events) / count if count else 0.0,
+            "average_response_size": sum(event.completion_tokens for event in events) / count if count else 0.0,
+            "cached_tokens": sum(event.cached_tokens for event in events),
+            "average_latency_ms": sum(event.response_latency_ms for event in events) / count if count else 0.0,
+            "estimated_total_cost_usd": round(total_cost, 6),
+            "cost_per_learner": dict(by_learner),
+            "cost_per_lesson": dict(by_lesson),
+            "cost_per_conversation": dict(by_conversation),
+            "estimated_monthly_cost_usd": round(total_cost * 30, 6),
+            "cost_classification": "ESTIMATE_NOT_PROVIDER_BILLING",
+            "models_used": sorted({event.model_used for event in events}),
+        }
