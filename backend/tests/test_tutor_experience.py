@@ -95,5 +95,6 @@ def test_learner_frontend_and_tutor_assets_are_served(client):
     assert script is not None
     javascript = client.get(script.group(1))
     assert "Your English" in javascript.text
-    assert "SpeechRecognition" in javascript.text
-    assert "speechSynthesis" in javascript.text
+    assert "MediaRecorder" in javascript.text
+    assert "sessionStorage" in javascript.text
+    assert "APPROXIMATE" in javascript.text

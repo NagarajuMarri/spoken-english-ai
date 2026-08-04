@@ -1,0 +1,2 @@
+import{describe,expect,it}from"vitest";import{sessionStore}from"../auth/session-store";import{tokens}from"./fixtures";
+describe("session storage policy",()=>{it("restores a session",()=>{sessionStore.write(tokens);expect(sessionStore.read()).toEqual(tokens)});it("clears a session",()=>{sessionStore.write(tokens);sessionStore.clear();expect(sessionStore.read()).toBeNull()});it("does not use local storage",()=>{sessionStore.write(tokens);expect(localStorage.length).toBe(0)})});
