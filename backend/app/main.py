@@ -53,6 +53,9 @@ def create_app(settings=None) -> FastAPI:
         settings.commercial_premium_fair_use_daily_requests,
         settings.commercial_premium_voice_minutes,
         settings.commercial_monthly_ai_cost_limit_usd,
+        settings.commercial_trial_daily_requests,
+        settings.commercial_monthly_request_limit,
+        settings.commercial_token_limit,
         settings.commercial_advertisements_enabled,
         settings.commercial_premium_tutors_enabled,
     )

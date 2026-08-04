@@ -397,3 +397,21 @@ class CommercialRefundRecord(Base):
     requested_by: Mapped[str] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(30), default="REQUESTED")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CommercialAuditEvent(Base):
+    __tablename__ = "commercial_audit_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    subscription_id: Mapped[str | None] = mapped_column(ForeignKey("commercial_subscriptions.id", ondelete="SET NULL"), nullable=True, index=True)
+    learner_id: Mapped[str | None] = mapped_column(ForeignKey("learners.id", ondelete="SET NULL"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(60), index=True)
+    outcome: Mapped[str] = mapped_column(String(20), default="RECORDED")
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+@event.listens_for(CommercialAuditEvent, "before_update")
+@event.listens_for(CommercialAuditEvent, "before_delete")
+def _commercial_audit_events_are_append_only(*_) -> None:
+    raise ValueError("Commercial audit events are append-only.")

@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     commercial_premium_fair_use_daily_requests: int = 200
     commercial_premium_voice_minutes: int = 120
     commercial_monthly_ai_cost_limit_usd: float = 20
+    commercial_trial_daily_requests: int = 50
+    commercial_monthly_request_limit: int = 5000
+    commercial_token_limit: int = 500000
     commercial_advertisements_enabled: bool = False
     commercial_premium_tutors_enabled: bool = True
     razorpay_enabled: bool = False

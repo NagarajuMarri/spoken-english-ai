@@ -36,6 +36,9 @@ class CommercialConfig:
     premium_fair_use_daily_requests: int
     premium_voice_minutes: int
     monthly_ai_cost_limit_usd: float
+    trial_daily_requests: int = 50
+    monthly_request_limit: int = 5000
+    token_limit: int = 500000
     advertisements_enabled: bool = False
     premium_tutors_enabled: bool = True
 
@@ -46,6 +49,7 @@ class CommercialConfig:
             self.free_daily_grammar_checks, self.free_daily_pronunciation_checks,
             self.premium_fair_use_daily_requests, self.premium_voice_minutes,
             self.monthly_ai_cost_limit_usd,
+            self.trial_daily_requests, self.monthly_request_limit, self.token_limit,
         )):
             raise ValueError("Commercial configuration values must be positive")
 
@@ -95,3 +99,5 @@ class Entitlements:
     conversation_history: bool
     pronunciation_coaching: bool
     vocabulary_coaching: bool
+    monthly_ai_requests: int
+    token_limit: int

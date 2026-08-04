@@ -75,11 +75,23 @@ def test_entitlements_are_provider_neutral_and_status_aware():
 
 def test_usage_enforcement_covers_limits_and_fair_use():
     limits = EntitlementEngine(config()).resolve(PlanId.FREE, SubscriptionStatus.ACTIVE)
-    UsageEnforcer(config()).enforce(limits, UsageSnapshot(conversations=4))
+    UsageEnforcer(config()).enforce(limits, UsageSnapshot(conversations=4), status=SubscriptionStatus.ACTIVE)
     with pytest.raises(UsageLimitExceeded, match="conversation_limit_reached"):
-        UsageEnforcer(config()).enforce(limits, UsageSnapshot(conversations=5))
+        UsageEnforcer(config()).enforce(limits, UsageSnapshot(conversations=5), status=SubscriptionStatus.ACTIVE)
     with pytest.raises(UsageLimitExceeded, match="ai_cost_limit_reached"):
-        UsageEnforcer(config()).enforce(limits, UsageSnapshot(ai_cost_usd=20))
+        UsageEnforcer(config()).enforce(limits, UsageSnapshot(ai_cost_usd=20), status=SubscriptionStatus.ACTIVE)
+
+
+def test_trial_monthly_token_and_subscription_limits_are_enforced():
+    settings = config(trial_daily_requests=7, monthly_request_limit=20, token_limit=100)
+    trial = EntitlementEngine(settings).resolve(PlanId.PREMIUM_MONTHLY, SubscriptionStatus.TRIAL)
+    assert trial.ai_requests == 7
+    with pytest.raises(UsageLimitExceeded, match="monthly_ai_requests_limit_reached"):
+        UsageEnforcer(settings).enforce(trial, UsageSnapshot(monthly_ai_requests=20), status=SubscriptionStatus.TRIAL)
+    with pytest.raises(UsageLimitExceeded, match="tokens_limit_reached"):
+        UsageEnforcer(settings).enforce(trial, UsageSnapshot(tokens=100), status=SubscriptionStatus.TRIAL)
+    with pytest.raises(UsageLimitExceeded, match="subscription_inactive"):
+        UsageEnforcer(settings).enforce(trial, UsageSnapshot(), status=SubscriptionStatus.EXPIRED)
 
 
 def test_provider_subscription_creation_is_idempotent():
@@ -87,6 +99,8 @@ def test_provider_subscription_creation_is_idempotent():
     first = commercial.create_provider_subscription("learner-1", PlanId.PREMIUM_MONTHLY, "idem-1")
     second = commercial.create_provider_subscription("learner-1", PlanId.PREMIUM_MONTHLY, "idem-1")
     assert first == second and first.startswith("sub_test_")
+    with pytest.raises(ValueError, match="idempotency_key_conflict"):
+        commercial.create_provider_subscription("learner-2", PlanId.PREMIUM_MONTHLY, "idem-1")
 
 
 def test_signed_webhook_and_duplicate_payment_protection():
@@ -94,11 +108,14 @@ def test_signed_webhook_and_duplicate_payment_protection():
     commercial = CommercialService(config(), provider)
     subscription = commercial.activate_trial("learner-1")
     event = PaymentEvent("event-1", "learner-1", subscription.subscription_id, "payment_success", "pay-1")
-    payload, signature = provider.sign({"event_id": "event-1"})
+    payload, signature = provider.sign({"event_id": "event-1", "learner_id": "learner-1", "subscription_id": subscription.subscription_id, "event_type": "payment_success", "provider_reference": "pay-1"})
     assert commercial.record_payment_event(event, payload, signature)
     assert not commercial.record_payment_event(event, payload, signature)
     with pytest.raises(ValueError, match="invalid_payment_signature"):
         commercial.record_payment_event(PaymentEvent("event-2", "learner-1", subscription.subscription_id, "payment_failed", "pay-2"), payload, "bad")
+    other_payload, other_signature = provider.sign({"event_id": "event-other"})
+    with pytest.raises(ValueError, match="webhook_identity_mismatch"):
+        commercial.record_payment_event(PaymentEvent("event-3", "learner-1", subscription.subscription_id, "payment_failed", "pay-3"), other_payload, other_signature)
 
 
 def test_refund_requires_owner_and_authorization_and_is_audit_logged():
@@ -118,6 +135,12 @@ def test_live_razorpay_boundary_is_disabled_without_approved_activation():
         boundary.create_subscription(learner_id="l1", plan_id=PlanId.PREMIUM_MONTHLY, idempotency_key="idem")
 
 
+def test_clock_requires_timezone_awareness():
+    commercial = service()
+    with pytest.raises(ValueError, match="timezone_aware_clock_required"):
+        commercial.activate_trial("learner-1", now=datetime(2026, 8, 4))
+
+
 def test_founder_metrics_are_derived_and_labelled_estimates():
     commercial = service()
     item = commercial.activate_trial("learner-1")
@@ -128,3 +151,4 @@ def test_founder_metrics_are_derived_and_labelled_estimates():
     assert metrics["estimated_arr_inr"] == 3588
     assert metrics["ai_cost_per_learner_usd"] == 2.5
     assert metrics["financial_classification"] == "ESTIMATE_NOT_PROVIDER_SETTLEMENT"
+    assert "learner-1" not in repr(metrics)

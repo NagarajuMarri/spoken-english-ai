@@ -19,9 +19,13 @@ def upgrade() -> None:
     op.create_table("commercial_refund_records", sa.Column("id", sa.String(36), primary_key=True), sa.Column("subscription_id", sa.String(36), sa.ForeignKey("commercial_subscriptions.id", ondelete="CASCADE"), nullable=False), sa.Column("learner_id", sa.String(36), sa.ForeignKey("learners.id", ondelete="CASCADE"), nullable=False), sa.Column("reason", sa.String(300), nullable=False), sa.Column("requested_by", sa.String(100), nullable=False), sa.Column("status", sa.String(30), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
     op.create_index("ix_commercial_refund_records_subscription_id", "commercial_refund_records", ["subscription_id"])
     op.create_index("ix_commercial_refund_records_learner_id", "commercial_refund_records", ["learner_id"])
+    op.create_table("commercial_audit_events", sa.Column("id", sa.String(36), primary_key=True), sa.Column("subscription_id", sa.String(36), sa.ForeignKey("commercial_subscriptions.id", ondelete="SET NULL")), sa.Column("learner_id", sa.String(36), sa.ForeignKey("learners.id", ondelete="SET NULL")), sa.Column("action", sa.String(60), nullable=False), sa.Column("outcome", sa.String(20), nullable=False), sa.Column("metadata_json", sa.JSON(), nullable=False), sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False))
+    for column in ("subscription_id", "learner_id", "action", "occurred_at"):
+        op.create_index(f"ix_commercial_audit_events_{column}", "commercial_audit_events", [column])
 
 
 def downgrade() -> None:
+    op.drop_table("commercial_audit_events")
     op.drop_table("commercial_refund_records")
     op.drop_table("commercial_payment_events")
     op.drop_table("commercial_subscriptions")
