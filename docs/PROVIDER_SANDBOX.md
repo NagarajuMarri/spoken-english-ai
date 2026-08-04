@@ -16,7 +16,14 @@ ordered fallback. Usage records contain units, measured latency, and estimated c
 transcript, audio, credential, or response body.
 
 Current official-documentation evidence is tracked in `PROVIDER_SANDBOX_EVIDENCE.json`. It is a
-shortlist, not a benchmark. Indian-English quality, Telugu-accented-English handling, latency,
-retention settings, current quotes, voice naturalness, browser support, and viseme support must be
-measured in a consented internal cohort. The human package therefore remains NO_GO and makes no
-automatic selection.
+shortlist, not a benchmark. The human-approved launch policy uses OpenAI for LLM, STT, and TTS,
+with the existing animated 2D tutor and approximate or provider-timed lip sync. Groq, Deepgram,
+Azure, and Google remain disabled `FUTURE_OPTIONAL_COMPARATOR` evidence only; no subscription is
+required. This policy is configuration, not hard-coded domain routing, and live invocation remains
+disabled.
+
+Indian-English quality, Telugu-accented-English handling, latency, retention settings, current
+quotes, voice naturalness, browser support, and viseme support still require a consented internal
+cohort. The USD 150 value is a `SANDBOX_CEILING`, never a production cost or capacity forecast;
+cost per learner remains telemetry-driven. Production activation therefore remains NO_GO pending
+its separate human gate.

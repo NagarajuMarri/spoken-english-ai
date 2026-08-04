@@ -4,7 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from backend.app.provider_sandbox import *
+from backend.app.provider_sandbox import (
+    ErrorCode, ProviderCapability, ProviderConfiguration, ProviderError,
+    ProviderEvidence, ProviderHealth, ProviderMode, ProviderSandboxService,
+    SandboxLimits, SandboxRequest,
+)
 from backend.app.provider_sandbox.evaluation import (
     build_human_package,
     comparison_matrix,
@@ -230,3 +234,12 @@ def test_evidence_and_decision_artifacts_are_complete():
         package["status"] == "WAITING_FOR_HUMAN_REVIEW"
         and not package["automatic_selection"]
     )
+    assert package["launch_policy"]["provider_family"] == "OpenAI"
+    assert package["launch_policy"]["activation"].endswith("remains disabled")
+    assert set(package["future_optional_comparators"]) == {
+        "Groq", "Deepgram", "Azure Speech", "Google Cloud TTS"
+    }
+    assert matrix["provider_policy"]["openai"] == "LAUNCH_PROVIDER_FAMILY"
+    assert not matrix["provider_policy"]["comparators_active"]
+    assert matrix["cost_model"]["ceiling_classification"] == "SANDBOX_CEILING"
+    assert not matrix["cost_model"]["production_capacity_inferred"]

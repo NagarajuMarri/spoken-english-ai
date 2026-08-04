@@ -2,18 +2,21 @@
   "package_id":"spoken-english-ai-pm9-provider-decision-v1",
   "status":"WAITING_FOR_HUMAN_REVIEW",
   "automatic_selection":false,
+  "decision_type":"HUMAN_APPROVED_LAUNCH_POLICY",
+  "launch_policy":{"provider_family":"OpenAI","llm":"OpenAI","speech_to_text":"OpenAI","text_to_speech":"OpenAI","avatar":"existing animated 2D tutor","lip_sync":"approximate or provider-timed boundary","activation":"configuration only; live invocation remains disabled"},
+  "future_optional_comparators":["Groq","Deepgram","Azure Speech","Google Cloud TTS"],
   "evidence_as_of":"2026-08-04T00:00:00+00:00",
   "recommendations":{
-    "llm":"Evaluate OpenAI and Groq through the same OpenAI-compatible structured-response corpus; no selection yet.",
-    "stt":"Evaluate Deepgram Nova-3 en-IN first, with Groq Whisper large-v3/turbo as the OpenAI-compatible comparator.",
-    "female_voice":"Evaluate Azure en-IN-NeerjaNeural against eligible Google en-IN voices; listening approval required.",
-    "male_voice":"Evaluate Azure en-IN-PrabhatNeural against eligible Google en-IN voices; listening approval required.",
+    "llm":"Use OpenAI for the initial commercial launch; retain Groq as a disabled future optional comparator.",
+    "stt":"Use OpenAI for the initial commercial launch; retain Deepgram and Groq as disabled future optional comparators.",
+    "female_voice":"Use an eligible OpenAI Indian-English female voice for launch after listening approval; retain Azure and Google as disabled future optional comparators.",
+    "male_voice":"Use an eligible OpenAI Indian-English male voice for launch after listening approval; retain Azure and Google as disabled future optional comparators.",
     "avatar_timing":"Use provider-neutral viseme/audio-offset events when verified for en-IN, otherwise the existing approximate lip-sync fallback.",
-    "pilot_budget":"USD 150 monthly hard ceiling for a 20-person internal sandbox cohort; revise only with current LLM/TTS quotes.",
+    "pilot_budget":"USD 150 SANDBOX_CEILING for a 20-person internal evaluation cohort; it is not a production cost or capacity forecast.",
     "usage_limits":"15 minutes per learner/day, 20 practice days, 120 audio seconds/request, 4096 tokens/request, provider kill switch and hard monthly stop.",
     "supported_browsers":"Current Chrome, Edge, Firefox and Safari after microphone/playback acceptance testing.",
-    "go_no_go":"NO_GO until credentials, retention, current quotes, cohort quality, latency, browser support and incident controls are human-approved."
+    "go_no_go":"OpenAI-only launch policy approved; production activation remains NO_GO until credentials, retention, current quotes, cohort quality, latency, browser support and incident controls are separately approved."
   },
-  "required_decisions":["chosen LLM provider/model","chosen STT provider/model","chosen female TTS voice","chosen male TTS voice","monthly sandbox budget","per-user pilot limit","audio retention duration","supported browsers","acceptable response latency","acceptable transcription quality"],
+  "required_decisions":["chosen OpenAI LLM model","chosen OpenAI STT model","chosen OpenAI female TTS voice","chosen OpenAI male TTS voice","monthly sandbox budget","per-user pilot limit","audio retention duration","supported browsers","acceptable response latency","acceptable transcription quality"],
   "evidence_ids":["E-LLM-OPENAI","E-LLM-GROQ","E-STT-DEEPGRAM","E-STT-GROQ","E-TTS-AZURE","E-TTS-GOOGLE","E-AVATAR-AZURE"]
 }

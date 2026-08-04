@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from backend.app.provider_sandbox.models import *
+from backend.app.provider_sandbox.models import (
+    ErrorCode, ProviderCapability, ProviderConfiguration, ProviderError,
+    ProviderHealth, SandboxRequest,
+)
 
 
 class SandboxProvider(Protocol):
