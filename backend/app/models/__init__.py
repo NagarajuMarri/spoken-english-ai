@@ -12,6 +12,10 @@ from backend.app.models.entities import (
     UserAccount,
     RefreshToken,
     SecurityAuditEvent,
+    LearnerMemoryProfile,
+    LearnerMemorySignal,
+    AIUsageRecord,
+    VoiceProcessingAttempt,
 )
 
 __all__ = [
@@ -28,4 +32,8 @@ __all__ = [
     "UserAccount",
     "RefreshToken",
     "SecurityAuditEvent",
+    "LearnerMemoryProfile",
+    "LearnerMemorySignal",
+    "AIUsageRecord",
+    "VoiceProcessingAttempt",
 ]

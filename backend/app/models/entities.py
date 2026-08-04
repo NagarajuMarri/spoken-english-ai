@@ -234,3 +234,67 @@ class AudioAsset(Base):
     cleanup_failure_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     deletion_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     voice_session: Mapped[VoiceSession] = relationship(back_populates="assets")
+
+
+class LearnerMemoryProfile(Base):
+    __tablename__ = "learner_memory_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(
+        ForeignKey("learners.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
+    current_level: Mapped[str] = mapped_column(String(30), default="STARTER")
+    preferred_topics: Mapped[list] = mapped_column(JSON, default=list)
+    avoided_topics: Mapped[list] = mapped_column(JSON, default=list)
+    recent_goals: Mapped[list] = mapped_column(JSON, default=list)
+    completed_goals: Mapped[list] = mapped_column(JSON, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class LearnerMemorySignal(Base):
+    __tablename__ = "learner_memory_signals"
+    __table_args__ = (UniqueConstraint("learner_id", "category", "normalised_value"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    normalised_value: Mapped[str] = mapped_column(String(200))
+    display_value: Mapped[str] = mapped_column(String(200))
+    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
+    trend_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AIUsageRecord(Base):
+    __tablename__ = "ai_usage_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
+    voice_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    provider_kind: Mapped[str] = mapped_column(String(20), index=True)
+    request_count: Mapped[int] = mapped_column(Integer, default=1)
+    input_units: Mapped[float] = mapped_column(Float, default=0)
+    output_units: Mapped[float] = mapped_column(Float, default=0)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    degraded: Mapped[bool] = mapped_column(Boolean, default=False)
+    failed: Mapped[bool] = mapped_column(Boolean, default=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class VoiceProcessingAttempt(Base):
+    __tablename__ = "voice_processing_attempts"
+    __table_args__ = (UniqueConstraint("voice_turn_id", "idempotency_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    voice_turn_id: Mapped[str] = mapped_column(ForeignKey("voice_turns.id", ondelete="CASCADE"), index=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    degraded_features: Mapped[list] = mapped_column(JSON, default=list)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
