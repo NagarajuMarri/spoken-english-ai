@@ -49,31 +49,27 @@ def test_health_readiness_version_and_missing_secret(client):
     assert version["api_version"] == "v1"
     assert "secret" not in str(version).lower()
 
-    app = create_app(Settings(
-        database_url="sqlite:///:memory:",
-        environment="production",
-        jwt_secret="",
-        auto_create_tables=True,
-        _env_file=None,
-    ))
-    with TestClient(app) as production:
-        response = production.get("/health/ready")
-        assert response.status_code == 503
-        assert response.json()["checks"]["authentication"] == "unavailable"
-    app.state.engine.dispose()
+    with pytest.raises(ValueError, match="Unsafe production configuration"):
+        Settings(
+            database_url="sqlite:///:memory:",
+            environment="production",
+            jwt_secret="",
+            auto_create_tables=True,
+            _env_file=None,
+        )
 
 
 def test_readiness_rejects_unconfigured_provider():
     app = create_app(Settings(
         database_url="sqlite:///:memory:",
-        environment="production",
+        environment="test",
         jwt_secret="test-signing-secret-at-least-32-bytes-long",
         llm_provider="external-not-configured",
         auto_create_tables=True,
         _env_file=None,
     ))
-    with TestClient(app) as production:
-        response = production.get("/health/ready")
+    with TestClient(app) as test_client:
+        response = test_client.get("/health/ready")
         assert response.status_code == 503
         assert response.json()["checks"]["providers"] == "unavailable"
     app.state.engine.dispose()
@@ -177,7 +173,7 @@ def test_auth_audits_and_admin_boundary(client):
         admin = AdministrativeService(db)
         admin.set_account_status(registered["id"], "LOCKED")
         assert db.get(UserAccount, registered["id"]).status == "LOCKED"
-    paths = {route.path for route in client.app.routes}
+    paths = {route.path for route in client.app.routes if hasattr(route, "path")}
     assert all(not path.startswith("/api/v1/admin") for path in paths)
 
 

@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,6 +54,86 @@ class Settings(BaseSettings):
     commercial_premium_tutors_enabled: bool = True
     razorpay_enabled: bool = False
     razorpay_webhook_secret: str = ""
+    public_frontend_url: str = "http://localhost:5173"
+    public_api_url: str = "http://localhost:8000"
+    cors_origins: str = "http://localhost:5173"
+    trusted_hosts: str = "localhost,127.0.0.1,testserver"
+    force_https: bool = False
+    secure_cookies: bool = False
+    request_size_limit_bytes: int = 2_000_000
+    upload_size_limit_bytes: int = 10_000_000
+    database_pool_size: int = 5
+    database_pool_timeout_seconds: int = 10
+    database_connect_timeout_seconds: int = 10
+    redis_url: str = ""
+    redis_required: bool = False
+    object_storage_backend: str = "local"
+    object_storage_bucket: str = ""
+    object_storage_endpoint: str = ""
+    object_storage_access_key: str = ""
+    object_storage_secret_key: str = ""
+    object_storage_retention_hours: int = 24
+    openai_api_key: str = ""
+    openai_llm_model: str = "gpt-5-mini"
+    openai_stt_model: str = "gpt-4o-mini-transcribe"
+    openai_tts_model: str = "gpt-4o-mini-tts"
+    tracing_enabled: bool = False
+    maintenance_mode: bool = False
+    worker_enabled: bool = False
+    worker_heartbeat_key: str = "spoken-english:worker:heartbeat"
+    worker_heartbeat_ttl_seconds: int = 30
+
+    @model_validator(mode="after")
+    def validate_environment(self):
+        if self.environment != "production":
+            return self
+        missing = []
+        if not self.database_url.startswith("postgresql"):
+            missing.append("database_url")
+        if not self.jwt_secret and self.jwt_verification_keys_json == "{}":
+            missing.append("jwt_signing_keys")
+        else:
+            try:
+                if any(len(value) < 32 for value in self.signing_keys().values()):
+                    missing.append("jwt_signing_keys")
+            except (TypeError, ValueError):
+                missing.append("jwt_signing_keys")
+        if not self.force_https:
+            missing.append("force_https")
+        if not self.secure_cookies:
+            missing.append("secure_cookies")
+        if not self.cors_origins or "*" in self.cors_origins:
+            missing.append("cors_origins")
+        if not self.trusted_hosts or "*" in self.trusted_hosts:
+            missing.append("trusted_hosts")
+        if self.llm_provider == "openai" and not self.openai_api_key:
+            missing.append("openai_api_key")
+        if self.razorpay_enabled and not self.razorpay_webhook_secret:
+            missing.append("razorpay_webhook_secret")
+        if self.redis_required and not self.redis_url:
+            missing.append("redis_url")
+        if self.object_storage_backend not in {"local", "s3"}:
+            missing.append("object_storage_backend")
+        if self.object_storage_backend == "s3" and not self.object_storage_bucket:
+            missing.append("object_storage_bucket")
+        if self.object_storage_backend == "local":
+            missing.append("object_storage_backend")
+        if missing:
+            raise ValueError("Unsafe production configuration; missing: " + ", ".join(missing))
+        if self.debug or self.auto_create_tables:
+            raise ValueError("Production requires debug=false and auto_create_tables=false")
+        return self
+
+    def safe_summary(self) -> dict[str, object]:
+        return {
+            "environment": self.environment,
+            "database": "postgresql" if self.database_url.startswith("postgresql") else "sqlite",
+            "redis_configured": bool(self.redis_url),
+            "object_storage_backend": self.object_storage_backend,
+            "llm_provider": self.llm_provider,
+            "razorpay_enabled": self.razorpay_enabled,
+            "build_identifier": self.build_identifier,
+        }
 
     def signing_keys(self) -> dict[str, str]:
         import json
@@ -77,12 +158,16 @@ class Settings(BaseSettings):
         return keys
 
     def providers_ready(self) -> bool:
-        allowed = {"disabled", "fake", "rule_based"}
-        return all(provider in allowed for provider in (
-            self.llm_provider,
-            self.speech_to_text_provider,
-            self.text_to_speech_provider,
-        ))
+        return (
+            self.llm_provider in {"disabled", "fake", "rule_based", "openai"}
+            and self.speech_to_text_provider in {"disabled", "fake", "openai"}
+            and self.text_to_speech_provider in {"disabled", "fake", "openai"}
+            and ("openai" not in {
+                self.llm_provider,
+                self.speech_to_text_provider,
+                self.text_to_speech_provider,
+            } or bool(self.openai_api_key))
+        )
 
     model_config = SettingsConfigDict(
         env_prefix="SPOKEN_ENGLISH_",

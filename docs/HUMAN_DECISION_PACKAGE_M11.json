@@ -1,0 +1,28 @@
+{
+  "decision_package_id": "spoken-english-ai-milestone-11-production-readiness-human-review-v1",
+  "milestone": 11,
+  "decision": "WAITING_FOR_HUMAN_REVIEW",
+  "deployment_authorized": false,
+  "merge_authorized": false,
+  "live_provider_invocation_authorized": false,
+  "review_scope": [
+    "container images and compose manifests",
+    "PostgreSQL migration ordering",
+    "Redis rate limits, jobs, and worker heartbeat",
+    "private object-storage boundary",
+    "health, security, observability, CI, PWA, and runbooks"
+  ],
+  "acceptance_hardening": {
+    "finding": "A legacy SQLite database was stamped at Alembic head while missing authentication ownership and refresh-token columns.",
+    "correction": "Readiness validates critical authentication schema columns, the recovery runbook forbids stamping as repair, and live browser acceptance covers registration, logout, login, restoration, and safe rejection.",
+    "verification": {
+      "backend_tests": "177 passed",
+      "frontend_tests": "35 passed",
+      "playwright_mock_tests": "7 passed",
+      "playwright_live_auth_tests": "1 passed",
+      "deterministic_examples": "7 passed",
+      "migration_cycle": "upgrade/downgrade/upgrade passed at 0009_commercial_subscriptions",
+      "log_secret_scan": "passed"
+    }
+  }
+}

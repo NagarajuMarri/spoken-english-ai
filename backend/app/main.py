@@ -3,6 +3,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.app.api.routes.conversations import router as conversations_router
 from backend.app.api.routes.health import router as health_router
@@ -15,7 +18,7 @@ from backend.app.api.routes.tutors import router as tutors_router
 from backend.app.api.routes.intelligent_learning import router as intelligent_learning_router
 from backend.app.api.routes.commercial import router as commercial_router
 from backend.app.core.security import InMemoryLoginThrottler
-from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, request_context_middleware
+from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, RedisRateLimiter, request_context_middleware
 from backend.app.core.config import get_settings
 from backend.app.core.errors import install_error_handlers
 from backend.app.db.base import Base
@@ -34,14 +37,39 @@ def create_app(settings=None) -> FastAPI:
         version=settings.app_version,
         debug=settings.debug,
     )
-    engine = build_engine(settings.database_url)
+    engine = build_engine(
+        settings.database_url,
+        pool_size=settings.database_pool_size,
+        pool_timeout_seconds=settings.database_pool_timeout_seconds,
+        connect_timeout_seconds=settings.database_connect_timeout_seconds,
+    )
     application.state.engine = engine
     application.state.settings = settings
     application.state.login_throttler = InMemoryLoginThrottler(settings.login_attempt_limit)
     application.state.metrics = InMemoryMetrics()
-    application.state.rate_limiter = InMemoryRateLimiter()
+    application.state.redis = None
+    if settings.redis_url:
+        from redis import Redis
+
+        application.state.redis = Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
+    application.state.rate_limiter = (
+        RedisRateLimiter(application.state.redis) if application.state.redis is not None else InMemoryRateLimiter()
+    )
     application.state.session_factory = build_session_factory(engine)
     application.state.learning_engine = IntelligentLearningEngine()
+    application.state.object_storage = None
+    if settings.object_storage_backend == "s3":
+        import boto3
+
+        from backend.app.storage import S3ObjectStorageBoundary
+
+        client = boto3.client(
+            "s3",
+            endpoint_url=settings.object_storage_endpoint or None,
+            aws_access_key_id=settings.object_storage_access_key or None,
+            aws_secret_access_key=settings.object_storage_secret_key or None,
+        )
+        application.state.object_storage = S3ObjectStorageBoundary(client, settings.object_storage_bucket)
     commercial_config = CommercialConfig(
         settings.commercial_monthly_price_inr,
         settings.commercial_yearly_price_inr,
@@ -66,6 +94,19 @@ def create_app(settings=None) -> FastAPI:
     if settings.auto_create_tables:
         Base.metadata.create_all(engine)
     install_error_handlers(application)
+    application.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[item.strip() for item in settings.trusted_hosts.split(",") if item.strip()],
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=[item.strip() for item in settings.cors_origins.split(",") if item.strip()],
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Correlation-ID", "X-CSRF-Token"],
+    )
+    if settings.force_https:
+        application.add_middleware(HTTPSRedirectMiddleware)
     application.middleware("http")(request_context_middleware)
     application.include_router(health_router)
     application.include_router(learners_router)
