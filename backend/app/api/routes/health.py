@@ -1,11 +1,27 @@
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from backend.app.core.config import get_settings
 
 router = APIRouter(tags=["system"])
+
+REQUIRED_AUTH_SCHEMA = {
+    "learners": {"user_account_id"},
+    "refresh_tokens": {"family_id", "parent_token_id"},
+}
+
+
+def authentication_schema_is_compatible(connection) -> bool:
+    inspector = inspect(connection)
+    try:
+        return all(
+            required.issubset({column["name"] for column in inspector.get_columns(table)})
+            for table, required in REQUIRED_AUTH_SCHEMA.items()
+        )
+    except Exception:
+        return False
 
 
 class HealthResponse(BaseModel):
@@ -43,7 +59,11 @@ def ready(request: Request):
             connection.execute(text("SELECT 1"))
             try:
                 revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-                checks["migration"] = "ready" if revision == "0009_commercial_subscriptions" else "incompatible"
+                checks["migration"] = (
+                    "ready"
+                    if revision == "0009_commercial_subscriptions" and authentication_schema_is_compatible(connection)
+                    else "incompatible"
+                )
             except Exception:
                 if settings.environment != "production" and settings.auto_create_tables:
                     checks["migration"] = "development_metadata"

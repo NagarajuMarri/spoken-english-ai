@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import create_engine, text
 
+from backend.app.api.routes.health import authentication_schema_is_compatible
 from backend.app.core.config import Settings
 from backend.app.core.operations import RATE_POLICIES, RedisRateLimiter
 from backend.app.jobs import Job, JobStatus, RedisJobQueue
@@ -67,3 +69,13 @@ def test_s3_boundary_returns_metadata_only_reference():
     assert reference.scoped_reference.startswith("signed:")
     assert storage.healthcheck()
     assert storage.delete(reference)
+
+
+def test_readiness_rejects_stamped_head_with_legacy_authentication_schema():
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE learners (id VARCHAR(36) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE refresh_tokens (id VARCHAR(36) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        connection.execute(text("INSERT INTO alembic_version VALUES ('0009_commercial_subscriptions')"))
+        assert authentication_schema_is_compatible(connection) is False
