@@ -1,9 +1,12 @@
 {
-  "name": "Spoken English AI",
-  "short_name": "English AI",
+  "name": "SpeakMate — Indian English Practice",
+  "short_name": "SpeakMate",
   "description": "Voice-first English practice for Indian learners",
   "start_url": "/",
   "display": "standalone",
+  "id": "/",
+  "scope": "/",
+  "categories": ["education", "productivity"],
   "background_color": "#f7f3e8",
   "theme_color": "#17324d",
   "icons": [

@@ -13,6 +13,7 @@ def client(tmp_path):
         environment="test",
         jwt_secret="test-signing-secret-at-least-32-bytes-long",
         auto_create_tables=True,
+        closed_beta_enabled=False,
         _env_file=None,
     )
     app = create_app(settings)

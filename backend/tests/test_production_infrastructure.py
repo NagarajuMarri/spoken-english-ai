@@ -77,5 +77,5 @@ def test_readiness_rejects_stamped_head_with_legacy_authentication_schema():
         connection.execute(text("CREATE TABLE learners (id VARCHAR(36) PRIMARY KEY)"))
         connection.execute(text("CREATE TABLE refresh_tokens (id VARCHAR(36) PRIMARY KEY)"))
         connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
-        connection.execute(text("INSERT INTO alembic_version VALUES ('0009_commercial_subscriptions')"))
+        connection.execute(text("INSERT INTO alembic_version VALUES ('0010_beta_launch_readiness')"))
         assert authentication_schema_is_compatible(connection) is False

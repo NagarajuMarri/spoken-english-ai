@@ -6,7 +6,7 @@ Keep the backend out of service. Check PostgreSQL reachability, connection satur
 
 ## Migration incompatible
 
-Stop rollout and leave the previous compatible image serving. Compare the reported revision with `0009_commercial_subscriptions`. Re-run the idempotent upgrade only after resolving the failed migration. Prefer a forward repair; rehearse any downgrade on a restored copy first.
+Stop rollout and leave the previous compatible image serving. Compare the reported revision with `0010_beta_launch_readiness`. Re-run the idempotent upgrade only after resolving the failed migration. Prefer a forward repair; rehearse any downgrade on a restored copy first.
 
 ### Local SQLite database created before Alembic
 
