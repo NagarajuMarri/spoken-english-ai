@@ -26,7 +26,7 @@
 
 ## Current state
 
-Deployment: **NOT AUTHORIZED**  
-Public release: **NOT AUTHORIZED**  
-Razorpay production mode: **DISABLED**  
+- Deployment: **NOT AUTHORIZED**
+- Public release: **NOT AUTHORIZED**
+- Razorpay production mode: **DISABLED**
 Next gate: **explicit production-release approval**
