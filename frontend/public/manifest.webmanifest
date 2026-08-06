@@ -1,0 +1,12 @@
+{
+  "name": "Spoken English AI",
+  "short_name": "English AI",
+  "description": "Voice-first English practice for Indian learners",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f3e8",
+  "theme_color": "#17324d",
+  "icons": [
+    {"src": "/icons/app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}

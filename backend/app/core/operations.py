@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from fastapi import Request
+from fastapi.responses import JSONResponse
 from fastapi import status
 from backend.app.core.errors import AppError
 
@@ -87,10 +88,18 @@ class RedisRateLimiter:
         self.client = client
 
     def decide(self, policy: RateLimitPolicy, key: str) -> RateLimitDecision:
-        raise NotImplementedError("Configure the production Redis rate-limit adapter.")
+        namespaced = f"rate:{policy.name}:{key}"
+        pipeline = self.client.pipeline()
+        pipeline.incr(namespaced)
+        pipeline.ttl(namespaced)
+        count, ttl = pipeline.execute()
+        if count == 1 or ttl < 0:
+            self.client.expire(namespaced, policy.window_seconds)
+            ttl = policy.window_seconds
+        return RateLimitDecision(count <= policy.limit, max(1, int(ttl)) if count > policy.limit else 0)
 
     def reset(self, policy: RateLimitPolicy, key: str) -> None:
-        raise NotImplementedError("Configure the production Redis rate-limit adapter.")
+        self.client.delete(f"rate:{policy.name}:{key}")
 
 
 RATE_POLICIES = {
@@ -144,6 +153,17 @@ async def request_context_middleware(request: Request, call_next):
     correlation_id = incoming if SAFE_ID.fullmatch(incoming) else uuid4().hex
     request.state.request_id = request_id
     request.state.correlation_id = correlation_id
+    settings = request.app.state.settings
+    content_length = request.headers.get("content-length")
+    try:
+        request_size = int(content_length) if content_length else 0
+    except ValueError:
+        request_size = settings.request_size_limit_bytes + 1
+    if request_size > settings.request_size_limit_bytes:
+        return JSONResponse(
+            status_code=413,
+            content={"error": {"code": "request_too_large", "message": "Request exceeds the configured limit."}},
+        )
     response = await call_next(request)
     duration_ms = round((time.perf_counter() - started) * 1000, 3)
     response.headers["X-Request-ID"] = request_id
@@ -164,8 +184,14 @@ async def request_context_middleware(request: Request, call_next):
         "duration_ms": duration_ms,
         "service": request.app.state.settings.app_name,
         "environment": request.app.state.settings.environment,
-        "authenticated_user_id": getattr(request.state, "authenticated_user_id", None),
-        "learner_id": getattr(request.state, "learner_id", None),
     }
     logger.info(json.dumps(record, separators=(",", ":")))
+    response.headers.update({
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "no-referrer",
+        "Permissions-Policy": "camera=(), geolocation=()",
+        "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+        "Cache-Control": "no-store" if request.url.path.startswith("/api") else response.headers.get("Cache-Control", "no-cache"),
+    })
     return response

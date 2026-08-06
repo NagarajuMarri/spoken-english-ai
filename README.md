@@ -40,7 +40,7 @@ The default local database is SQLite. Set `SPOKEN_ENGLISH_DATABASE_URL` to a Pos
 Run tests:
 
 ```powershell
-pytest
+python -m pytest
 ```
 
 ## Roadmap
@@ -70,3 +70,7 @@ See `docs/PROVIDER_ARCHITECTURE.md` and `docs/VOICE_TUTOR_PIPELINE.md`. The next
 ## Interactive avatar tutors
 
 Milestone 8 serves the typed React learner experience at `/`, with Ananya and Arjun as configuration-driven Indian-English tutors. It includes explicit guarded routes, session refresh/logout, consent-aware bounded browser microphone input, an animated 2D avatar state machine, approximate-or-provider-timed lip-sync contracts, conversation coaching, optional Telugu preferences, progress and streaks, and a subscription-ready boundary. No live provider, human-like video avatar, payment, or deployment is enabled. Run `python examples/deterministic_tutor_experience.py` for the offline tutor-catalogue example. See `docs/AVATAR_TUTOR_EXPERIENCE.md`.
+
+## Production infrastructure
+
+Milestone 11 adds deterministic container builds, migration-gated PostgreSQL startup, Redis-backed distributed controls and jobs, private S3-compatible object storage, dependency-aware readiness, a same-origin PWA deployment, CI supply-chain checks, staging manifests, and operational runbooks. Start the local stack with `docker compose up --build`; registration is admitted only after the migration service completes. See `docs/PRODUCTION_READINESS.md`, `docs/STAGING_DEPLOYMENT.md`, and `docs/RUNBOOKS.md`.
