@@ -83,8 +83,20 @@ class Settings(BaseSettings):
     release_version: str = "1.0.0-rc1"
     closed_beta_enabled: bool = True
     beta_invite_code: str = ""
+    beta_invite_codes: str = ""
+    beta_allowlist: str = ""
+    founder_emails: str = ""
     razorpay_mode: str = "test"
     support_email: str = "support@example.com"
+
+    def beta_codes(self) -> set[str]:
+        return {item.strip() for item in (self.beta_invite_codes or self.beta_invite_code).split(",") if item.strip()}
+
+    def beta_allowed_emails(self) -> set[str]:
+        return {item.strip().lower() for item in self.beta_allowlist.split(",") if item.strip()}
+
+    def founders(self) -> set[str]:
+        return {item.strip().lower() for item in self.founder_emails.split(",") if item.strip()}
     worker_enabled: bool = False
     worker_heartbeat_key: str = "spoken-english:worker:heartbeat"
     worker_heartbeat_ttl_seconds: int = 30

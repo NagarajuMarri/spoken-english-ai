@@ -16,7 +16,7 @@ from backend.app.core.security import (
     utc_now,
     verify_password,
 )
-from backend.app.models import Learner, RefreshToken, SecurityAuditEvent, UserAccount
+from backend.app.models import BetaWaitlistEntry, Learner, RefreshToken, SecurityAuditEvent, UserAccount
 from backend.app.models.entities import new_id
 
 
@@ -69,6 +69,16 @@ class AuthService:
 
     def register(self, data):
         email = normalize_email(str(data.email))
+        if self.settings.closed_beta_enabled:
+            email_allowed = email in self.settings.beta_allowed_emails() or email in self.settings.founders()
+            code_allowed = bool(data.invitation_code) and any(
+                secrets.compare_digest(data.invitation_code, configured) for configured in self.settings.beta_codes()
+            )
+            if not (email_allowed or code_allowed):
+                if self.session.scalar(select(BetaWaitlistEntry).where(BetaWaitlistEntry.email == email)) is None:
+                    self.session.add(BetaWaitlistEntry(email=email))
+                    self.session.commit()
+                raise AppError(status.HTTP_403_FORBIDDEN, "beta_access_required", "You are on the beta waiting list. We will contact you when access is available.")
         if len(data.password) < self.settings.password_minimum_length:
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "weak_password", "Password does not meet requirements.")
         if len(data.password.encode("utf-8")) > self.settings.password_maximum_bytes:

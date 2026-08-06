@@ -8,7 +8,7 @@ Milestone 11 packages the modular application for repeatable staging review. It 
 - Redis is used for distributed rate limits, durable queued work, idempotency, retry/dead-letter handling, and worker heartbeats.
 - Private S3-compatible storage holds temporary audio bytes. Relational records retain metadata and time-limited scoped references only.
 - The web image serves the PWA and reverse-proxies same-origin `/api/` and `/health/` requests to the backend.
-- Readiness checks schema revision `0009_commercial_subscriptions`, signing keys, configured providers, PostgreSQL, Redis, object storage, payment configuration, and the worker heartbeat.
+- Readiness checks schema revision `0010_beta_launch_readiness`, signing keys, configured providers, PostgreSQL, Redis, object storage, payment configuration, and the worker heartbeat.
 
 ## Release sequence
 

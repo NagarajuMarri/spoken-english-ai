@@ -11,5 +11,7 @@
 ## Non-blocking limitations
 
 - Forgot-password is not implemented and was treated as optional by the audit request.
+- Pytest 8.4.2 is development-only and is flagged by pip-audit; its compatible upgrade is tracked separately.
+- One pre-existing nullable-conversation mypy warning remains; runtime ownership tests pass.
 - Legal text is explicitly draft and still requires legal/founder approval.
 - Live OpenAI latency was not measured because live provider invocation is not authorized.

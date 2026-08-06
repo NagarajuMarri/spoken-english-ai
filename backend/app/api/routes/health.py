@@ -61,7 +61,7 @@ def ready(request: Request):
                 revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
                 checks["migration"] = (
                     "ready"
-                    if revision == "0009_commercial_subscriptions" and authentication_schema_is_compatible(connection)
+                    if revision == "0010_beta_launch_readiness" and authentication_schema_is_compatible(connection)
                     else "incompatible"
                 )
             except Exception:
@@ -127,7 +127,7 @@ def version(request: Request):
         "build_identifier": settings.build_identifier,
         "environment": settings.environment,
         "api_version": "v1",
-        "dependencies": {"python": "3.12+", "database_schema": "0009_commercial_subscriptions"},
+        "dependencies": {"python": "3.12+", "database_schema": "0010_beta_launch_readiness"},
     }
 
 

@@ -1,16 +1,16 @@
 from backend.app.core.config import Settings
 
 
-def test_launch_config_is_closed_beta_and_test_mode(client):
+def test_launch_config_can_be_disabled_and_remains_test_mode(client):
     response = client.get("/api/v1/launch/config")
     assert response.status_code == 200
-    assert response.json()["closed_beta"] is True
+    assert response.json()["closed_beta"] is False
     assert response.json()["razorpay_mode"] == "test"
     assert response.json()["provider_policy"] == "OPENAI_FIRST"
 
 
 def test_feedback_requires_authentication(client):
-    response = client.post("/api/v1/launch/feedback", json={"rating": 5, "category": "lesson", "message": "Helpful lesson"})
+    response = client.post("/api/v1/launch/feedback", json={"rating": 5, "category": "lesson", "severity": "LOW", "message": "Helpful lesson"})
     assert response.status_code == 401
 
 

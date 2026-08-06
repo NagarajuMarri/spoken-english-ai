@@ -7,6 +7,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(max_length=256)
     display_name: str = Field(min_length=1, max_length=100)
+    invitation_code: str | None = Field(default=None, max_length=100)
 
 
 class LoginRequest(BaseModel):

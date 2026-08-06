@@ -16,6 +16,8 @@ from backend.app.models.entities import (
     LearnerMemorySignal,
     AIUsageRecord,
     VoiceProcessingAttempt,
+    BetaWaitlistEntry,
+    BetaFeedback,
 )
 
 __all__ = [
@@ -36,4 +38,6 @@ __all__ = [
     "LearnerMemorySignal",
     "AIUsageRecord",
     "VoiceProcessingAttempt",
+    "BetaWaitlistEntry",
+    "BetaFeedback",
 ]

@@ -415,3 +415,22 @@ class CommercialAuditEvent(Base):
 @event.listens_for(CommercialAuditEvent, "before_delete")
 def _commercial_audit_events_are_append_only(*_) -> None:
     raise ValueError("Commercial audit events are append-only.")
+
+
+class BetaWaitlistEntry(Base):
+    __tablename__ = "beta_waitlist_entries"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class BetaFeedback(Base):
+    __tablename__ = "beta_feedback"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
+    category: Mapped[str] = mapped_column(String(30), index=True)
+    severity: Mapped[str] = mapped_column(String(20), index=True)
+    message: Mapped[str] = mapped_column(String(1000))
+    contact_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    screenshot_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

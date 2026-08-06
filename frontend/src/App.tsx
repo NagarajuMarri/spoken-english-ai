@@ -5,7 +5,8 @@ import { AppShell } from "./components/AppShell";
 import type { Dashboard, TutorPreference } from "./models";
 import { useRouter } from "./routes/router";
 import { AuthScreen } from "./screens/AuthScreen";
-import { ConversationScreen, DailyLessonScreen, DashboardScreen, ProgressScreen, SettingsScreen } from "./screens/ExperienceScreens";
+import { ConversationScreen, DailyLessonScreen, DashboardScreen, SettingsScreen } from "./screens/ExperienceScreens";
+import { FeedbackScreen, FounderScreen, ProgressDetailScreen, SubscriptionScreen } from "./screens/LaunchScreens";
 import { PublicScreen } from "./screens/PublicScreens";
 import { TutorPicker } from "./screens/TutorPicker";
 
@@ -33,6 +34,6 @@ export function App() {
   if (route === "/onboarding") return <TutorPicker />;
   if (error) return <main role="alert" className="loading">{error} <button onClick={() => location.reload()}>Retry</button></main>;
   if (!pref || !data) return <main className="loading" aria-live="polite">Preparing your lesson…</main>;
-  const screen = route === "/app/dashboard" ? <DashboardScreen data={data} tutor={pref.tutor} /> : route === "/app/daily-lesson" ? <DailyLessonScreen /> : route === "/app/conversation" ? <ConversationScreen account={account} tutor={pref.tutor} telugu={pref.telugu_explanations_enabled} /> : route === "/app/progress" ? <ProgressScreen data={data} /> : <SettingsScreen tutor={pref.tutor} onChange={() => navigate("/onboarding")} />;
+  const screen = route === "/app/dashboard" ? <DashboardScreen data={data} tutor={pref.tutor} /> : route === "/app/daily-lesson" ? <DailyLessonScreen /> : route === "/app/conversation" ? <ConversationScreen account={account} tutor={pref.tutor} telugu={pref.telugu_explanations_enabled} /> : route === "/app/progress" ? <ProgressDetailScreen /> : route === "/app/feedback" ? <FeedbackScreen /> : route === "/app/subscription" ? <SubscriptionScreen /> : route === "/app/founder" ? <FounderScreen /> : <SettingsScreen tutor={pref.tutor} onChange={() => navigate("/onboarding")} />;
   return <AppShell>{screen}</AppShell>;
 }
