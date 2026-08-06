@@ -1,10 +1,32 @@
-# Version 1.0 go-live checklist
+# Version 1.0 production go-live checklist
 
-- [ ] Release decision is `RC1_READY`.
-- [ ] Closed-beta admission is enforced server-side.
-- [ ] Feedback and founder/admin workflows pass end-to-end.
-- [ ] Trial, subscription and entitlement UX pass end-to-end in Razorpay test mode.
-- [ ] Registration, login, logout, restoration, tutors, voice, conversation completion, progress, pronunciation, profile, settings, support and legal flows pass.
-- [ ] Security, accessibility, performance, PWA, dependency and secret gates pass on the exact SHA.
-- [ ] Release notes, known issues and customer/admin/support documentation are approved.
-- [ ] Separate deployment, public-release and payment-production authorizations are recorded.
+## Approved release-candidate evidence
+
+- [x] Product Milestone 12 received human approval.
+- [x] RC audit is `RC1_READY` with no blocking issues.
+- [x] Closed-beta admission, feedback, founder dashboard, trial, subscription, entitlement and progress workflows are implemented.
+- [x] Core learner, accessibility, build, migration and browser gates passed.
+- [x] Release notes, changelog, known issues and operating documentation are present.
+
+## Required before production deployment
+
+- [ ] Record explicit production-release and deployment approval.
+- [ ] Approve final brand, legal text, pricing, beta cohort and production domain.
+- [ ] Configure and verify DNS, HTTPS, trusted hosts and production secrets.
+- [ ] Provision PostgreSQL, Redis, private object storage and worker services.
+- [ ] Validate staging migration, immutable artifact, smoke tests, rollback and restore evidence.
+- [ ] Configure monitoring, alerts, uptime checks, cost ceilings and incident ownership.
+- [ ] Confirm support coverage and incident communications.
+
+## Payment and publication gates
+
+- [ ] Obtain separate approval before enabling Razorpay production mode or real charges.
+- [ ] Verify production webhook, idempotency, refund and reconciliation flows.
+- [ ] Obtain separate approval before public publication or general availability.
+
+## Current state
+
+Deployment: **NOT AUTHORIZED**  
+Public release: **NOT AUTHORIZED**  
+Razorpay production mode: **DISABLED**  
+Next gate: **explicit production-release approval**
