@@ -17,6 +17,7 @@ from backend.app.api.routes.ai import router as ai_router
 from backend.app.api.routes.tutors import router as tutors_router
 from backend.app.api.routes.intelligent_learning import router as intelligent_learning_router
 from backend.app.api.routes.commercial import router as commercial_router
+from backend.app.api.routes.launch import router as launch_router
 from backend.app.core.security import InMemoryLoginThrottler
 from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, RedisRateLimiter, request_context_middleware
 from backend.app.core.config import get_settings
@@ -118,6 +119,7 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(tutors_router)
     application.include_router(intelligent_learning_router)
     application.include_router(commercial_router)
+    application.include_router(launch_router)
     frontend = Path(__file__).resolve().parents[2] / "frontend" / "dist"
     if frontend.is_dir():
         application.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")

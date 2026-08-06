@@ -79,6 +79,12 @@ class Settings(BaseSettings):
     openai_tts_model: str = "gpt-4o-mini-tts"
     tracing_enabled: bool = False
     maintenance_mode: bool = False
+    product_name: str = "SpeakMate"
+    release_version: str = "1.0.0-rc1"
+    closed_beta_enabled: bool = True
+    beta_invite_code: str = ""
+    razorpay_mode: str = "test"
+    support_email: str = "support@example.com"
     worker_enabled: bool = False
     worker_heartbeat_key: str = "spoken-english:worker:heartbeat"
     worker_heartbeat_ttl_seconds: int = 30
@@ -110,6 +116,8 @@ class Settings(BaseSettings):
             missing.append("openai_api_key")
         if self.razorpay_enabled and not self.razorpay_webhook_secret:
             missing.append("razorpay_webhook_secret")
+        if self.razorpay_enabled and self.razorpay_mode != "test":
+            missing.append("razorpay_test_mode")
         if self.redis_required and not self.redis_url:
             missing.append("redis_url")
         if self.object_storage_backend not in {"local", "s3"}:
