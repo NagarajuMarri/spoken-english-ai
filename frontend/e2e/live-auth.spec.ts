@@ -37,7 +37,7 @@ test("live registration, logout, login, restoration, and safe rejection", async 
   const duplicate = page.waitForResponse((response) => response.url().endsWith("/auth/register"));
   await page.getByRole("button", { name: "Create learner account" }).click();
   expect((await duplicate).status()).toBe(409);
-  await expect(page.getByRole("alert")).toContainText("could not sign you in");
+  await expect(page.getByRole("alert")).toContainText("An account with this email exists.");
 
   await page.getByRole("button", { name: "I already have an account" }).click();
   await page.getByLabel("Email").fill(email);

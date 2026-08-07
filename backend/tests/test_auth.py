@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from sqlalchemy import select
 
+from backend.app.core.errors import AppError
 from backend.app.core.security import hash_refresh_token
 from backend.app.models import Learner, RefreshToken, SecurityAuditEvent, UserAccount
 
@@ -53,6 +54,35 @@ def test_registration_requires_terms_and_privacy_consent(client):
     assert response.json()["error"]["code"] == "legal_consent_required"
     with client.app.state.session_factory() as db:
         assert db.scalar(select(UserAccount).where(UserAccount.email == "no-consent@example.com")) is None
+
+
+def test_failed_token_creation_rolls_back_registration_and_allows_clean_retry(client, monkeypatch):
+    """Regresses: failed registration -> duplicate account -> login failure."""
+    from backend.app.services import auth as auth_service
+
+    real_create_access_token = auth_service.create_access_token
+
+    def fail_token_creation(*_args, **_kwargs):
+        raise AppError(503, "authentication_unavailable", "Authentication signing is not configured.")
+
+    monkeypatch.setattr(auth_service, "create_access_token", fail_token_creation)
+    first = register(client, "atomic-registration@example.com")
+    assert first.status_code == 503
+
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(UserAccount).where(UserAccount.email == "atomic-registration@example.com")) is None
+        assert db.scalar(select(Learner).where(Learner.email == "atomic-registration@example.com")) is None
+        assert db.scalar(select(RefreshToken).join(UserAccount).where(
+            UserAccount.email == "atomic-registration@example.com"
+        )) is None
+
+    monkeypatch.setattr(auth_service, "create_access_token", real_create_access_token)
+    retry = register(client, "atomic-registration@example.com")
+    assert retry.status_code == 201
+    login = client.post("/api/v1/auth/login", json={
+        "email": "atomic-registration@example.com", "password": PASSWORD,
+    })
+    assert login.status_code == 200
 
 
 def test_login_success_invalid_credentials_and_disabled_account(client):
