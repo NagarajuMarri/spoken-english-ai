@@ -25,6 +25,8 @@ Refresh tokens are random opaque values, stored only as SHA-256 hashes, and link
 
 Passwords have configured minimum length and a 72-byte maximum so bcrypt never silently truncates input. Validation error details omit submitted values. Login errors are generic; throttling uses both a normalized-email hash and a privacy-minimized network hash, and successful login resets both in-memory counters.
 
+Password-recovery requests return the same public response for known and unknown emails. Reset tokens are cryptographically random, stored only as SHA-256 hashes, short-lived, rate-limited, and single-use. A successful reset updates the bcrypt password hash, consumes all outstanding reset tokens, revokes all refresh sessions, and records an audit event in one transaction. Production requires SMTP delivery; development may use only the mode-0600 local outbox, which is excluded from version control. Reset URLs and submitted passwords are never logged.
+
 Ownership checks use a privacy-safe `404` for cross-user resources. User-agent metadata is bounded; raw IP addresses are not stored. Before production, replace in-memory throttling with a distributed rate limiter, add secret rotation procedures, audit logging, HTTPS enforcement, breached-password screening, and token-family reuse response.
 
 JWTs carry an explicit `kid`. New tokens use the configured active symmetric key; configured previous keys verify older tokens. Unknown keys and unexpected algorithms are rejected. Tokens without `kid` use only the documented `legacy` migration key. Keys never appear in probes, logs, metrics, or API payloads.

@@ -8,8 +8,10 @@ from backend.app.core.config import get_settings
 router = APIRouter(tags=["system"])
 
 REQUIRED_AUTH_SCHEMA = {
+    "user_accounts": {"session_epoch"},
     "learners": {"user_account_id"},
     "refresh_tokens": {"family_id", "parent_token_id"},
+    "password_reset_tokens": {"user_id", "token_hash", "expires_at", "used_at"},
 }
 
 
@@ -61,7 +63,7 @@ def ready(request: Request):
                 revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
                 checks["migration"] = (
                     "ready"
-                    if revision == "0010_beta_launch_readiness" and authentication_schema_is_compatible(connection)
+                    if revision == "0011_password_recovery" and authentication_schema_is_compatible(connection)
                     else "incompatible"
                 )
             except Exception:
@@ -127,7 +129,7 @@ def version(request: Request):
         "build_identifier": settings.build_identifier,
         "environment": settings.environment,
         "api_version": "v1",
-        "dependencies": {"python": "3.12+", "database_schema": "0010_beta_launch_readiness"},
+        "dependencies": {"python": "3.12+", "database_schema": "0011_password_recovery"},
     }
 
 

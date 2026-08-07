@@ -126,7 +126,7 @@ def test_signing_key_rotation_and_unknown_key(client):
     assert header["kid"] == "current"
     now = datetime.now(timezone.utc)
     claims = {
-        "sub": registration["id"], "type": "access", "iat": now,
+        "sub": registration["id"], "type": "access", "sev": 0, "iat": now,
         "exp": now + timedelta(minutes=5), "iss": settings.jwt_issuer, "aud": settings.jwt_audience,
     }
     previous = jwt.encode(

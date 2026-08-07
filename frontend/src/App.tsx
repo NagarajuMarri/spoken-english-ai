@@ -8,6 +8,7 @@ import { AuthScreen } from "./screens/AuthScreen";
 import { ConversationScreen, DailyLessonScreen, DashboardScreen, SettingsScreen } from "./screens/ExperienceScreens";
 import { FeedbackScreen, FounderScreen, ProgressDetailScreen, SubscriptionScreen } from "./screens/LaunchScreens";
 import { PublicScreen } from "./screens/PublicScreens";
+import { RequestPasswordResetScreen, UpdatePasswordScreen } from "./screens/PasswordResetScreens";
 import { TutorPicker } from "./screens/TutorPicker";
 
 const publicContent = new Set(["/", "/pricing", "/privacy", "/terms", "/refunds", "/support", "/faq"]);
@@ -30,6 +31,8 @@ export function App() {
   if (status === "restoring") return <main className="loading" aria-live="polite">Restoring your secure session…</main>;
   if (route === "/login") return <AuthScreen mode="login" />;
   if (route === "/register") return <AuthScreen mode="register" />;
+  if (route === "/forgot-password") return <RequestPasswordResetScreen />;
+  if (route === "/reset-password") return <UpdatePasswordScreen />;
   if (status !== "authenticated" || !account) return null;
   if (route === "/onboarding") return <TutorPicker />;
   if (error) return <main role="alert" className="loading">{error} <button onClick={() => location.reload()}>Retry</button></main>;

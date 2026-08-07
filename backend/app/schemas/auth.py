@@ -24,6 +24,31 @@ class LogoutRequest(RefreshRequest):
     pass
 
 
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    new_password: str = Field(max_length=256)
+
+
+class PasswordResetTokenRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+
+
+class PasswordResetRequestResponse(BaseModel):
+    message: str
+
+
+class PasswordResetConfirmResponse(BaseModel):
+    message: str
+
+
+class PasswordResetTokenResponse(BaseModel):
+    valid: bool
+
+
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str

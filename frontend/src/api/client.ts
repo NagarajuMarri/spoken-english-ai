@@ -19,6 +19,9 @@ async function raw<T>(path:string,init:RequestInit={},retry=true):Promise<T>{
 export const api={
   register:(body:{email:string;password:string;display_name:string;invitation_code?:string;terms_privacy_accepted:boolean})=>raw<Account&{tokens:TokenPair}>("/api/v1/auth/register",{method:"POST",body:JSON.stringify(body)}),
   login:(email:string,password:string)=>raw<TokenPair>("/api/v1/auth/login",{method:"POST",body:JSON.stringify({email,password})}),
+  requestPasswordReset:(email:string)=>raw<{message:string}>("/api/v1/auth/password-reset/request",{method:"POST",body:JSON.stringify({email})}),
+  validatePasswordReset:(token:string)=>raw<{valid:boolean}>("/api/v1/auth/password-reset/validate",{method:"POST",body:JSON.stringify({token})}),
+  confirmPasswordReset:async(token:string,new_password:string)=>{const result=await raw<{message:string}>("/api/v1/auth/password-reset/confirm",{method:"POST",body:JSON.stringify({token,new_password})});hooks.clear();return result},
   me:()=>raw<Account>("/api/v1/auth/me"),
   logout:(refresh_token:string)=>raw<void>("/api/v1/auth/logout",{method:"POST",body:JSON.stringify({refresh_token})}),
   logoutAll:()=>raw<void>("/api/v1/auth/logout-all",{method:"POST"}),
