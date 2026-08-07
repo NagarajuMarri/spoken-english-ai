@@ -34,17 +34,24 @@ class ConversationRepository:
         learner_text: str,
         tutor_response: str,
         correction_summary: str | None,
+        *,
+        ai_turn_attempt_id: str | None = None,
+        commit: bool = True,
     ) -> ConversationMessage:
-        for attempt in range(3):
+        maximum_attempts = 3 if commit else 1
+        for attempt in range(maximum_attempts):
             conversation = self.session.scalar(
                 select(Conversation).where(Conversation.id == conversation_id).with_for_update()
             )
+            if conversation is None:
+                raise TurnSequenceConflict
             turn = self.session.scalar(
                 select(func.max(ConversationMessage.turn_number)).where(
                     ConversationMessage.conversation_id == conversation_id
                 )
             ) or 0
             message = ConversationMessage(
+                ai_turn_attempt_id=ai_turn_attempt_id,
                 conversation_id=conversation_id,
                 turn_number=turn + 1,
                 learner_text=learner_text,
@@ -60,12 +67,16 @@ class ConversationRepository:
                 )
             )
             try:
-                self.session.commit()
+                if commit:
+                    self.session.commit()
+                else:
+                    self.session.flush()
             except IntegrityError as exc:
                 self.session.rollback()
-                if attempt == 2:
+                if attempt == maximum_attempts - 1:
                     raise TurnSequenceConflict from exc
                 continue
-            self.session.refresh(message)
+            if commit:
+                self.session.refresh(message)
             return message
         raise TurnSequenceConflict

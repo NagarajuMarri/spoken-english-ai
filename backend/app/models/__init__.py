@@ -1,6 +1,7 @@
 from backend.app.models.entities import (
     Conversation,
     ConversationMessage,
+    AITurnAttempt,
     ConversationEvaluation,
     Learner,
     LessonSession,
@@ -26,6 +27,7 @@ __all__ = [
     "Learner",
     "Conversation",
     "ConversationMessage",
+    "AITurnAttempt",
     "ProgressRecord",
     "LessonSession",
     "ConversationEvaluation",

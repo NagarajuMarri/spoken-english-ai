@@ -1,7 +1,15 @@
 import type { Account, AiTurn, Dashboard, ProgressDetail, SubscriptionView, TokenPair, Tutor, TutorPreference, VoiceTranscription } from "../models";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
-export class ApiError extends Error { constructor(public status:number, message:string){super(message)} }
+export class ApiError extends Error {
+  constructor(
+    public status:number,
+    message:string,
+    public code="request_failed",
+    public retryable=false,
+    public requestId?:string,
+  ){super(message)}
+}
 type SessionHooks={get:()=>TokenPair|null;update:(tokens:TokenPair)=>void;clear:()=>void};
 let hooks:SessionHooks={get:()=>null,update:()=>undefined,clear:()=>undefined};
 export function configureSession(next:SessionHooks){hooks=next}
@@ -14,7 +22,7 @@ async function raw<T>(path:string,init:RequestInit={},retry=true):Promise<T>{
     const refreshed=await fetch(`${API_BASE}/api/v1/auth/refresh`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh_token:tokens.refresh_token})});
     if(refreshed.ok){hooks.update(await refreshed.json() as TokenPair);return raw<T>(path,init,false)} hooks.clear();
   }
-  if(!response.ok){const body=await response.json().catch(()=>({}));const message=response.status===401?"Your session could not be verified.":(body?.error?.message||body?.detail||"Request failed");throw new ApiError(response.status,message)}
+  if(!response.ok){const body=await response.json().catch(()=>({}));const message=response.status===401?"Your session could not be verified.":(body?.error?.message||body?.detail||"Request failed");throw new ApiError(response.status,message,body?.error?.code,Boolean(body?.error?.retryable),body?.error?.request_id)}
   return (response.status===204?undefined:await response.json()) as T;
 }
 export const api={
@@ -31,7 +39,7 @@ export const api={
   dashboard:()=>raw<Dashboard>("/api/v1/tutors/dashboard"),
   conversation:(learner_id:string)=>raw<{id:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:"daily-conversation"})}),
   transcribe:(id:string,capture:{blob:Blob;durationMs:number})=>raw<VoiceTranscription>(`/api/v1/conversations/${id}/transcriptions`,{method:"POST",headers:{"Content-Type":capture.blob.type,"X-Audio-Duration-Ms":String(capture.durationMs),"X-Voice-Processing-Consent":"accepted"},body:capture.blob}),
-  turn:(id:string,message:string,include_telugu_explanation:boolean)=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",body:JSON.stringify({message,include_telugu_explanation})}),
+  turn:(id:string,message:string,include_telugu_explanation:boolean,idempotencyKey:string)=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({message,include_telugu_explanation})}),
   feedback:(body:{rating:number;category:string;severity:string;message:string;contact_allowed:boolean;screenshot_name?:string})=>raw<{accepted:boolean;message:string}>("/api/v1/launch/feedback",{method:"POST",body:JSON.stringify(body)}),
   subscription:()=>raw<SubscriptionView>("/api/v1/launch/subscription"),
   startTrial:()=>raw<{status:string;payment_mode:string}>("/api/v1/launch/subscription/trial",{method:"POST"}),

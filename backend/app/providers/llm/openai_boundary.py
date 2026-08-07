@@ -1,9 +1,20 @@
 from __future__ import annotations
 
 import json
+import socket
+from time import sleep
 from urllib import error, request as urllib_request
 
-from backend.app.ai.exceptions import ProviderTimeout, ProviderUnavailable
+from backend.app.ai.exceptions import (
+    ProviderConnectionError,
+    ProviderContextLimit,
+    ProviderError,
+    ProviderMalformedResponse,
+    ProviderRateLimited,
+    ProviderServiceError,
+    ProviderTimeout,
+    ProviderUnavailable,
+)
 from backend.app.ai.prompts import safe_prompt_context
 from backend.app.ai.validation import validate_provider_output
 
@@ -54,11 +65,12 @@ class OpenAIResponsesHTTPClient:
 
     endpoint = "https://api.openai.com/v1/responses"
 
-    def __init__(self, api_key: str, opener=urllib_request.urlopen):
+    def __init__(self, api_key: str, opener=urllib_request.urlopen, sleeper=sleep):
         if not api_key:
             raise ValueError("OpenAI API key is required.")
         self.api_key = api_key
         self.opener = opener
+        self.sleeper = sleeper
 
     @staticmethod
     def _instructions(context: dict) -> str:
@@ -85,7 +97,19 @@ class OpenAIResponsesHTTPClient:
         return messages
 
     @staticmethod
-    def _output_text(value: dict) -> str:
+    def _output_text(value: dict, provider_requests: int) -> str:
+        if value.get("status") == "incomplete":
+            raise ProviderMalformedResponse(
+                "OpenAI response was incomplete.", provider_requests=provider_requests
+            )
+        if any(
+            content.get("type") == "refusal"
+            for item in value.get("output", [])
+            for content in item.get("content", [])
+        ):
+            raise ProviderMalformedResponse(
+                "OpenAI response was refused.", provider_requests=provider_requests
+            )
         texts = [
             content.get("text", "")
             for item in value.get("output", [])
@@ -94,8 +118,49 @@ class OpenAIResponsesHTTPClient:
         ]
         output = "".join(texts).strip()
         if not output:
-            raise ValueError("OpenAI response did not contain structured output.")
+            raise ProviderMalformedResponse(
+                "OpenAI response did not contain structured output.",
+                provider_requests=provider_requests,
+            )
         return output
+
+    @staticmethod
+    def _retry_after(exc: error.HTTPError) -> int | None:
+        raw = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            return max(0, min(int(raw), 2)) if raw is not None else None
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _http_error(exc: error.HTTPError, provider_requests: int) -> ProviderError:
+        code = ""
+        try:
+            body = json.loads(exc.read())
+            provider_error = body.get("error") if isinstance(body, dict) else None
+            if isinstance(provider_error, dict):
+                code = str(provider_error.get("code") or provider_error.get("type") or "")
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            pass
+        if exc.code in {408, 409}:
+            return ProviderTimeout("OpenAI response request timed out.", provider_requests=provider_requests)
+        if exc.code == 429:
+            return ProviderRateLimited(
+                "OpenAI response request was rate limited.",
+                provider_requests=provider_requests,
+                retry_after_seconds=OpenAIResponsesHTTPClient._retry_after(exc),
+            )
+        if exc.code >= 500:
+            return ProviderServiceError("OpenAI response service failed.", provider_requests=provider_requests)
+        if code in {"context_length_exceeded", "context_window_exceeded", "max_tokens"}:
+            return ProviderContextLimit("OpenAI context limit was exceeded.", provider_requests=provider_requests)
+        return ProviderUnavailable("OpenAI response request was rejected.", provider_requests=provider_requests)
+
+    def _wait_before_retry(self, exc: ProviderError, attempt: int) -> None:
+        delay = exc.retry_after_seconds
+        if delay is None:
+            delay = min(0.25 * (2 ** attempt), 1.0)
+        self.sleeper(delay)
 
     def generate_structured(self, *, model: str, context: dict, timeout: float, max_retries: int) -> dict:
         payload = json.dumps({
@@ -123,22 +188,62 @@ class OpenAIResponsesHTTPClient:
             },
         )
         value = None
+        provider_requests = 0
         for attempt in range(max_retries + 1):
+            provider_requests += 1
             try:
                 with self.opener(outgoing, timeout=timeout) as response:
-                    value = json.loads(response.read())
+                    try:
+                        value = json.loads(response.read())
+                    except (json.JSONDecodeError, TypeError) as exc:
+                        raise ProviderMalformedResponse(
+                            "OpenAI response body was malformed.",
+                            provider_requests=provider_requests,
+                        ) from exc
                 break
-            except TimeoutError:
+            except (TimeoutError, socket.timeout) as exc:
+                failure: ProviderError = ProviderTimeout(
+                    "OpenAI response request timed out.",
+                    provider_requests=provider_requests,
+                )
                 if attempt == max_retries:
-                    raise
+                    raise failure from exc
+                self._wait_before_retry(failure, attempt)
             except error.HTTPError as exc:
-                raise RuntimeError("OpenAI response request failed.") from exc
-            except (error.URLError, json.JSONDecodeError, TypeError) as exc:
+                failure = self._http_error(exc, provider_requests)
+                if not failure.retryable or attempt == max_retries:
+                    raise failure from exc
+                self._wait_before_retry(failure, attempt)
+            except error.URLError as exc:
+                reason = exc.reason
+                failure = (
+                    ProviderTimeout("OpenAI response request timed out.", provider_requests=provider_requests)
+                    if isinstance(reason, (TimeoutError, socket.timeout))
+                    else ProviderConnectionError(
+                        "OpenAI response connection failed.",
+                        provider_requests=provider_requests,
+                    )
+                )
                 if attempt == max_retries:
-                    raise RuntimeError("OpenAI response request failed.") from exc
+                    raise failure from exc
+                self._wait_before_retry(failure, attempt)
         if not isinstance(value, dict):
-            raise RuntimeError("OpenAI response request failed.")
-        content = json.loads(self._output_text(value))
+            raise ProviderMalformedResponse(
+                "OpenAI response body was malformed.",
+                provider_requests=provider_requests,
+            )
+        try:
+            content = json.loads(self._output_text(value, provider_requests))
+        except json.JSONDecodeError as exc:
+            raise ProviderMalformedResponse(
+                "OpenAI structured output was malformed.",
+                provider_requests=provider_requests,
+            ) from exc
+        if not isinstance(content, dict):
+            raise ProviderMalformedResponse(
+                "OpenAI structured output was malformed.",
+                provider_requests=provider_requests,
+            )
         usage = value.get("usage") or {}
         input_details = usage.get("input_tokens_details") or {}
         content["provider_metadata_reference"] = (
@@ -148,7 +253,7 @@ class OpenAIResponsesHTTPClient:
             "input_units": int(usage.get("input_tokens") or 0),
             "cached_input_units": int(input_details.get("cached_tokens") or 0),
             "output_units": int(usage.get("output_tokens") or 0),
-            "provider_requests": 1,
+            "provider_requests": provider_requests,
         }
         return content
 
@@ -157,8 +262,8 @@ class OpenAICompatibleAIProvider:
     """Injected-client boundary; it never reads keys or logs raw requests/responses."""
     name = "openai-compatible"
 
-    def __init__(self, client, *, model: str, timeout_seconds: float = 20, max_retries: int = 0):
-        if not model or not 1 <= timeout_seconds <= 60 or max_retries < 0 or max_retries > 3:
+    def __init__(self, client, *, model: str, timeout_seconds: float = 45, max_retries: int = 1):
+        if not model or not 1 <= timeout_seconds <= 60 or max_retries not in {0, 1}:
             raise ValueError("Unsafe provider configuration.")
         self.client = client
         self.model = model
@@ -174,9 +279,9 @@ class OpenAICompatibleAIProvider:
                 max_retries=self.max_retries,
             )
             return validate_provider_output(value)
-        except TimeoutError as exc:
-            raise ProviderTimeout("AI provider timed out.") from exc
-        except ProviderTimeout:
+        except ProviderError:
             raise
+        except (TimeoutError, socket.timeout) as exc:
+            raise ProviderTimeout("AI provider timed out.") from exc
         except Exception as exc:
             raise ProviderUnavailable("AI provider unavailable.") from exc

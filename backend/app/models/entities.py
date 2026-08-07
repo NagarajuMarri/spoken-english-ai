@@ -123,6 +123,9 @@ class ConversationMessage(Base):
     __table_args__ = (UniqueConstraint("conversation_id", "turn_number"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    ai_turn_attempt_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_turn_attempts.id", ondelete="SET NULL"), unique=True, nullable=True
+    )
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
     turn_number: Mapped[int] = mapped_column(Integer)
     learner_text: Mapped[str] = mapped_column(Text)
@@ -130,6 +133,28 @@ class ConversationMessage(Base):
     correction_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class AITurnAttempt(Base):
+    __tablename__ = "ai_turn_attempts"
+    __table_args__ = (UniqueConstraint("conversation_id", "idempotency_key"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    learner_id: Mapped[str] = mapped_column(
+        ForeignKey("learners.id", ondelete="CASCADE"), index=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    learner_text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    provider_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ProgressRecord(Base):
@@ -283,12 +308,17 @@ class LearnerMemorySignal(Base):
 
 class AIUsageRecord(Base):
     __tablename__ = "ai_usage_records"
+    __table_args__ = (UniqueConstraint("ai_turn_attempt_id", "outcome"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    ai_turn_attempt_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_turn_attempts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
     voice_session_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     provider_kind: Mapped[str] = mapped_column(String(20), index=True)
+    outcome: Mapped[str] = mapped_column(String(20), default="SUCCESS")
     request_count: Mapped[int] = mapped_column(Integer, default=1)
     input_units: Mapped[float] = mapped_column(Float, default=0)
     output_units: Mapped[float] = mapped_column(Float, default=0)
@@ -356,6 +386,9 @@ class AICostMetricEvent(Base):
     __tablename__ = "ai_cost_metric_events"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    ai_turn_attempt_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_turn_attempts.id", ondelete="SET NULL"), unique=True, nullable=True
+    )
     learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)
     lesson_id: Mapped[str] = mapped_column(String(80), index=True)
     conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)

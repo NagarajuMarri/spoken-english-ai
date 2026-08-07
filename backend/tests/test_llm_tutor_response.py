@@ -1,16 +1,27 @@
 import json
+from io import BytesIO
 from urllib import error
 
 import pytest
 from sqlalchemy import func, select
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
-from backend.app.ai.exceptions import ProviderTimeout, ProviderUnavailable
+from backend.app.ai.exceptions import (
+    ProviderConnectionError,
+    ProviderContextLimit,
+    ProviderMalformedResponse,
+    ProviderOutputInvalid,
+    ProviderRateLimited,
+    ProviderServiceError,
+    ProviderTimeout,
+    ProviderUnavailable,
+)
 from backend.app.ai.models import AIConversationRequest, ConversationHistoryTurn, UsageInfo
 from backend.app.core.config import Settings
-from backend.app.models import AICostMetricEvent, AIUsageRecord, ConversationMessage
+from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
 from backend.app.providers.llm import build_llm_provider
 from backend.app.providers.llm.openai_boundary import OpenAICompatibleAIProvider, OpenAIResponsesHTTPClient
+from backend.app.repositories.conversations import ConversationRepository, TurnSequenceConflict
 
 
 def _request(**overrides):
@@ -123,11 +134,83 @@ def test_openai_provider_failure_does_not_log_key_or_learner_content(caplog):
         model="gpt-5-mini",
         max_retries=0,
     )
-    with pytest.raises(ProviderUnavailable):
+    with pytest.raises(ProviderConnectionError):
         provider.generate(_request(current_learner_message=learner_content))
     captured = caplog.text
     assert secret not in captured
     assert learner_content not in captured
+
+
+def test_responses_client_retries_one_transient_failure_and_reports_actual_requests():
+    calls = []
+    sleeps = []
+    content = _content()
+    content.pop("provider_metadata_reference")
+    content.pop("usage")
+
+    def intermittent(outgoing, timeout):
+        calls.append((outgoing, timeout))
+        if len(calls) == 1:
+            raise error.URLError("temporary network failure")
+        return _HTTPResponse({
+            "id": "resp_recovered",
+            "model": "gpt-5-mini",
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": json.dumps(content)}],
+            }],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        })
+
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient("secret-key", intermittent, sleeps.append),
+        model="gpt-5-mini",
+        max_retries=1,
+    )
+    result = provider.generate(_request())
+
+    assert len(calls) == 2
+    assert sleeps == [0.25]
+    assert result.usage.provider_requests == 2
+
+
+def test_responses_client_does_not_retry_context_or_malformed_output():
+    calls = 0
+
+    def context_failure(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise error.HTTPError(
+            "https://api.openai.com/v1/responses",
+            400,
+            "bad request",
+            {},
+            BytesIO(json.dumps({"error": {"code": "context_length_exceeded"}}).encode()),
+        )
+
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient("secret-key", context_failure, lambda _: None),
+        model="gpt-5-mini",
+        max_retries=1,
+    )
+    with pytest.raises(ProviderContextLimit):
+        provider.generate(_request())
+    assert calls == 1
+
+    malformed = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient(
+            "secret-key",
+            lambda *_args, **_kwargs: _HTTPResponse({
+                "id": "resp_incomplete",
+                "status": "incomplete",
+                "output": [],
+            }),
+        ),
+        model="gpt-5-mini",
+        max_retries=1,
+    )
+    with pytest.raises(ProviderMalformedResponse):
+        malformed.generate(_request())
 
 
 class _RecordingProvider:
@@ -177,14 +260,20 @@ def test_ai_turn_uses_provider_for_greetings_carries_three_turns_and_persists_us
 
 
 @pytest.mark.parametrize(
-    ("provider_error", "status_code", "error_code"),
+    ("provider_error", "status_code", "error_code", "retryable"),
     [
-        (ProviderTimeout("raw timeout detail"), 504, "llm_timeout"),
-        (ProviderUnavailable("raw provider detail"), 503, "llm_unavailable"),
+        (ProviderTimeout("raw timeout detail"), 504, "llm_timeout", True),
+        (ProviderConnectionError("raw connection detail"), 503, "llm_connection_error", True),
+        (ProviderRateLimited("raw limit detail"), 429, "llm_rate_limited", True),
+        (ProviderServiceError("raw service detail"), 502, "llm_provider_error", True),
+        (ProviderContextLimit("raw context detail"), 422, "llm_context_limit", False),
+        (ProviderMalformedResponse("raw malformed detail"), 502, "llm_malformed_response", False),
+        (ProviderOutputInvalid("raw schema detail"), 502, "llm_schema_validation_failed", False),
+        (ProviderUnavailable("raw provider detail"), 503, "llm_unavailable", False),
     ],
 )
 def test_ai_turn_maps_provider_failures_without_persisting_a_message(
-    client, learner, conversation, provider_error, status_code, error_code,
+    client, learner, conversation, provider_error, status_code, error_code, retryable, caplog,
 ):
     class FailedProvider:
         def generate(self, _):
@@ -197,11 +286,122 @@ def test_ai_turn_maps_provider_failures_without_persisting_a_message(
     )
     assert response.status_code == status_code
     assert response.json()["error"]["code"] == error_code
+    assert response.json()["error"]["retryable"] is retryable
     assert "raw" not in response.text
+    assert "raw" not in caplog.text
+    assert provider_error.failure_code in caplog.text
     with client.app.state.session_factory() as db:
         assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 0
-        usage = db.scalar(select(AIUsageRecord))
+        assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 0
+        usage = db.scalar(select(AIUsageRecord).where(AIUsageRecord.outcome == "FAILURE"))
         assert usage.failed is True
+        assert db.scalar(select(func.count()).select_from(AIUsageRecord).where(
+            AIUsageRecord.outcome == "SUCCESS"
+        )) == 0
+
+
+def test_transient_failure_retries_with_same_identity_and_persists_exactly_once(
+    client, learner, conversation,
+):
+    class IntermittentProvider:
+        def __init__(self):
+            self.requests = []
+
+        def generate(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                raise ProviderConnectionError("temporary failure", provider_requests=2)
+            return _content("Recovered tutor response.")
+
+    provider = IntermittentProvider()
+    client.app.state.llm_provider = provider
+    headers = {"Idempotency-Key": "turn-recovery-0001"}
+    payload = {"message": "I want to practise this sentence."}
+
+    failed = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+    recovered = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+    replayed = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+
+    assert failed.status_code == 503
+    assert failed.json()["error"]["code"] == "llm_connection_error"
+    assert recovered.status_code == 200
+    assert replayed.json() == recovered.json()
+    assert len(provider.requests) == 2
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 1
+        assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 1
+        assert db.scalar(select(func.count()).select_from(AIUsageRecord).where(
+            AIUsageRecord.outcome == "SUCCESS"
+        )) == 1
+        failure = db.scalar(select(AIUsageRecord).where(AIUsageRecord.outcome == "FAILURE"))
+        assert failure.request_count == 2
+        attempt = db.scalar(select(AITurnAttempt))
+        assert attempt.status == "COMPLETED"
+        assert attempt.provider_attempts == 3
+        message = db.scalar(select(ConversationMessage))
+        assert message.learner_text == payload["message"]
+        assert message.ai_turn_attempt_id == attempt.id
+
+    continued = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json={"message": "Can we continue now?"},
+        headers={"Idempotency-Key": "turn-recovery-0002"},
+    )
+    assert continued.status_code == 200
+    assert provider.requests[-1].conversation_history[-1].learner_message == payload["message"]
+
+
+def test_persistence_retry_reuses_checkpoint_without_second_provider_call(
+    client, learner, conversation, monkeypatch,
+):
+    provider = _RecordingProvider()
+    client.app.state.llm_provider = provider
+    original = ConversationRepository.add_message
+    failures = 0
+
+    def fail_once(self, *args, **kwargs):
+        nonlocal failures
+        if failures == 0:
+            failures += 1
+            raise TurnSequenceConflict
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ConversationRepository, "add_message", fail_once)
+    headers = {"Idempotency-Key": "turn-persistence-0001"}
+    payload = {"message": "Please preserve my turn."}
+    failed = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+    recovered = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+
+    assert failed.status_code == 500
+    assert failed.json()["error"]["code"] == "llm_persistence_failed"
+    assert recovered.status_code == 200
+    assert len(provider.requests) == 1
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 1
+        assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 1
+        assert db.scalar(select(func.count()).select_from(AIUsageRecord).where(
+            AIUsageRecord.outcome == "SUCCESS"
+        )) == 1
 
 
 def test_llm_provider_configuration_fails_closed_outside_tests():

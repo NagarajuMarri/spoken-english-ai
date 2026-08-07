@@ -83,8 +83,8 @@ class Settings(BaseSettings):
     object_storage_retention_hours: int = 24
     openai_api_key: str = ""
     openai_llm_model: str = "gpt-5-mini"
-    openai_llm_timeout_seconds: int = 20
-    openai_llm_max_retries: int = 0
+    openai_llm_timeout_seconds: int = 45
+    openai_llm_max_retries: int = 1
     openai_llm_input_usd_per_million: float = 0.25
     openai_llm_cached_input_usd_per_million: float = 0.025
     openai_llm_output_usd_per_million: float = 2.0
@@ -116,6 +116,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self):
+        if not 1 <= self.openai_llm_timeout_seconds <= 60:
+            raise ValueError("openai_llm_timeout_seconds must be between 1 and 60")
+        if self.openai_llm_max_retries not in {0, 1}:
+            raise ValueError("openai_llm_max_retries must be 0 or 1")
         if self.environment != "production":
             return self
         missing = []

@@ -8,25 +8,37 @@ logger = logging.getLogger("spoken_english.errors")
 
 
 class AppError(Exception):
-    def __init__(self, status_code: int, code: str, message: str, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+        *,
+        retryable: bool | None = None,
+    ) -> None:
         self.status_code = status_code
         self.code = code
         self.message = message
         self.headers = headers or {}
+        self.retryable = retryable
 
 
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:
         request = _
+        error = {
+            "code": exc.code,
+            "message": exc.message,
+            "request_id": getattr(request.state, "request_id", None),
+        }
+        if exc.retryable is not None:
+            error["retryable"] = exc.retryable
         return JSONResponse(
             status_code=exc.status_code,
             headers=exc.headers,
-            content={"error": {
-                "code": exc.code,
-                "message": exc.message,
-                "request_id": getattr(request.state, "request_id", None),
-            }},
+            content={"error": error},
         )
 
     @app.exception_handler(RequestValidationError)

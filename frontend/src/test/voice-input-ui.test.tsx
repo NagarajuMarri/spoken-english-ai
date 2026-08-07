@@ -48,7 +48,12 @@ describe("voice input customer journey",()=>{
     expect(capture.blob.type).toContain("audio/webm");
     expect(await screen.findByLabelText("Recognized speech")).toHaveTextContent("I practise English every morning.");
     expect(screen.getByText("You: I practise English every morning.")).toBeVisible();
-    expect(api.turn).toHaveBeenCalledWith("conversation-voice","I practise English every morning.",false);
+    expect(api.turn).toHaveBeenCalledWith(
+      "conversation-voice",
+      "I practise English every morning.",
+      false,
+      expect.any(String),
+    );
   });
 
   it("shows a safe STT error and does not submit an invented learner message",async()=>{

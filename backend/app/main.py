@@ -112,7 +112,7 @@ def create_app(settings=None) -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=[
             "Authorization", "Content-Type", "X-Correlation-ID", "X-CSRF-Token",
-            "X-Audio-Duration-Ms", "X-Voice-Processing-Consent",
+            "X-Audio-Duration-Ms", "X-Voice-Processing-Consent", "Idempotency-Key",
         ],
     )
     if settings.force_https:

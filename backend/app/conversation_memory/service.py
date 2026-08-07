@@ -6,10 +6,13 @@ class ConversationMemoryService:
         self.session = session
         self.repository = ConversationMemoryRepository(session)
 
-    def update(self, learner_id, signals):
+    def update(self, learner_id, signals, *, commit=True):
         self.repository.profile(learner_id)
         items = [self.repository.upsert_signal(learner_id, signal) for signal in signals]
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return items
 
     def export(self, learner_id):
