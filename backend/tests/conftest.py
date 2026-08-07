@@ -14,6 +14,7 @@ def client(tmp_path):
         jwt_secret="test-signing-secret-at-least-32-bytes-long",
         auto_create_tables=True,
         closed_beta_enabled=False,
+        password_reset_delivery_provider="memory",
         _env_file=None,
     )
     app = create_app(settings)
@@ -28,6 +29,7 @@ def learner(client):
         "email": "learner@example.com",
         "password": "StrongPassword123!",
         "display_name": "Anusha",
+        "terms_privacy_accepted": True,
     })
     assert response.status_code == 201
     body = response.json()

@@ -28,6 +28,7 @@ from backend.app.intelligent_learning import IntelligentLearningEngine
 from backend.app.commercial.models import CommercialConfig
 from backend.app.commercial.payments import RazorpayBoundary
 from backend.app.commercial.service import CommercialService
+from backend.app.providers.password_reset import build_password_reset_delivery
 import backend.app.models  # noqa: F401
 
 
@@ -58,6 +59,7 @@ def create_app(settings=None) -> FastAPI:
     )
     application.state.session_factory = build_session_factory(engine)
     application.state.learning_engine = IntelligentLearningEngine()
+    application.state.password_reset_delivery = build_password_reset_delivery(settings)
     application.state.object_storage = None
     if settings.object_storage_backend == "s3":
         import boto3

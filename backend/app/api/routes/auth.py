@@ -7,6 +7,12 @@ from backend.app.schemas.auth import (
     AccountRead,
     LoginRequest,
     LogoutRequest,
+    PasswordResetConfirm,
+    PasswordResetConfirmResponse,
+    PasswordResetRequest,
+    PasswordResetRequestResponse,
+    PasswordResetTokenRequest,
+    PasswordResetTokenResponse,
     RefreshRequest,
     RegisterRequest,
     RegisterResponse,
@@ -30,6 +36,28 @@ def login(data: LoginRequest, request: Request, session: Session = Depends(get_d
     enforce_rate_limit(request, "login_email", privacy_key(normalize_email(str(data.email))))
     enforce_rate_limit(request, "login_network", privacy_minimised_network_key(request))
     return AuthService(session, request).login(data)
+
+
+@router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
+def request_password_reset(data: PasswordResetRequest, request: Request, session: Session = Depends(get_db)):
+    from backend.app.core.security import normalize_email, privacy_minimised_network_key
+    enforce_rate_limit(request, "password_reset_email", privacy_key(normalize_email(str(data.email))))
+    enforce_rate_limit(request, "password_reset_network", privacy_minimised_network_key(request))
+    return AuthService(session, request).request_password_reset(data)
+
+
+@router.post("/password-reset/validate", response_model=PasswordResetTokenResponse)
+def validate_password_reset_token(
+    data: PasswordResetTokenRequest, request: Request, session: Session = Depends(get_db)
+):
+    enforce_rate_limit(request, "password_reset_attempt", privacy_key(data.token))
+    return AuthService(session, request).validate_password_reset_token(data.token)
+
+
+@router.post("/password-reset/confirm", response_model=PasswordResetConfirmResponse)
+def confirm_password_reset(data: PasswordResetConfirm, request: Request, session: Session = Depends(get_db)):
+    enforce_rate_limit(request, "password_reset_attempt", privacy_key(data.token))
+    return AuthService(session, request).reset_password(data)
 
 
 @router.post("/refresh", response_model=TokenPair)

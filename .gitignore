@@ -19,3 +19,4 @@ venv/
 .vscode/
 .DS_Store
 
+.local-password-reset-outbox.jsonl

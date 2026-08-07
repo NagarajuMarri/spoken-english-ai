@@ -230,6 +230,7 @@ def test_ai_memory_blocks_cross_account_access(client, learner):
         "email": "second-ai@example.com",
         "password": "StrongPassword123!",
         "display_name": "Second Learner",
+        "terms_privacy_accepted": True,
     }).json()
     client.headers["Authorization"] = f"Bearer {second['tokens']['access_token']}"
     response = client.get(f"/api/v1/learners/{learner['id']}/memory")

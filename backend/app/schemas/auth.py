@@ -8,6 +8,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(max_length=256)
     display_name: str = Field(min_length=1, max_length=100)
     invitation_code: str | None = Field(default=None, max_length=100)
+    terms_privacy_accepted: bool = False
 
 
 class LoginRequest(BaseModel):
@@ -21,6 +22,31 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(RefreshRequest):
     pass
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+    new_password: str = Field(max_length=256)
+
+
+class PasswordResetTokenRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=256)
+
+
+class PasswordResetRequestResponse(BaseModel):
+    message: str
+
+
+class PasswordResetConfirmResponse(BaseModel):
+    message: str
+
+
+class PasswordResetTokenResponse(BaseModel):
+    valid: bool
 
 
 class TokenPair(BaseModel):

@@ -10,13 +10,21 @@ from backend.app.core.errors import AppError
 from backend.app.core.security import (
     create_access_token,
     hash_password,
+    hash_password_reset_token,
     hash_refresh_token,
     normalize_email,
     privacy_minimised_network_key,
     utc_now,
     verify_password,
 )
-from backend.app.models import BetaWaitlistEntry, Learner, RefreshToken, SecurityAuditEvent, UserAccount
+from backend.app.models import (
+    BetaWaitlistEntry,
+    Learner,
+    PasswordResetToken,
+    RefreshToken,
+    SecurityAuditEvent,
+    UserAccount,
+)
 from backend.app.models.entities import new_id
 
 
@@ -26,7 +34,7 @@ class AuthService:
         self.request = request
         self.settings = request.app.state.settings
 
-    def _audit(self, event_type, user=None, outcome="SUCCEEDED", reason=None):
+    def _audit_event(self, event_type, user=None, outcome="SUCCEEDED", reason=None):
         event = SecurityAuditEvent(
             event_type=event_type,
             user_id=user.id if user else None,
@@ -39,9 +47,18 @@ class AuthService:
             metadata_json={},
         )
         self.session.add(event)
+
+    def _audit(self, event_type, user=None, outcome="SUCCEEDED", reason=None):
+        self._audit_event(event_type, user, outcome, reason)
         self.session.commit()
 
-    def _pair(self, user: UserAccount, previous: RefreshToken | None = None) -> dict:
+    def _pair(
+        self,
+        user: UserAccount,
+        previous: RefreshToken | None = None,
+        *,
+        commit: bool = True,
+    ) -> dict:
         now = utc_now()
         raw = secrets.token_urlsafe(48)
         token = RefreshToken(
@@ -59,16 +76,24 @@ class AuthService:
         if previous is not None:
             previous.revoked_at = now
             previous.replaced_by_token_id = token.id
-        self.session.commit()
-        return {
-            "access_token": create_access_token(self.settings, user.id, now),
+        pair = {
+            "access_token": create_access_token(self.settings, user.id, now, user.session_epoch),
             "refresh_token": raw,
             "token_type": "bearer",
             "expires_in": self.settings.access_token_lifetime_minutes * 60,
         }
+        if commit:
+            self.session.commit()
+        return pair
 
     def register(self, data):
         email = normalize_email(str(data.email))
+        if not data.terms_privacy_accepted:
+            raise AppError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "legal_consent_required",
+                "You must accept the Terms and Privacy Policy to create an account.",
+            )
         if self.settings.closed_beta_enabled:
             email_allowed = email in self.settings.beta_allowed_emails() or email in self.settings.founders()
             code_allowed = bool(data.invitation_code) and any(
@@ -90,13 +115,18 @@ class AuthService:
             learner = Learner(email=email, display_name=data.display_name.strip(), user_account_id=user.id)
             self.session.add(learner)
             self.session.flush()
+            tokens = self._pair(user, commit=False)
+            self._audit_event("ACCOUNT_REGISTERED", user)
+            payload = self.account_payload(user, learner, tokens)
+            self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
             raise AppError(status.HTTP_409_CONFLICT, "duplicate_email", "An account with this email exists.") from exc
-        tokens = self._pair(user)
-        self._audit("ACCOUNT_REGISTERED", user)
+        except Exception:
+            self.session.rollback()
+            raise
         self.request.app.state.metrics.increment("registrations")
-        return self.account_payload(user, learner, tokens)
+        return payload
 
     def login(self, data):
         email = normalize_email(str(data.email))
@@ -204,6 +234,104 @@ class AuthService:
             token.revoked_at = now
         self.session.commit()
         self._audit("LOGOUT_ALL_COMPLETED", self.session.get(UserAccount, user_id))
+
+    def request_password_reset(self, data):
+        email = normalize_email(str(data.email))
+        neutral = {
+            "message": "If an account matches that email, password reset instructions have been sent."
+        }
+        user = self.session.scalar(
+            select(UserAccount).where(UserAccount.email == email, UserAccount.status == "ACTIVE")
+        )
+        if user is None:
+            self._audit("PASSWORD_RESET_REQUESTED", outcome="SUCCEEDED", reason="neutral_unknown_account")
+            return neutral
+
+        now = utc_now()
+        for previous in self.session.scalars(
+            select(PasswordResetToken).where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+            )
+        ):
+            previous.used_at = now
+        raw = secrets.token_urlsafe(48)
+        reset = PasswordResetToken(
+            user_id=user.id,
+            token_hash=hash_password_reset_token(raw),
+            created_at=now,
+            expires_at=now + timedelta(minutes=self.settings.password_reset_token_lifetime_minutes),
+        )
+        self.session.add(reset)
+        self._audit_event("PASSWORD_RESET_REQUESTED", user)
+        self.session.commit()
+        reset_url = f"{self.settings.public_frontend_url.rstrip('/')}/reset-password?token={raw}"
+        try:
+            self.request.app.state.password_reset_delivery.deliver(user.email, reset_url)
+        except Exception:
+            reset.used_at = utc_now()
+            self._audit_event("PASSWORD_RESET_DELIVERY_FAILED", user, "FAILED", "delivery_unavailable")
+            self.session.commit()
+        return neutral
+
+    def validate_password_reset_token(self, raw: str):
+        self._valid_password_reset_token(raw)
+        return {"valid": True}
+
+    def reset_password(self, data):
+        self._validate_password_policy(data.new_password)
+        reset = self._valid_password_reset_token(data.token, lock=True)
+        now = utc_now()
+        user = self.session.get(UserAccount, reset.user_id)
+        if user is None or user.status != "ACTIVE":
+            raise AppError(status.HTTP_400_BAD_REQUEST, "invalid_reset_token", "This password reset link is invalid.")
+        try:
+            user.password_hash = hash_password(data.new_password)
+            user.session_epoch += 1
+            user.updated_at = now
+            for token in self.session.scalars(
+                select(PasswordResetToken).where(
+                    PasswordResetToken.user_id == user.id,
+                    PasswordResetToken.used_at.is_(None),
+                ).with_for_update()
+            ):
+                token.used_at = now
+            for refresh in self.session.scalars(
+                select(RefreshToken).where(
+                    RefreshToken.user_id == user.id,
+                    RefreshToken.revoked_at.is_(None),
+                ).with_for_update()
+            ):
+                refresh.revoked_at = now
+            self._audit_event("PASSWORD_RESET_COMPLETED", user)
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+        return {"message": "Your password has been updated. Sign in with your new password."}
+
+    def _valid_password_reset_token(self, raw: str, *, lock: bool = False):
+        statement = select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == hash_password_reset_token(raw)
+        )
+        if lock:
+            statement = statement.with_for_update()
+        reset = self.session.scalar(statement)
+        now = utc_now()
+        if reset is None:
+            raise AppError(status.HTTP_400_BAD_REQUEST, "invalid_reset_token", "This password reset link is invalid.")
+        if reset.used_at is not None:
+            raise AppError(status.HTTP_400_BAD_REQUEST, "used_reset_token", "This password reset link has already been used.")
+        expires_at = reset.expires_at.replace(tzinfo=reset.expires_at.tzinfo or now.tzinfo)
+        if expires_at <= now:
+            raise AppError(status.HTTP_400_BAD_REQUEST, "expired_reset_token", "This password reset link has expired.")
+        return reset
+
+    def _validate_password_policy(self, password: str) -> None:
+        if len(password) < self.settings.password_minimum_length:
+            raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "weak_password", "Password does not meet requirements.")
+        if len(password.encode("utf-8")) > self.settings.password_maximum_bytes:
+            raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "password_too_long", "Password does not meet requirements.")
 
     @staticmethod
     def account_payload(user, learner, tokens=None):

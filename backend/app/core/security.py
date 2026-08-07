@@ -36,12 +36,16 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def hash_password_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def privacy_minimised_network_key(request: Request) -> str:
     host = request.client.host if request.client else "unknown"
     return hashlib.sha256(f"network-throttle:{host}".encode()).hexdigest()
 
 
-def create_access_token(settings, user_id: str, now: datetime | None = None) -> str:
+def create_access_token(settings, user_id: str, now: datetime | None = None, session_epoch: int = 0) -> str:
     try:
         keys = settings.signing_keys()
     except (ValueError, TypeError):
@@ -54,6 +58,7 @@ def create_access_token(settings, user_id: str, now: datetime | None = None) -> 
     payload = {
         "sub": user_id,
         "type": "access",
+        "sev": session_epoch,
         "jti": secrets.token_hex(16),
         "iat": issued,
         "exp": issued + timedelta(minutes=settings.access_token_lifetime_minutes),
@@ -162,7 +167,7 @@ def current_principal(
             algorithms=[settings.jwt_algorithm],
             issuer=settings.jwt_issuer,
             audience=settings.jwt_audience,
-            options={"require": ["sub", "exp", "iat", "iss", "aud", "type"]},
+            options={"require": ["sub", "exp", "iat", "iss", "aud", "type", "sev"]},
         )
     except jwt.ExpiredSignatureError as exc:
         _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "access_token_expired")
@@ -177,6 +182,9 @@ def current_principal(
     if user is None or user.status != "ACTIVE":
         _audit_access_block(session, request, "ACCOUNT_STATUS_BLOCKED", "account_unavailable", user)
         raise AppError(status.HTTP_401_UNAUTHORIZED, "account_unavailable", "Account is unavailable.")
+    if claims.get("sev") != user.session_epoch:
+        _audit_access_block(session, request, "ACCESS_TOKEN_REJECTED", "session_revoked", user)
+        raise AppError(status.HTTP_401_UNAUTHORIZED, "session_revoked", "Your session has been revoked.")
     learner = session.scalar(select(Learner).where(Learner.user_account_id == user.id))
     if learner is None:
         raise AppError(status.HTTP_401_UNAUTHORIZED, "account_unavailable", "Account is unavailable.")

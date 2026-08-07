@@ -29,7 +29,7 @@ Placement support, adaptive practice, spaced review, safety evaluation, learner 
 Each milestone requires privacy, accessibility, reliability, learning-quality, and cost review. Multiple Indian languages, social features, live tutors, and institutional dashboards remain later hypotheses.
 ## Milestone 5 — Authentication, Ownership and API Security
 
-Implemented email/password accounts, bcrypt, JWT access tokens, hashed rotating refresh tokens, account status enforcement, login throttling interface, privacy-safe ownership checks, and authentication migrations. Deferred: social login, email delivery, password reset, MFA, distributed abuse controls, and production identity verification.
+Implemented email/password accounts, bcrypt, JWT access tokens, hashed rotating refresh tokens, account status enforcement, login throttling, privacy-safe ownership checks, and secure single-use password recovery with session revocation and an SMTP/development delivery boundary. Deferred: social login, MFA, distributed abuse controls, and production identity verification.
 
 Recommended next: Milestone 6 — production operations and observability, including distributed throttling, audit events, secret rotation, structured security telemetry, and deployment hardening.
 

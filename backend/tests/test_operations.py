@@ -120,12 +120,13 @@ def test_signing_key_rotation_and_unknown_key(client):
     })
     registration = client.post("/api/v1/auth/register", json={
         "email": "keys@example.com", "password": "StrongPassword123!", "display_name": "Keys",
+        "terms_privacy_accepted": True,
     }).json()
     header = jwt.get_unverified_header(registration["tokens"]["access_token"])
     assert header["kid"] == "current"
     now = datetime.now(timezone.utc)
     claims = {
-        "sub": registration["id"], "type": "access", "iat": now,
+        "sub": registration["id"], "type": "access", "sev": 0, "iat": now,
         "exp": now + timedelta(minutes=5), "iss": settings.jwt_issuer, "aud": settings.jwt_audience,
     }
     previous = jwt.encode(
@@ -164,6 +165,7 @@ def test_signing_key_configuration_rejects_duplicates_and_missing_active_key():
 def test_auth_audits_and_admin_boundary(client):
     registered = client.post("/api/v1/auth/register", json={
         "email": "audit@example.com", "password": "StrongPassword123!", "display_name": "Audit",
+        "terms_privacy_accepted": True,
     }).json()
     client.post("/api/v1/auth/login", json={"email": "audit@example.com", "password": "wrong"})
     client.post("/api/v1/auth/login", json={"email": "audit@example.com", "password": "StrongPassword123!"})
@@ -181,7 +183,8 @@ def test_security_audit_events_are_append_only(client):
     client.post("/api/v1/auth/register", json={
         "email": "append-only@example.com",
         "password": "StrongPassword123!",
-        "display_name": "Append Only",
+            "display_name": "Append Only",
+            "terms_privacy_accepted": True,
     })
     with client.app.state.session_factory() as db:
         event = db.scalar(select(SecurityAuditEvent))

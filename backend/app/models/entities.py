@@ -42,6 +42,7 @@ class UserAccount(Base):
     password_hash: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE", index=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    session_epoch: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -65,6 +66,17 @@ class RefreshToken(Base):
     )
     user_agent: Mapped[str | None] = mapped_column(String(200), nullable=True)
     ip_metadata: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SecurityAuditEvent(Base):

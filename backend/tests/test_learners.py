@@ -1,6 +1,6 @@
 def test_learner_creation(client):
     registered = client.post("/api/v1/auth/register", json={
-        "email": "RAVI@EXAMPLE.COM", "password": "StrongPassword123!", "display_name": "Ravi",
+        "email": "RAVI@EXAMPLE.COM", "password": "StrongPassword123!", "display_name": "Ravi", "terms_privacy_accepted": True,
     }).json()
     client.headers["Authorization"] = f"Bearer {registered['tokens']['access_token']}"
     response = client.get(f"/api/v1/learners/{registered['learner_id']}")
@@ -19,6 +19,7 @@ def test_duplicate_email_prevention(client, learner):
         "email": learner["email"].upper(),
         "password": "StrongPassword123!",
         "display_name": "Duplicate",
+        "terms_privacy_accepted": True,
     })
 
     assert response.status_code == 409
@@ -86,18 +87,21 @@ def test_learner_persists_across_clients(tmp_path):
 
     url = f"sqlite:///{(tmp_path / 'persistent.db').as_posix()}"
     first_app = create_app(Settings(
-        database_url=url, jwt_secret="test-signing-secret-at-least-32-bytes-long", _env_file=None
+        database_url=url, jwt_secret="test-signing-secret-at-least-32-bytes-long",
+        closed_beta_enabled=False, _env_file=None,
     ))
     with TestClient(first_app) as first:
         registered = first.post("/api/v1/auth/register", json={
             "email": "persist@example.com", "password": "StrongPassword123!",
-            "display_name": "Persistent",
+                "display_name": "Persistent",
+                "terms_privacy_accepted": True,
         }).json()
         learner_id = registered["learner_id"]
     first_app.state.engine.dispose()
 
     second_app = create_app(Settings(
-        database_url=url, jwt_secret="test-signing-secret-at-least-32-bytes-long", _env_file=None
+        database_url=url, jwt_secret="test-signing-secret-at-least-32-bytes-long",
+        closed_beta_enabled=False, _env_file=None,
     ))
     with TestClient(second_app) as second:
         tokens = second.post("/api/v1/auth/login", json={

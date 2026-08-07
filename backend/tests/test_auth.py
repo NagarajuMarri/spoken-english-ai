@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from sqlalchemy import select
 
-from backend.app.core.security import hash_refresh_token
-from backend.app.models import Learner, RefreshToken, SecurityAuditEvent, UserAccount
+from backend.app.core.errors import AppError
+from backend.app.core.security import hash_refresh_token, verify_password
+from backend.app.models import Learner, PasswordResetToken, RefreshToken, SecurityAuditEvent, UserAccount
 
 
 PASSWORD = "StrongPassword123!"
@@ -12,7 +13,7 @@ PASSWORD = "StrongPassword123!"
 
 def register(client, email="USER@Example.COM", password=PASSWORD, name="User"):
     return client.post("/api/v1/auth/register", json={
-        "email": email, "password": password, "display_name": name,
+        "email": email, "password": password, "display_name": name, "terms_privacy_accepted": True,
     })
 
 
@@ -44,6 +45,46 @@ def test_duplicate_email_and_weak_password(client):
     assert too_long_value not in too_long.text
 
 
+def test_registration_requires_terms_and_privacy_consent(client):
+    response = client.post("/api/v1/auth/register", json={
+        "email": "no-consent@example.com", "password": PASSWORD,
+        "display_name": "No Consent", "terms_privacy_accepted": False,
+    })
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "legal_consent_required"
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(UserAccount).where(UserAccount.email == "no-consent@example.com")) is None
+
+
+def test_failed_token_creation_rolls_back_registration_and_allows_clean_retry(client, monkeypatch):
+    """Regresses: failed registration -> duplicate account -> login failure."""
+    from backend.app.services import auth as auth_service
+
+    real_create_access_token = auth_service.create_access_token
+
+    def fail_token_creation(*_args, **_kwargs):
+        raise AppError(503, "authentication_unavailable", "Authentication signing is not configured.")
+
+    monkeypatch.setattr(auth_service, "create_access_token", fail_token_creation)
+    first = register(client, "atomic-registration@example.com")
+    assert first.status_code == 503
+
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(UserAccount).where(UserAccount.email == "atomic-registration@example.com")) is None
+        assert db.scalar(select(Learner).where(Learner.email == "atomic-registration@example.com")) is None
+        assert db.scalar(select(RefreshToken).join(UserAccount).where(
+            UserAccount.email == "atomic-registration@example.com"
+        )) is None
+
+    monkeypatch.setattr(auth_service, "create_access_token", real_create_access_token)
+    retry = register(client, "atomic-registration@example.com")
+    assert retry.status_code == 201
+    login = client.post("/api/v1/auth/login", json={
+        "email": "atomic-registration@example.com", "password": PASSWORD,
+    })
+    assert login.status_code == 200
+
+
 def test_login_success_invalid_credentials_and_disabled_account(client):
     register(client)
     good = client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": PASSWORD})
@@ -58,6 +99,140 @@ def test_login_success_invalid_credentials_and_disabled_account(client):
     disabled = client.post("/api/v1/auth/login", json={"email": "user@example.com", "password": PASSWORD})
     assert disabled.status_code == 401
     assert disabled.json()["error"]["code"] == "invalid_credentials"
+
+
+def _request_reset(client, email="user@example.com"):
+    response = client.post("/api/v1/auth/password-reset/request", json={"email": email})
+    deliveries = client.app.state.password_reset_delivery.deliveries
+    reset_url = deliveries[-1]["reset_url"] if deliveries else ""
+    token = reset_url.split("token=", 1)[1] if "token=" in reset_url else ""
+    return response, token
+
+
+def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplog):
+    registered = register(client).json()
+    original_refresh = registered["tokens"]["refresh_token"]
+    neutral, raw_token = _request_reset(client)
+    unknown, _ = _request_reset(client, "unknown@example.com")
+    assert neutral.status_code == unknown.status_code == 200
+    assert neutral.json() == unknown.json()
+    assert raw_token and len(raw_token) >= 32
+
+    with client.app.state.session_factory() as db:
+        reset = db.scalar(select(PasswordResetToken))
+        assert reset.token_hash != raw_token
+        assert raw_token not in reset.token_hash
+        account = db.scalar(select(UserAccount).where(UserAccount.email == "user@example.com"))
+        assert verify_password(PASSWORD, account.password_hash)
+
+    assert client.post("/api/v1/auth/password-reset/validate", json={"token": raw_token}).json() == {"valid": True}
+    new_password = "NewStrongPassword456!"
+    changed = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token, "new_password": new_password,
+    })
+    assert changed.status_code == 200
+    assert client.post("/api/v1/auth/login", json={
+        "email": "user@example.com", "password": PASSWORD,
+    }).status_code == 401
+    assert client.post("/api/v1/auth/login", json={
+        "email": "user@example.com", "password": new_password,
+    }).status_code == 200
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": original_refresh}).status_code == 401
+    assert client.get("/api/v1/auth/me", headers={
+        "Authorization": f"Bearer {registered['tokens']['access_token']}"
+    }).status_code == 401
+    reused = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token, "new_password": "AnotherStrongPassword789!",
+    })
+    assert reused.status_code == 400
+    assert reused.json()["error"]["code"] == "used_reset_token"
+    with client.app.state.session_factory() as db:
+        reset = db.scalar(select(PasswordResetToken))
+        assert reset.used_at is not None
+        audit = db.scalar(select(SecurityAuditEvent).where(
+            SecurityAuditEvent.event_type == "PASSWORD_RESET_COMPLETED"
+        ))
+        assert audit is not None
+    assert raw_token not in caplog.text
+    assert PASSWORD not in caplog.text
+    assert new_password not in caplog.text
+
+
+def test_password_reset_rejects_invalid_expired_and_weak_tokens(client):
+    register(client)
+    _, raw_token = _request_reset(client)
+    invalid = client.post("/api/v1/auth/password-reset/validate", json={"token": "x" * 48})
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "invalid_reset_token"
+    weak = client.post("/api/v1/auth/password-reset/confirm", json={
+        "token": raw_token, "new_password": "short",
+    })
+    assert weak.status_code == 422
+    assert weak.json()["error"]["code"] == "weak_password"
+    with client.app.state.session_factory() as db:
+        reset = db.scalar(select(PasswordResetToken))
+        reset.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        db.commit()
+    expired = client.post("/api/v1/auth/password-reset/validate", json={"token": raw_token})
+    assert expired.status_code == 400
+    assert expired.json()["error"]["code"] == "expired_reset_token"
+
+
+def test_password_reset_requests_are_rate_limited_per_email(client):
+    register(client)
+    for _ in range(3):
+        assert client.post("/api/v1/auth/password-reset/request", json={
+            "email": "user@example.com"
+        }).status_code == 200
+    limited = client.post("/api/v1/auth/password-reset/request", json={
+        "email": "user@example.com"
+    })
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "rate_limited"
+
+
+def test_password_reset_delivery_failure_remains_neutral_and_disables_token(client):
+    from backend.app.providers.password_reset import DisabledPasswordResetDelivery
+
+    register(client)
+    client.app.state.password_reset_delivery = DisabledPasswordResetDelivery()
+    known = client.post("/api/v1/auth/password-reset/request", json={"email": "user@example.com"})
+    unknown = client.post("/api/v1/auth/password-reset/request", json={"email": "unknown@example.com"})
+    assert known.status_code == unknown.status_code == 200
+    assert known.json() == unknown.json()
+    with client.app.state.session_factory() as db:
+        reset = db.scalar(select(PasswordResetToken))
+        assert reset.used_at is not None
+        failed = db.scalar(select(SecurityAuditEvent).where(
+            SecurityAuditEvent.event_type == "PASSWORD_RESET_DELIVERY_FAILED"
+        ))
+        assert failed.outcome == "FAILED"
+
+
+def test_password_reset_rolls_back_password_token_and_session_revocation(client, monkeypatch):
+    from backend.app.services import auth as auth_service
+
+    registered = register(client).json()
+    raw_refresh = registered["tokens"]["refresh_token"]
+    _, raw_token = _request_reset(client)
+
+    def fail_hashing(_password):
+        raise RuntimeError("injected hashing failure")
+
+    monkeypatch.setattr(auth_service, "hash_password", fail_hashing)
+    try:
+        client.post("/api/v1/auth/password-reset/confirm", json={
+            "token": raw_token, "new_password": "NewStrongPassword456!",
+        })
+    except RuntimeError:
+        pass
+    with client.app.state.session_factory() as db:
+        reset = db.scalar(select(PasswordResetToken))
+        refresh = db.scalar(select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(raw_refresh)))
+        account = db.scalar(select(UserAccount).where(UserAccount.email == "user@example.com"))
+        assert reset.used_at is None
+        assert refresh.revoked_at is None
+        assert verify_password(PASSWORD, account.password_hash)
 
 
 def test_me_and_anonymous_rejection(client):
@@ -75,7 +250,7 @@ def test_access_token_wrong_issuer_audience_and_expired(client):
     body = register(client).json()
     settings = client.app.state.settings
     now = datetime.now(timezone.utc)
-    base = {"sub": body["id"], "type": "access", "iat": now, "exp": now + timedelta(minutes=5)}
+    base = {"sub": body["id"], "type": "access", "sev": 0, "iat": now, "exp": now + timedelta(minutes=5)}
     cases = [
         {**base, "iss": "wrong", "aud": settings.jwt_audience},
         {**base, "iss": settings.jwt_issuer, "aud": "wrong"},

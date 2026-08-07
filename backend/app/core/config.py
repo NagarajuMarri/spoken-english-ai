@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     refresh_token_lifetime_days: int = 30
     password_minimum_length: int = 12
     password_maximum_bytes: int = 72
+    password_reset_token_lifetime_minutes: int = 30
+    password_reset_delivery_provider: str = "development_file"
+    password_reset_development_outbox_path: str = ".local-password-reset-outbox.jsonl"
+    password_reset_email_from: str = "no-reply@example.com"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
     login_attempt_limit: int = 5
     build_identifier: str = "development"
     expose_development_metrics: bool = False
@@ -138,6 +146,8 @@ class Settings(BaseSettings):
             missing.append("object_storage_bucket")
         if self.object_storage_backend == "local":
             missing.append("object_storage_backend")
+        if self.password_reset_delivery_provider != "smtp" or not self.smtp_host:
+            missing.append("password_reset_delivery_provider")
         if missing:
             raise ValueError("Unsafe production configuration; missing: " + ", ".join(missing))
         if self.debug or self.auto_create_tables:
@@ -178,6 +188,11 @@ class Settings(BaseSettings):
         return keys
 
     def providers_ready(self) -> bool:
+        reset_delivery_ready = (
+            (self.password_reset_delivery_provider == "smtp" and bool(self.smtp_host))
+            or (self.environment != "production" and self.password_reset_delivery_provider == "development_file")
+            or (self.environment == "test" and self.password_reset_delivery_provider == "memory")
+        )
         return (
             self.llm_provider in {"disabled", "fake", "rule_based", "openai"}
             and self.speech_to_text_provider in {"disabled", "fake", "openai"}
@@ -187,6 +202,7 @@ class Settings(BaseSettings):
                 self.speech_to_text_provider,
                 self.text_to_speech_provider,
             } or bool(self.openai_api_key))
+            and reset_delivery_ready
         )
 
     model_config = SettingsConfigDict(
