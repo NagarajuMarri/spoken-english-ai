@@ -10,6 +10,7 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
  const[id,setId]=useState("");
  const[input,setInput]=useState("");
  const[lastTranscript,setLastTranscript]=useState("");
+ const[turnError,setTurnError]=useState("");
  const[messages,setMessages]=useState<string[]>([`Namaste! I’m ${tutor.display_name}. Tell me about your day.`]);
  const[feedback,setFeedback]=useState({grammar:"Your correction will appear here.",words:[] as string[],telugu:""});
  const[machine,dispatch]=useReducer(avatarReducer,{state:"IDLE"});
@@ -22,6 +23,7 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
  const submit=useCallback(async(text:string)=>{
   const learnerText=text.trim();
   if(!learnerText||!id)return;
+  setTurnError("");
   setMessages(items=>[...items,`You: ${learnerText}`]);
   setInput("");
   dispatch("PROCESSING");
@@ -32,7 +34,10 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
    setMessages(items=>[...items,`${tutor.display_name}: ${result.tutor_message} ${result.next_question}`]);
    setFeedback({grammar:result.correction_explanation||"That sentence works well.",words:result.vocabulary_suggestions,telugu:result.telugu_explanation||"Telugu explanation will appear when the conversation provider supplies it."});
    timers.current.push(window.setTimeout(()=>dispatch("IDLE"),reduced?0:900));
-  }catch{dispatch("ERROR")}
+  }catch(error){
+   dispatch("ERROR");
+   setTurnError(error instanceof Error?error.message:"The tutor is temporarily unavailable. Please try again.");
+  }
  },[id,reduced,telugu,tutor.display_name]);
 
  const handleCapture=useCallback(async(capture:CapturedAudio)=>{
@@ -44,4 +49,4 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
  },[id,submit]);
  const mic=useMicrophone(consent,handleCapture);
 
- return <div className="conversation-layout"><section className="studio"><Avatar tutor={tutor} state={machine.state} reducedMotion={reduced}/><div className="transcript" aria-live="polite">{messages.map((m,i)=><p key={i}>{m}</p>)}</div><label htmlFor="message">Your message</label><div className="composer"><input id="message" value={input} onChange={e=>setInput(e.target.value)}/><button onClick={()=>void submit(input)}>Send</button></div><fieldset><legend>Voice controls</legend><label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to voice processing for this turn</label><p aria-live="polite">Microphone: {mic.state}{mic.state==="recording"?` · ${Math.ceil(mic.elapsed/1000)} seconds`:""}</p><p>Browser permission: {mic.permission}</p><button disabled={!consent||!id||mic.state==="recording"||mic.state==="processing"} onClick={()=>void mic.start()}>{mic.state==="denied"?"Retry microphone":"Start microphone"}</button><button disabled={mic.state!=="recording"} onClick={mic.stop}>Stop and transcribe</button><button disabled={mic.state!=="recording"} onClick={mic.cancel}>Cancel</button>{lastTranscript&&<p aria-live="polite" aria-label="Recognized speech"><strong>We heard:</strong> {lastTranscript}</p>}{mic.errorMessage&&<p role="alert">{mic.errorMessage} {mic.state==="denied"&&"Enable microphone access in Chrome site settings, then retry."}</p>}</fieldset></section><aside className="coach" aria-live="polite"><h2>Live coaching</h2><h3>Grammar correction</h3><p>{feedback.grammar}</p><h3>Vocabulary</h3><div className="chips">{feedback.words.length?feedback.words.map(w=><span key={w}>{w}</span>):<span>No suggestions yet.</span>}</div>{telugu&&<><h3>Telugu explanation</h3><p>{feedback.telugu}</p></>}</aside></div>}
+ return <div className="conversation-layout"><section className="studio"><Avatar tutor={tutor} state={machine.state} reducedMotion={reduced}/><div className="transcript" aria-live="polite">{messages.map((m,i)=><p key={i}>{m}</p>)}</div><label htmlFor="message">Your message</label><div className="composer"><input id="message" value={input} onChange={e=>setInput(e.target.value)}/><button onClick={()=>void submit(input)}>Send</button></div>{turnError&&<p role="alert">{turnError}</p>}<fieldset><legend>Voice controls</legend><label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to voice processing for this turn</label><p aria-live="polite">Microphone: {mic.state}{mic.state==="recording"?` · ${Math.ceil(mic.elapsed/1000)} seconds`:""}</p><p>Browser permission: {mic.permission}</p><button disabled={!consent||!id||mic.state==="recording"||mic.state==="processing"} onClick={()=>void mic.start()}>{mic.state==="denied"?"Retry microphone":"Start microphone"}</button><button disabled={mic.state!=="recording"} onClick={mic.stop}>Stop and transcribe</button><button disabled={mic.state!=="recording"} onClick={mic.cancel}>Cancel</button>{lastTranscript&&<p aria-live="polite" aria-label="Recognized speech"><strong>We heard:</strong> {lastTranscript}</p>}{mic.errorMessage&&<p role="alert">{mic.errorMessage} {mic.state==="denied"&&"Enable microphone access in Chrome site settings, then retry."}</p>}</fieldset></section><aside className="coach" aria-live="polite"><h2>Live coaching</h2><h3>Grammar correction</h3><p>{feedback.grammar}</p><h3>Vocabulary</h3><div className="chips">{feedback.words.length?feedback.words.map(w=><span key={w}>{w}</span>):<span>No suggestions yet.</span>}</div>{telugu&&<><h3>Telugu explanation</h3><p>{feedback.telugu}</p></>}</aside></div>}

@@ -153,5 +153,10 @@ def test_production_requires_openai_stt_policy():
     )
     with pytest.raises(ValueError, match="speech_to_text_provider"):
         Settings(**base, speech_to_text_provider="disabled")
-    configured = Settings(**base, speech_to_text_provider="openai", openai_api_key="test-key")
+    configured = Settings(
+        **base,
+        llm_provider="openai",
+        speech_to_text_provider="openai",
+        openai_api_key="test-key",
+    )
     assert configured.speech_to_text_provider == "openai"

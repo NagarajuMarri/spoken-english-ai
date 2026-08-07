@@ -7,7 +7,7 @@ def safe_prompt_context(request) -> dict:
         "tutor_id": request.tutor_id,
         "tutor_prompt_profile": request.tutor_prompt_profile,
         "tutor_vocabulary_profile": request.tutor_vocabulary_profile,
-        "history": request.conversation_history[-10:],
+        "history": [turn.model_dump() for turn in request.conversation_history[-3:]],
         "message": request.current_learner_message,
         "strengths": request.known_strengths,
         "weaknesses": request.known_weaknesses,

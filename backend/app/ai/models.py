@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class UsageInfo(BaseModel):
     input_units: int = Field(default=0, ge=0)
+    cached_input_units: int = Field(default=0, ge=0)
     output_units: int = Field(default=0, ge=0)
     provider_requests: int = Field(default=1, ge=0)
 
@@ -12,6 +13,11 @@ class LearningSignals(BaseModel):
     vocabulary: list[str] = Field(default_factory=list, max_length=8)
     confidence: int = Field(default=50, ge=0, le=100)
     fluency: int = Field(default=50, ge=0, le=100)
+
+
+class ConversationHistoryTurn(BaseModel):
+    learner_message: str = Field(min_length=1, max_length=2000)
+    tutor_message: str = Field(min_length=1, max_length=2000)
 
 
 class AIConversationRequest(BaseModel):
@@ -25,7 +31,7 @@ class AIConversationRequest(BaseModel):
     tutor_vocabulary_profile: str = Field(default="practical-indian-english-v1", max_length=100)
     scenario: str = Field(min_length=1, max_length=80)
     topic: str = Field(min_length=1, max_length=120)
-    conversation_history: list[str] = Field(default_factory=list, max_length=20)
+    conversation_history: list[ConversationHistoryTurn] = Field(default_factory=list, max_length=3)
     current_learner_message: str = Field(min_length=1, max_length=2000)
     daily_goal: str | None = Field(default=None, max_length=200)
     known_strengths: list[str] = Field(default_factory=list, max_length=10)

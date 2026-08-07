@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     object_storage_retention_hours: int = 24
     openai_api_key: str = ""
     openai_llm_model: str = "gpt-5-mini"
+    openai_llm_timeout_seconds: int = 20
+    openai_llm_max_retries: int = 0
+    openai_llm_input_usd_per_million: float = 0.25
+    openai_llm_cached_input_usd_per_million: float = 0.025
+    openai_llm_output_usd_per_million: float = 2.0
     openai_stt_model: str = "gpt-4o-mini-transcribe"
     openai_tts_model: str = "gpt-4o-mini-tts"
     tracing_enabled: bool = False
@@ -132,7 +137,9 @@ class Settings(BaseSettings):
             missing.append("cors_origins")
         if not self.trusted_hosts or "*" in self.trusted_hosts:
             missing.append("trusted_hosts")
-        if self.llm_provider == "openai" and not self.openai_api_key:
+        if self.llm_provider != "openai":
+            missing.append("llm_provider")
+        elif not self.openai_api_key:
             missing.append("openai_api_key")
         if self.speech_to_text_provider != "openai":
             missing.append("speech_to_text_provider")
@@ -153,7 +160,7 @@ class Settings(BaseSettings):
         if self.password_reset_delivery_provider != "smtp" or not self.smtp_host:
             missing.append("password_reset_delivery_provider")
         if missing:
-            raise ValueError("Unsafe production configuration; missing: " + ", ".join(missing))
+            raise ValueError("Unsafe production configuration; missing: " + ", ".join(dict.fromkeys(missing)))
         if self.debug or self.auto_create_tables:
             raise ValueError("Production requires debug=false and auto_create_tables=false")
         return self

@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
-from backend.app.ai.exceptions import ProviderTimeout, ProviderUnavailable
-from backend.app.ai.models import AIConversationRequest
+from backend.app.ai.exceptions import ProviderOutputInvalid, ProviderTimeout, ProviderUnavailable
+from backend.app.ai.models import AIConversationRequest, ConversationHistoryTurn
 from backend.app.ai.service import AIConversationService, AdaptivePolicy
 from backend.app.conversation_memory.models import MemorySignalInput
 from backend.app.conversation_memory.service import ConversationMemoryService
@@ -17,8 +17,8 @@ from backend.app.core.operations import enforce_rate_limit
 from backend.app.core.security import Principal, current_principal, ensure_owner
 from backend.app.db.session import get_db
 from backend.app.domain.scenarios import SCENARIOS_BY_ID
-from backend.app.models import Conversation, VoiceProcessingAttempt
-from backend.app.intelligent_learning.models import CostEvent, LearnerSummary, PromptContext
+from backend.app.models import AICostMetricEvent, Conversation, VoiceProcessingAttempt
+from backend.app.intelligent_learning.models import CostEvent
 from backend.app.providers.pronunciation.deterministic import DeterministicPronunciationProvider
 from backend.app.providers.stt.contracts import SpeechToTextRequest
 from backend.app.providers.stt.deterministic import DeterministicSpeechToTextProvider
@@ -73,71 +73,98 @@ def ai_turn(
     usage = UsageService(session)
     usage.enforce(principal.learner.id, principal.user.id)
     tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
-    learning_engine = request.app.state.learning_engine
-    category = learning_engine.classifier.classify(data.message)
-    route_decision = learning_engine.router.route(category)
-    if not route_decision.requires_llm:
-        engine_result = learning_engine.handle(
-            message=data.message,
-            context=PromptContext(
-                tutor_persona=tutor.prompt_profile,
-                learner_summary=LearnerSummary(current_lesson=conversation.scenario_id),
-                current_lesson=conversation.scenario_id,
-                current_objective=SCENARIOS_BY_ID[conversation.scenario_id].name,
-                recent_conversation=tuple(item.learner_text for item in conversation.messages[-6:]),
-            ),
-            learner_id=principal.learner.id,
-            lesson_id=conversation.scenario_id,
-            conversation_id=conversation.id,
+    provider = request.app.state.llm_provider
+    if provider is None:
+        raise AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "llm_unavailable",
+            "The tutor is temporarily unavailable. Please try again shortly.",
         )
-        ConversationRepository(session).add_message(conversation.id, data.message, engine_result.response, None)
-        request.app.state.metrics.increment("ai_requests_avoided")
-        return {
-            "tutor_message": engine_result.response,
-            "corrected_sentence": None,
-            "correction_explanation": None,
-            "vocabulary_suggestions": [],
-            "next_question": "What would you like to practise next?",
-            "encouragement": "Keep going!",
-            "adaptive_policy": AdaptivePolicy.decide(
-                level=principal.learner.proficiency_level,
-                correctness=0.7,
-                repeated_mistakes=0,
-                confidence=60,
-            ).__dict__,
-        }
     started_at = perf_counter()
-    response = AIConversationService(DeterministicAIProvider()).generate(AIConversationRequest(
-        learner_id=principal.learner.id,
-        conversation_id=conversation.id,
-        learner_level=principal.learner.proficiency_level,
-        preferred_language=(
-            principal.learner.native_language
-            if principal.learner.telugu_explanations_enabled
-            else "English"
-        ),
-        tutor_id=tutor.tutor_id,
-        tutor_prompt_profile=tutor.prompt_profile,
-        tutor_vocabulary_profile=tutor.vocabulary_profile,
-        scenario=conversation.scenario_id,
-        topic=SCENARIOS_BY_ID[conversation.scenario_id].name,
-        conversation_history=[
-            item.learner_text for item in conversation.messages[-10:]
-        ],
-        current_learner_message=data.message,
-        correlation_id=request.state.correlation_id,
-    ))
+    try:
+        response = AIConversationService(provider).generate(AIConversationRequest(
+            learner_id=principal.learner.id,
+            conversation_id=conversation.id,
+            learner_level=principal.learner.proficiency_level,
+            preferred_language=(
+                principal.learner.native_language
+                if principal.learner.telugu_explanations_enabled
+                else "English"
+            ),
+            tutor_id=tutor.tutor_id,
+            tutor_prompt_profile=tutor.prompt_profile,
+            tutor_vocabulary_profile=tutor.vocabulary_profile,
+            scenario=conversation.scenario_id,
+            topic=SCENARIOS_BY_ID[conversation.scenario_id].name,
+            conversation_history=[
+                ConversationHistoryTurn(
+                    learner_message=item.learner_text,
+                    tutor_message=item.tutor_response,
+                )
+                for item in conversation.messages[-3:]
+            ],
+            current_learner_message=data.message,
+            correlation_id=request.state.correlation_id,
+        ))
+    except ProviderTimeout as exc:
+        usage.record(
+            learner_id=principal.learner.id,
+            user_id=principal.user.id,
+            provider_kind="llm",
+            failed=True,
+        )
+        request.app.state.metrics.increment("ai_provider_timeouts")
+        raise AppError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "llm_timeout",
+            "The tutor took too long to respond. Please try again.",
+        ) from exc
+    except (ProviderUnavailable, ProviderOutputInvalid) as exc:
+        usage.record(
+            learner_id=principal.learner.id,
+            user_id=principal.user.id,
+            provider_kind="llm",
+            failed=True,
+        )
+        request.app.state.metrics.increment("ai_provider_failures")
+        raise AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "llm_unavailable",
+            "The tutor is temporarily unavailable. Please try again shortly.",
+        ) from exc
     latency_ms = (perf_counter() - started_at) * 1000
-    learning_engine.metrics.record(CostEvent(
+    cached_input = min(response.usage.cached_input_units, response.usage.input_units)
+    uncached_input = response.usage.input_units - cached_input
+    estimated_cost_usd = (
+        uncached_input * request.app.state.settings.openai_llm_input_usd_per_million
+        + cached_input * request.app.state.settings.openai_llm_cached_input_usd_per_million
+        + response.usage.output_units * request.app.state.settings.openai_llm_output_usd_per_million
+    ) / 1_000_000
+    request.app.state.learning_engine.metrics.record(CostEvent(
         learner_id=principal.learner.id,
         lesson_id=conversation.scenario_id,
         conversation_id=conversation.id,
         prompt_tokens=int(response.usage.input_units),
         completion_tokens=int(response.usage.output_units),
-        estimated_cost_usd=(response.usage.input_units * 0.00000015 + response.usage.output_units * 0.0000006),
+        estimated_cost_usd=estimated_cost_usd,
         response_latency_ms=latency_ms,
         cache_hit=False,
         model_used=response.provider_metadata_reference,
+        cached_tokens=cached_input,
+        cost_classification="ESTIMATE_FROM_PROVIDER_REPORTED_USAGE",
+    ))
+    session.add(AICostMetricEvent(
+        learner_id=principal.learner.id,
+        lesson_id=conversation.scenario_id,
+        conversation_id=conversation.id,
+        prompt_tokens=int(response.usage.input_units),
+        completion_tokens=int(response.usage.output_units),
+        cached_tokens=cached_input,
+        estimated_cost_usd=estimated_cost_usd,
+        response_latency_ms=latency_ms,
+        cache_hit=False,
+        model_used=response.provider_metadata_reference,
+        cost_classification="ESTIMATE_FROM_PROVIDER_REPORTED_USAGE",
     ))
     ConversationRepository(session).add_message(
         conversation.id, data.message, response.tutor_message, response.correction_explanation
