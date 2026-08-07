@@ -17,7 +17,7 @@ async function raw<T>(path:string,init:RequestInit={},retry=true):Promise<T>{
   return (response.status===204?undefined:await response.json()) as T;
 }
 export const api={
-  register:(body:{email:string;password:string;display_name:string;invitation_code?:string})=>raw<Account&{tokens:TokenPair}>("/api/v1/auth/register",{method:"POST",body:JSON.stringify(body)}),
+  register:(body:{email:string;password:string;display_name:string;invitation_code?:string;terms_privacy_accepted:boolean})=>raw<Account&{tokens:TokenPair}>("/api/v1/auth/register",{method:"POST",body:JSON.stringify(body)}),
   login:(email:string,password:string)=>raw<TokenPair>("/api/v1/auth/login",{method:"POST",body:JSON.stringify({email,password})}),
   me:()=>raw<Account>("/api/v1/auth/me"),
   logout:(refresh_token:string)=>raw<void>("/api/v1/auth/logout",{method:"POST",body:JSON.stringify({refresh_token})}),

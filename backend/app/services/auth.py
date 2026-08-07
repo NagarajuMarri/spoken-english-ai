@@ -69,6 +69,12 @@ class AuthService:
 
     def register(self, data):
         email = normalize_email(str(data.email))
+        if not data.terms_privacy_accepted:
+            raise AppError(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "legal_consent_required",
+                "You must accept the Terms and Privacy Policy to create an account.",
+            )
         if self.settings.closed_beta_enabled:
             email_allowed = email in self.settings.beta_allowed_emails() or email in self.settings.founders()
             code_allowed = bool(data.invitation_code) and any(

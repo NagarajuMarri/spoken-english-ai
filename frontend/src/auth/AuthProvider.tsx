@@ -3,7 +3,7 @@ import { api, configureSession } from "../api/client";
 import type { Account, TokenPair } from "../models";
 import { sessionStore } from "./session-store";
 
-interface AuthValue { status:"restoring"|"authenticated"|"anonymous"; account:Account|null; login:(email:string,password:string)=>Promise<void>; register:(name:string,email:string,password:string,invitationCode?:string)=>Promise<void>; logout:()=>Promise<void>; logoutAll:()=>Promise<void> }
+interface AuthValue { status:"restoring"|"authenticated"|"anonymous"; account:Account|null; login:(email:string,password:string)=>Promise<void>; register:(name:string,email:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean)=>Promise<void>; logout:()=>Promise<void>; logoutAll:()=>Promise<void> }
 const Context=createContext<AuthValue|null>(null);
 export function AuthProvider({children}:{children:ReactNode}) {
   const [tokens,setTokens]=useState<TokenPair|null>(()=>sessionStore.read()); const [account,setAccount]=useState<Account|null>(null); const [status,setStatus]=useState<AuthValue["status"]>(tokens?"restoring":"anonymous");
@@ -11,7 +11,7 @@ export function AuthProvider({children}:{children:ReactNode}) {
   useEffect(()=>configureSession({get:()=>sessionStore.read(),update:save,clear}),[save,clear]);
   useEffect(()=>{if(!tokens){setStatus("anonymous");return}let active=true;api.me().then(value=>{if(active){setAccount(value);setStatus("authenticated")}}).catch(()=>{if(active)clear()});return()=>{active=false}},[tokens,clear]);
   async function login(email:string,password:string){const pair=await api.login(email,password);save(pair);setAccount(await api.me());setStatus("authenticated")}
-  async function register(name:string,email:string,password:string,invitationCode?:string){const result=await api.register({display_name:name,email,password,invitation_code:invitationCode||undefined});save(result.tokens);setAccount(result);setStatus("authenticated")}
+  async function register(name:string,email:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean){const result=await api.register({display_name:name,email,password,invitation_code:invitationCode||undefined,terms_privacy_accepted:termsPrivacyAccepted});save(result.tokens);setAccount(result);setStatus("authenticated")}
   async function logout(){const current=sessionStore.read();try{if(current)await api.logout(current.refresh_token)}finally{clear()}}
   async function logoutAll(){try{await api.logoutAll()}finally{clear()}}
   return <Context.Provider value={{status,account,login,register,logout,logoutAll}}>{children}</Context.Provider>

@@ -12,7 +12,7 @@ PASSWORD = "StrongPassword123!"
 
 def register(client, email="USER@Example.COM", password=PASSWORD, name="User"):
     return client.post("/api/v1/auth/register", json={
-        "email": email, "password": password, "display_name": name,
+        "email": email, "password": password, "display_name": name, "terms_privacy_accepted": True,
     })
 
 
@@ -42,6 +42,17 @@ def test_duplicate_email_and_weak_password(client):
     assert too_long.status_code == 422
     assert too_long.json()["error"]["code"] == "password_too_long"
     assert too_long_value not in too_long.text
+
+
+def test_registration_requires_terms_and_privacy_consent(client):
+    response = client.post("/api/v1/auth/register", json={
+        "email": "no-consent@example.com", "password": PASSWORD,
+        "display_name": "No Consent", "terms_privacy_accepted": False,
+    })
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "legal_consent_required"
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(UserAccount).where(UserAccount.email == "no-consent@example.com")) is None
 
 
 def test_login_success_invalid_credentials_and_disabled_account(client):

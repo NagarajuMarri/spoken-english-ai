@@ -28,6 +28,7 @@ def learner(client):
         "email": "learner@example.com",
         "password": "StrongPassword123!",
         "display_name": "Anusha",
+        "terms_privacy_accepted": True,
     })
     assert response.status_code == 201
     body = response.json()

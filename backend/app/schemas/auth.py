@@ -8,6 +8,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(max_length=256)
     display_name: str = Field(min_length=1, max_length=100)
     invitation_code: str | None = Field(default=None, max_length=100)
+    terms_privacy_accepted: bool = False
 
 
 class LoginRequest(BaseModel):
