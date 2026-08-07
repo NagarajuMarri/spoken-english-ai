@@ -162,7 +162,12 @@ async def request_context_middleware(request: Request, call_next):
         request_size = int(content_length) if content_length else 0
     except ValueError:
         request_size = settings.request_size_limit_bytes + 1
-    if request_size > settings.request_size_limit_bytes:
+    size_limit = (
+        settings.upload_size_limit_bytes
+        if request.url.path.endswith("/transcriptions")
+        else settings.request_size_limit_bytes
+    )
+    if request_size > size_limit:
         return JSONResponse(
             status_code=413,
             content={"error": {"code": "request_too_large", "message": "Request exceeds the configured limit."}},
@@ -193,7 +198,7 @@ async def request_context_middleware(request: Request, call_next):
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "no-referrer",
-        "Permissions-Policy": "camera=(), geolocation=()",
+        "Permissions-Policy": "microphone=(self), camera=(), geolocation=()",
         "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
         "Cache-Control": "no-store" if request.url.path.startswith("/api") else response.headers.get("Cache-Control", "no-cache"),
     })

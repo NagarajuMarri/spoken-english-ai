@@ -29,6 +29,7 @@ from backend.app.commercial.models import CommercialConfig
 from backend.app.commercial.payments import RazorpayBoundary
 from backend.app.commercial.service import CommercialService
 from backend.app.providers.password_reset import build_password_reset_delivery
+from backend.app.providers.stt import build_speech_to_text_provider
 import backend.app.models  # noqa: F401
 
 
@@ -60,6 +61,7 @@ def create_app(settings=None) -> FastAPI:
     application.state.session_factory = build_session_factory(engine)
     application.state.learning_engine = IntelligentLearningEngine()
     application.state.password_reset_delivery = build_password_reset_delivery(settings)
+    application.state.speech_to_text_provider = build_speech_to_text_provider(settings)
     application.state.object_storage = None
     if settings.object_storage_backend == "s3":
         import boto3
@@ -106,7 +108,10 @@ def create_app(settings=None) -> FastAPI:
         allow_origins=[item.strip() for item in settings.cors_origins.split(",") if item.strip()],
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Correlation-ID", "X-CSRF-Token"],
+        allow_headers=[
+            "Authorization", "Content-Type", "X-Correlation-ID", "X-CSRF-Token",
+            "X-Audio-Duration-Ms", "X-Voice-Processing-Consent",
+        ],
     )
     if settings.force_https:
         application.add_middleware(HTTPSRedirectMiddleware)

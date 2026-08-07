@@ -3,7 +3,7 @@ from backend.app.providers.stt.contracts import SpeechToTextResult
 
 class DeterministicSpeechToTextProvider:
     name = "deterministic-stt"
-    allowed_types = {"audio/wav", "audio/mpeg", "audio/webm"}
+    allowed_types = {"audio/wav", "audio/mpeg", "audio/webm", "audio/ogg", "audio/mp4"}
 
     def __init__(self, transcript="I enjoy practising English every day."):
         self.transcript = transcript

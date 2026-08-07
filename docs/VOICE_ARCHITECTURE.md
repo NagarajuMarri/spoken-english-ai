@@ -2,7 +2,7 @@
 
 ## Provider-neutral flow
 
-Client audio is recorded in bounded chunks or streamed through a future transport. An audio-ingress service validates format and duration, stores only when policy permits, and calls a speech-to-text interface. The normalized transcript enters the same conversation use case as typed text. Tutor text is optionally sent through a text-to-speech interface, and the client receives text plus an audio reference or stream.
+Client audio is recorded with `getUserMedia` and `MediaRecorder` in bounded chunks. Stopping produces one non-empty Blob that is uploaded as the raw request body to the authenticated conversation transcription endpoint. Audio ingress validates ownership, media type, duration and size, calls the configured speech-to-text interface, and does not retain the raw request body. The normalized transcript is displayed to the learner and enters the same conversation use case as typed text.
 
 Interfaces should expose provider-independent requests, results, confidence, language hints, timing, and error categories. Adapters translate these to vendors. LLM, speech-to-text, and text-to-speech providers are all `disabled` in Milestone 1.
 
@@ -18,7 +18,11 @@ Interfaces should expose provider-independent requests, results, confidence, lan
 
 Require explicit microphone permission and clear recording state. Default to deleting raw audio after transcription unless a learner explicitly opts into retention for review. Enforce duration and size limits, redact sensitive logs, and make provider region/retention terms a launch criterion.
 
-Milestone 3 formalizes `SpeechToTextProvider.transcribe()` and `TextToSpeechProvider.synthesize()`. The fake implementations are local test doubles only. No audio is uploaded, retained, or used for pronunciation scoring.
+The production configuration fails closed unless speech-to-text is `openai` with an injected API key. The fake implementation is a local/test double only and is never acceptance evidence for transcription quality. No audio is stored in relational tables or application logs.
+
+## Browser behavior
+
+Current Chrome on Windows supports microphone capture on `http://localhost` and `http://127.0.0.1` because browsers treat loopback origins as secure contexts. Non-loopback environments require HTTPS. The UI exposes permission, recording, processing, denied, empty-capture, cancelled, oversized and provider-error states; text entry remains available in every failure state.
 
 ## Consent-aware simulated workflow
 

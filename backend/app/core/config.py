@@ -134,6 +134,10 @@ class Settings(BaseSettings):
             missing.append("trusted_hosts")
         if self.llm_provider == "openai" and not self.openai_api_key:
             missing.append("openai_api_key")
+        if self.speech_to_text_provider != "openai":
+            missing.append("speech_to_text_provider")
+        elif not self.openai_api_key:
+            missing.append("openai_api_key")
         if self.razorpay_enabled and not self.razorpay_webhook_secret:
             missing.append("razorpay_webhook_secret")
         if self.razorpay_enabled and self.razorpay_mode != "test":

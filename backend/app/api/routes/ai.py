@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, Header, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
+from backend.app.ai.exceptions import ProviderTimeout, ProviderUnavailable
 from backend.app.ai.models import AIConversationRequest
 from backend.app.ai.service import AIConversationService, AdaptivePolicy
 from backend.app.conversation_memory.models import MemorySignalInput
@@ -18,6 +20,7 @@ from backend.app.domain.scenarios import SCENARIOS_BY_ID
 from backend.app.models import Conversation, VoiceProcessingAttempt
 from backend.app.intelligent_learning.models import CostEvent, LearnerSummary, PromptContext
 from backend.app.providers.pronunciation.deterministic import DeterministicPronunciationProvider
+from backend.app.providers.stt.contracts import SpeechToTextRequest
 from backend.app.providers.stt.deterministic import DeterministicSpeechToTextProvider
 from backend.app.providers.tts.deterministic import DeterministicTextToSpeechProvider
 from backend.app.repositories.conversations import ConversationRepository
@@ -45,6 +48,13 @@ class AITurnRead(BaseModel):
 
 class VoiceProcessRequest(BaseModel):
     generate_audio: bool = True
+
+
+class VoiceTranscriptionRead(BaseModel):
+    transcript: str
+    detected_language: str
+    duration_ms: int
+    size_bytes: int
 
 
 @router.post("/conversations/{conversation_id}/ai-turns", response_model=AITurnRead)
@@ -154,6 +164,109 @@ def ai_turn(
         "next_question": response.conversation_question,
         "encouragement": response.encouragement,
         "adaptive_policy": policy.__dict__,
+    }
+
+
+@router.post("/conversations/{conversation_id}/transcriptions", response_model=VoiceTranscriptionRead)
+async def transcribe_voice_input(
+    conversation_id: str,
+    request: Request,
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_db),
+):
+    """Transcribe one bounded browser capture without retaining raw audio."""
+    enforce_rate_limit(request, "voice_turn", principal.user.id)
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None:
+        raise AppError(status.HTTP_404_NOT_FOUND, "conversation_not_found", "Conversation not found.")
+    ensure_owner(conversation.learner_id, principal)
+    if request.headers.get("x-voice-processing-consent", "").lower() != "accepted":
+        raise AppError(
+            status.HTTP_403_FORBIDDEN,
+            "voice_consent_required",
+            "Voice-processing consent is required.",
+        )
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    allowed_types = {"audio/webm", "audio/ogg", "audio/mp4", "audio/wav", "audio/mpeg"}
+    if content_type not in allowed_types:
+        raise AppError(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "unsupported_audio_type", "Unsupported audio format.")
+    try:
+        duration_ms = int(request.headers.get("x-audio-duration-ms", "0"))
+    except ValueError as exc:
+        raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_audio_duration", "Invalid audio duration.") from exc
+    if not 100 <= duration_ms <= 60_000:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_audio_duration",
+            "Audio duration must be between 0.1 and 60 seconds.",
+        )
+
+    audio = await request.body()
+    if not audio:
+        raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "empty_audio", "No audio was captured.")
+    if len(audio) > request.app.state.settings.upload_size_limit_bytes:
+        raise AppError(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "audio_too_large", "Audio capture is too large.")
+    provider = request.app.state.speech_to_text_provider
+    if provider is None:
+        raise AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "speech_to_text_unavailable",
+            "Speech recognition is unavailable.",
+        )
+
+    extension = {
+        "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a",
+        "audio/wav": "wav", "audio/mpeg": "mp3",
+    }[content_type]
+    stt_request = SpeechToTextRequest(
+        audio_asset_reference=f"ephemeral/{request.state.request_id}.{extension}",
+        audio_bytes=audio,
+        filename=f"speech.{extension}",
+        content_type=content_type,
+        learner_id=principal.learner.id,
+        voice_session_id=conversation.id,
+        voice_turn_id=request.state.request_id,
+        correlation_id=request.state.correlation_id,
+        maximum_duration_seconds=60,
+        duration_seconds=duration_ms / 1000,
+        size_bytes=len(audio),
+    )
+    try:
+        result = await run_in_threadpool(provider.transcribe, stt_request)
+    except ValueError as exc:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "no_speech_detected",
+            "No clear speech was detected.",
+        ) from exc
+    except ProviderTimeout as exc:
+        raise AppError(
+            status.HTTP_504_GATEWAY_TIMEOUT,
+            "speech_to_text_timeout",
+            "Speech recognition timed out.",
+        ) from exc
+    except ProviderUnavailable as exc:
+        raise AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "speech_to_text_unavailable",
+            "Speech recognition is unavailable.",
+        ) from exc
+
+    transcript = result.transcript.strip()
+    if not transcript:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "no_speech_detected",
+            "No clear speech was detected.",
+        )
+    request.app.state.metrics.increment("voice_transcriptions_completed")
+    request.app.state.metrics.observe("voice_capture_size_bytes", len(audio))
+    return {
+        "transcript": transcript,
+        "detected_language": result.detected_language,
+        "duration_ms": duration_ms,
+        "size_bytes": len(audio),
     }
 
 

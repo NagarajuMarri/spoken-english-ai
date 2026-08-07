@@ -4,6 +4,8 @@ from pydantic import BaseModel, Field
 
 class SpeechToTextRequest(BaseModel):
     audio_asset_reference: str = Field(min_length=1, max_length=200)
+    audio_bytes: bytes | None = Field(default=None, exclude=True, repr=False)
+    filename: str = Field(default="speech.webm", min_length=1, max_length=100)
     content_type: str
     language_hint: str = Field(default="en", max_length=20)
     learner_id: str
