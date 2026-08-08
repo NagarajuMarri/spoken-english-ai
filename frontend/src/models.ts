@@ -4,7 +4,8 @@ export interface TokenPair { access_token:string; refresh_token:string; token_ty
 export interface Account { id:string; learner_id:string; email:string; status:string }
 export interface TutorPreference { learner_id:string; tutor:Tutor; telugu_explanations_enabled:boolean }
 export interface Dashboard { learner_id:string; completed_sessions:number; current_streak_days:number; total_practice_minutes:number; preferred_tutor_id:string; subscription_tier:string; subscription_status:string }
-export interface AiTurn { tutor_message:string; next_question:string; correction_explanation?:string; vocabulary_suggestions:string[]; telugu_explanation?:string }
+export interface AiTurn { turn_id?:string; tutor_message:string; next_question:string; correction_explanation?:string; vocabulary_suggestions:string[]; telugu_explanation?:string }
+export interface TutorSpeech {blob:Blob;provider:string;model:string;voice:string;cacheStatus:string;inputCharacters:number;providerRequests:number;usageClassification:string}
 export interface VoiceTranscription { transcript:string; detected_language:string; duration_ms:number; size_bytes:number }
 export interface SubscriptionView {plan_id:string;status:string;trial_remaining_days:number;payment_mode:"test";entitlements:{daily_conversations:number;voice_minutes:number};fair_use:string}
 export interface ProgressDetail {scores:Record<"grammar"|"vocabulary"|"pronunciation"|"confidence"|"fluency",number|null>;completed_lessons:number;daily_streak:number;weekly_activity:number;monthly_activity:number;learning_goal:string;recent_achievements:string[];conversation_history_summary:{conversations:number;recent_sessions:number}}

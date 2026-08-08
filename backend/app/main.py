@@ -31,6 +31,7 @@ from backend.app.commercial.service import CommercialService
 from backend.app.providers.llm import build_llm_provider
 from backend.app.providers.password_reset import build_password_reset_delivery
 from backend.app.providers.stt import build_speech_to_text_provider
+from backend.app.providers.tts import build_text_to_speech_provider
 import backend.app.models  # noqa: F401
 
 
@@ -64,6 +65,7 @@ def create_app(settings=None) -> FastAPI:
     application.state.password_reset_delivery = build_password_reset_delivery(settings)
     application.state.llm_provider = build_llm_provider(settings)
     application.state.speech_to_text_provider = build_speech_to_text_provider(settings)
+    application.state.text_to_speech_provider = build_text_to_speech_provider(settings)
     application.state.object_storage = None
     if settings.object_storage_backend == "s3":
         import boto3
@@ -113,6 +115,11 @@ def create_app(settings=None) -> FastAPI:
         allow_headers=[
             "Authorization", "Content-Type", "X-Correlation-ID", "X-CSRF-Token",
             "X-Audio-Duration-Ms", "X-Voice-Processing-Consent", "Idempotency-Key",
+        ],
+        expose_headers=[
+            "X-TTS-Attempt-ID", "X-TTS-Provider", "X-TTS-Model", "X-TTS-Voice",
+            "X-TTS-Cache", "X-TTS-Input-Characters", "X-TTS-Provider-Requests",
+            "X-TTS-Usage-Classification",
         ],
     )
     if settings.force_https:

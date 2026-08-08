@@ -112,7 +112,7 @@ def test_stt_rejects_excessive_duration():
 
 
 @pytest.mark.parametrize("voice", ["supportive-neutral", "supportive-slow"])
-def test_deterministic_tts_is_metadata_only_and_repeatable(voice):
+def test_deterministic_tts_returns_repeatable_browser_safe_audio(voice):
     provider = DeterministicTextToSpeechProvider()
     request = TextToSpeechRequest(
         text="Keep practising.", voice_reference=voice,
@@ -121,7 +121,9 @@ def test_deterministic_tts_is_metadata_only_and_repeatable(voice):
     first, second = provider.synthesize(request), provider.synthesize(request)
     assert first.audio_asset_reference == second.audio_asset_reference
     assert first.audio_asset_reference.endswith(".wav")
-    assert not hasattr(first, "audio_bytes")
+    assert first.audio_bytes == second.audio_bytes
+    assert first.audio_bytes.startswith(b"RIFF")
+    assert first.content_type == "audio/wav"
 
 
 def test_tts_rejects_unsupported_voice():

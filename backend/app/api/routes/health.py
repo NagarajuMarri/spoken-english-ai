@@ -106,7 +106,14 @@ def ready(request: Request):
         checks.update({
             "redis": "ready" if redis_ready else "unavailable",
             "object_storage": "ready" if storage_ready else "unavailable",
-            "openai": "configured" if (settings.llm_provider != "openai" or settings.openai_api_key) else "unavailable",
+            "openai": "configured" if (
+                "openai" not in {
+                    settings.llm_provider,
+                    settings.speech_to_text_provider,
+                    settings.text_to_speech_provider,
+                }
+                or settings.openai_api_key
+            ) else "unavailable",
             "payment": "configured" if (not settings.razorpay_enabled or settings.razorpay_webhook_secret) else "unavailable",
             "worker": "ready" if (not settings.worker_enabled or getattr(request.app.state, "worker_healthy", False)) else "unavailable",
         })
@@ -129,7 +136,7 @@ def version(request: Request):
         "build_identifier": settings.build_identifier,
         "environment": settings.environment,
         "api_version": "v1",
-        "dependencies": {"python": "3.12+", "database_schema": "0011_password_recovery"},
+        "dependencies": {"python": "3.12+", "database_schema": "0013_openai_tts"},
     }
 
 

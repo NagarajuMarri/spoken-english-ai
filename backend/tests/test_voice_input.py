@@ -157,6 +157,7 @@ def test_production_requires_openai_stt_policy():
         **base,
         llm_provider="openai",
         speech_to_text_provider="openai",
+        text_to_speech_provider="openai",
         openai_api_key="test-key",
     )
     assert configured.speech_to_text_provider == "openai"

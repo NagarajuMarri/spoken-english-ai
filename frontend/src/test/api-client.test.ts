@@ -36,4 +36,19 @@ describe("central API session lifecycle", () => {
     await api.confirmPasswordReset("single-use-token-value-with-safe-length-123", "NewStrongPassword456!");
     expect(clear).toHaveBeenCalledOnce();
   });
+  it("retrieves authenticated binary tutor audio and safe evidence headers", async () => {
+    const audio=new Uint8Array(64);audio[0]=0x49;audio[1]=0x44;audio[2]=0x33;
+    vi.stubGlobal("fetch",vi.fn().mockResolvedValue(new Response(audio,{status:200,headers:{
+      "Content-Type":"audio/mpeg","X-TTS-Provider":"openai","X-TTS-Model":"gpt-4o-mini-tts",
+      "X-TTS-Voice":"marin","X-TTS-Cache":"MISS","X-TTS-Input-Characters":"42",
+      "X-TTS-Provider-Requests":"1","X-TTS-Usage-Classification":"provider-token-usage-unavailable",
+    }})));
+    const speech=await api.speech("conversation-1","turn-1");
+    expect(speech.blob.size).toBe(64);
+    expect(speech).toMatchObject({provider:"openai",model:"gpt-4o-mini-tts",voice:"marin",cacheStatus:"MISS",inputCharacters:42,providerRequests:1});
+    const[url,init]=vi.mocked(fetch).mock.calls[0];
+    expect(url).toContain("/api/v1/conversations/conversation-1/ai-turns/turn-1/speech");
+    expect(init?.method).toBe("POST");
+    expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${tokens.access_token}`);
+  });
 });

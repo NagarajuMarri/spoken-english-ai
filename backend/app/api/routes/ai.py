@@ -1,7 +1,8 @@
+import hashlib
 import logging
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, Header, Request, status
+from fastapi import APIRouter, Depends, Header, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -37,8 +38,10 @@ from backend.app.providers.pronunciation.deterministic import DeterministicPronu
 from backend.app.providers.stt.contracts import SpeechToTextRequest
 from backend.app.providers.stt.deterministic import DeterministicSpeechToTextProvider
 from backend.app.providers.tts.deterministic import DeterministicTextToSpeechProvider
+from backend.app.providers.tts.contracts import TextToSpeechRequest
 from backend.app.repositories.conversations import ConversationRepository
 from backend.app.repositories.ai_turns import AITurnAttemptRepository
+from backend.app.repositories.tts_synthesis import TTSSynthesisRepository
 from backend.app.repositories.conversations import TurnSequenceConflict
 from backend.app.usage.service import UsageService
 from backend.app.voice.models import VoiceTutorResult
@@ -54,6 +57,7 @@ class AITurnCreate(BaseModel):
 
 
 class AITurnRead(BaseModel):
+    turn_id: str
     tutor_message: str
     corrected_sentence: str | None
     correction_explanation: str | None
@@ -159,8 +163,9 @@ def _failure_from_attempt(attempt: AITurnAttempt) -> AppError:
     return _provider_app_error(error_type("Stored provider failure."))
 
 
-def _api_result(response: AIConversationResponse, policy: AdaptivePolicy) -> dict:
+def _api_result(response: AIConversationResponse, policy: AdaptivePolicy, turn_id: str) -> dict:
     return {
+        "turn_id": turn_id,
         "tutor_message": response.tutor_message,
         "corrected_sentence": response.corrected_learner_sentence,
         "correction_explanation": response.correction_explanation,
@@ -218,7 +223,9 @@ def ai_turn(
                 retryable=False,
             )
         if attempt.status == "COMPLETED":
-            return attempt.result_json["api_result"]
+            completed_result = dict(attempt.result_json["api_result"])
+            completed_result.setdefault("turn_id", attempt.id)
+            return completed_result
         if attempt.status == "PROVIDER_SUCCEEDED":
             response = AIConversationResponse.model_validate(attempt.result_json["provider_response"])
         elif attempt.status == "FAILED_FINAL":
@@ -365,7 +372,7 @@ def ai_turn(
         cost_classification="ESTIMATE_FROM_PROVIDER_REPORTED_USAGE",
     )
     policy = AdaptivePolicy.decide(level=principal.learner.proficiency_level, correctness=0.7, repeated_mistakes=1, confidence=60)
-    result = _api_result(response, policy)
+    result = _api_result(response, policy, attempt.id)
     try:
         session.add(AICostMetricEvent(
             ai_turn_attempt_id=attempt.id,
@@ -418,7 +425,9 @@ def ai_turn(
         session.rollback()
         recovered = attempts.get(conversation.id, turn_key)
         if recovered is not None and recovered.status == "COMPLETED":
-            return recovered.result_json["api_result"]
+            recovered_result = dict(recovered.result_json["api_result"])
+            recovered_result.setdefault("turn_id", recovered.id)
+            return recovered_result
         logger.error(
             "llm_persistence_failure request_id=%s attempt_id=%s",
             request.state.request_id,
@@ -434,6 +443,147 @@ def ai_turn(
     request.app.state.learning_engine.metrics.record(cost_event)
     request.app.state.metrics.increment("ai_requests")
     return result
+
+
+def _tts_app_error(exc: ProviderError) -> AppError:
+    if isinstance(exc, ProviderTimeout):
+        return AppError(status.HTTP_504_GATEWAY_TIMEOUT, "tts_timeout", "Tutor voice timed out. Try audio again.", retryable=True)
+    if isinstance(exc, ProviderRateLimited):
+        return AppError(status.HTTP_429_TOO_MANY_REQUESTS, "tts_rate_limited", "Tutor voice is busy. Wait, then try again.", retryable=True)
+    if isinstance(exc, ProviderConnectionError):
+        return AppError(status.HTTP_503_SERVICE_UNAVAILABLE, "tts_connection_error", "Tutor voice could not connect. Try again.", retryable=True)
+    if isinstance(exc, ProviderServiceError):
+        return AppError(status.HTTP_502_BAD_GATEWAY, "tts_provider_error", "Tutor voice had a temporary provider error.", retryable=True)
+    if isinstance(exc, ProviderMalformedResponse):
+        return AppError(status.HTTP_502_BAD_GATEWAY, "tts_invalid_audio", "Tutor voice returned invalid audio.", retryable=False)
+    return AppError(status.HTTP_503_SERVICE_UNAVAILABLE, "tts_unavailable", "Tutor voice is unavailable.", retryable=False)
+
+
+@router.post("/conversations/{conversation_id}/ai-turns/{turn_id}/speech")
+def synthesize_tutor_speech(
+    conversation_id: str,
+    turn_id: str,
+    request: Request,
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_db),
+):
+    """Return the exact completed tutor turn as provider-generated audio."""
+    enforce_rate_limit(request, "voice_turn", principal.user.id)
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None:
+        raise AppError(status.HTTP_404_NOT_FOUND, "conversation_not_found", "Conversation not found.")
+    ensure_owner(conversation.learner_id, principal)
+    ai_attempt = session.get(AITurnAttempt, turn_id)
+    if (
+        ai_attempt is None
+        or ai_attempt.conversation_id != conversation.id
+        or ai_attempt.learner_id != principal.learner.id
+        or ai_attempt.status != "COMPLETED"
+    ):
+        raise AppError(status.HTTP_404_NOT_FOUND, "tutor_turn_not_found", "Completed tutor turn not found.")
+
+    api_result = ai_attempt.result_json.get("api_result", {})
+    tutor_message = str(api_result.get("tutor_message") or "").strip()
+    next_question = str(api_result.get("next_question") or "").strip()
+    spoken_text = " ".join(value for value in (tutor_message, next_question) if value)
+    if not spoken_text:
+        raise AppError(status.HTTP_422_UNPROCESSABLE_CONTENT, "tts_empty_text", "This tutor turn has no speech text.")
+
+    tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
+    settings = request.app.state.settings
+    voice = settings.openai_tts_ananya_voice if tutor.tutor_id == "ananya" else settings.openai_tts_arjun_voice
+    instructions = (
+        "Speak in a warm, patient Indian English accent at a natural teaching pace. "
+        "Pronounce every word clearly and preserve the written meaning."
+        if tutor.tutor_id == "ananya"
+        else
+        "Speak in a friendly, confident Indian English accent at a natural teaching pace. "
+        "Pronounce every word clearly and preserve the written meaning."
+    )
+    provider = request.app.state.text_to_speech_provider
+    if provider is None:
+        raise AppError(status.HTTP_503_SERVICE_UNAVAILABLE, "tts_unavailable", "Tutor voice is unavailable.", retryable=True)
+
+    spoken_hash = hashlib.sha256(spoken_text.encode()).hexdigest()
+    repository = TTSSynthesisRepository(session)
+    attempt = repository.get(ai_attempt.id)
+    if attempt is not None:
+        if attempt.learner_id != principal.learner.id or attempt.spoken_text_hash != spoken_hash:
+            raise AppError(status.HTTP_409_CONFLICT, "tts_turn_conflict", "Tutor voice identity conflict.", retryable=False)
+        if attempt.status == "SUCCEEDED" and attempt.audio_bytes and attempt.content_type:
+            return _speech_response(attempt, cache_status="HIT")
+        if attempt.status == "IN_PROGRESS":
+            raise AppError(status.HTTP_409_CONFLICT, "tts_in_progress", "Tutor voice is already being generated.", retryable=True)
+        if attempt.status == "FAILED_FINAL":
+            raise AppError(status.HTTP_502_BAD_GATEWAY, "tts_invalid_audio", "Tutor voice could not produce valid audio.", retryable=False)
+        repository.retry(attempt)
+    else:
+        try:
+            attempt = repository.create(
+                ai_turn_attempt_id=ai_attempt.id,
+                learner_id=principal.learner.id,
+                tutor_id=tutor.tutor_id,
+                provider="openai" if settings.text_to_speech_provider == "openai" else "test-only-fake",
+                model=settings.openai_tts_model if settings.text_to_speech_provider == "openai" else "deterministic-tts",
+                voice=voice,
+                spoken_text_hash=spoken_hash,
+                input_characters=len(spoken_text),
+            )
+        except IntegrityError as exc:
+            session.rollback()
+            raise AppError(status.HTTP_409_CONFLICT, "tts_in_progress", "Tutor voice is already being generated.", retryable=True) from exc
+
+    try:
+        result = provider.synthesize(TextToSpeechRequest(
+            text=spoken_text,
+            language="en-IN",
+            voice_reference=voice,
+            speaking_rate=settings.openai_tts_speed,
+            instructions=instructions,
+            learner_level=principal.learner.proficiency_level,
+            correlation_id=request.state.correlation_id,
+        ))
+    except ProviderError as exc:
+        repository.fail(attempt, exc.failure_code, exc.provider_requests)
+        if not exc.retryable:
+            attempt.status = "FAILED_FINAL"
+            session.commit()
+        logger.warning(
+            "tts_provider_failure request_id=%s attempt_id=%s failure_code=%s retryable=%s",
+            request.state.request_id, attempt.id, exc.failure_code, exc.retryable,
+        )
+        request.app.state.metrics.increment("tts_provider_failures")
+        raise _tts_app_error(exc) from exc
+
+    repository.succeed(attempt, result)
+    request.app.state.metrics.increment("tts_requests")
+    request.app.state.metrics.observe("tts_audio_size_bytes", len(result.audio_bytes))
+    logger.info(
+        "tts_generation_completed request_id=%s attempt_id=%s model=%s voice=%s bytes=%s provider_requests=%s",
+        request.state.request_id, attempt.id, attempt.model_used, attempt.voice_used,
+        attempt.audio_size_bytes, attempt.provider_requests,
+    )
+    return _speech_response(attempt, cache_status="MISS")
+
+
+def _speech_response(attempt, *, cache_status: str) -> Response:
+    return Response(
+        content=attempt.audio_bytes,
+        media_type=attempt.content_type,
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "Content-Disposition": "inline; filename=tutor-speech.mp3",
+            "X-Content-Type-Options": "nosniff",
+            "X-TTS-Attempt-ID": attempt.id,
+            "X-TTS-Provider": attempt.provider,
+            "X-TTS-Model": attempt.model_used,
+            "X-TTS-Voice": attempt.voice_used,
+            "X-TTS-Cache": cache_status,
+            "X-TTS-Input-Characters": str(attempt.input_characters),
+            "X-TTS-Provider-Requests": str(attempt.provider_requests),
+            "X-TTS-Usage-Classification": attempt.usage_classification,
+        },
+    )
 
 
 @router.post("/conversations/{conversation_id}/transcriptions", response_model=VoiceTranscriptionRead)

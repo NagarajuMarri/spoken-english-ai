@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, event
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, LargeBinary, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.db.base import Base
@@ -152,6 +152,37 @@ class AITurnAttempt(Base):
     failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     provider_attempts: Mapped[int] = mapped_column(Integer, default=0)
     result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TTSSynthesisAttempt(Base):
+    __tablename__ = "tts_synthesis_attempts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    ai_turn_attempt_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_turn_attempts.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    learner_id: Mapped[str] = mapped_column(
+        ForeignKey("learners.id", ondelete="CASCADE"), index=True
+    )
+    tutor_id: Mapped[str] = mapped_column(String(50))
+    provider: Mapped[str] = mapped_column(String(30))
+    model_used: Mapped[str] = mapped_column(String(100))
+    voice_used: Mapped[str] = mapped_column(String(50))
+    spoken_text_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    content_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    audio_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    audio_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    input_characters: Mapped[int] = mapped_column(Integer, default=0)
+    provider_requests: Mapped[int] = mapped_column(Integer, default=0)
+    generation_latency_ms: Mapped[float] = mapped_column(Float, default=0)
+    usage_classification: Mapped[str] = mapped_column(
+        String(80), default="CHARACTERS_AND_BYTES_PROVIDER_TOKEN_USAGE_UNAVAILABLE"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

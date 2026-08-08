@@ -10,6 +10,7 @@ This repository contains Release Candidate 1 for a controlled individual-learner
 - DNS, HTTPS, trusted hosts, CORS, secrets, monitoring, alerting, backup and restore are verified in staging.
 - Razorpay configuration reports `test`; no real customer charge is permitted.
 - OpenAI request, token, voice and monthly cost ceilings are configured and alertable.
+- Founder personally hears Ananya in Windows Chrome and verifies stop, mute, replay and a second consecutive tutor response before Feature 5 is accepted.
 - Exact RC SHA passes backend, frontend, accessibility, Playwright, migration, build, secret, dependency and PWA checks.
 
 ## Controlled beta and support

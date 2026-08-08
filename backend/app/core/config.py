@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     openai_llm_output_usd_per_million: float = 2.0
     openai_stt_model: str = "gpt-4o-mini-transcribe"
     openai_tts_model: str = "gpt-4o-mini-tts"
+    openai_tts_timeout_seconds: int = 30
+    openai_tts_max_retries: int = 0
+    openai_tts_response_format: str = "mp3"
+    openai_tts_ananya_voice: str = "marin"
+    openai_tts_arjun_voice: str = "cedar"
+    openai_tts_speed: float = 1.0
     tracing_enabled: bool = False
     maintenance_mode: bool = False
     product_name: str = "SpeakMate"
@@ -126,6 +132,22 @@ class Settings(BaseSettings):
             raise ValueError("openai_llm_reasoning_effort must be minimal, low, medium, or high")
         if not 1024 <= self.openai_llm_max_output_tokens <= 25_000:
             raise ValueError("openai_llm_max_output_tokens must be between 1024 and 25000")
+        if not 1 <= self.openai_tts_timeout_seconds <= 60:
+            raise ValueError("openai_tts_timeout_seconds must be between 1 and 60")
+        if self.openai_tts_max_retries != 0:
+            raise ValueError("openai_tts_max_retries must be 0 for controlled paid synthesis")
+        if self.openai_tts_response_format != "mp3":
+            raise ValueError("openai_tts_response_format must be mp3 for RC1 browser acceptance")
+        supported_tts_voices = {
+            "alloy", "ash", "ballad", "coral", "echo", "fable", "nova",
+            "onyx", "sage", "shimmer", "verse", "marin", "cedar",
+        }
+        if self.openai_tts_ananya_voice not in supported_tts_voices:
+            raise ValueError("openai_tts_ananya_voice is unsupported")
+        if self.openai_tts_arjun_voice not in supported_tts_voices:
+            raise ValueError("openai_tts_arjun_voice is unsupported")
+        if not 0.5 <= self.openai_tts_speed <= 2:
+            raise ValueError("openai_tts_speed must be between 0.5 and 2")
         if self.environment != "production":
             return self
         missing = []
@@ -155,6 +177,10 @@ class Settings(BaseSettings):
             missing.append("speech_to_text_provider")
         elif not self.openai_api_key:
             missing.append("openai_api_key")
+        if self.text_to_speech_provider != "openai":
+            missing.append("text_to_speech_provider")
+        elif not self.openai_api_key:
+            missing.append("openai_api_key")
         if self.razorpay_enabled and not self.razorpay_webhook_secret:
             missing.append("razorpay_webhook_secret")
         if self.razorpay_enabled and self.razorpay_mode != "test":
@@ -182,6 +208,8 @@ class Settings(BaseSettings):
             "redis_configured": bool(self.redis_url),
             "object_storage_backend": self.object_storage_backend,
             "llm_provider": self.llm_provider,
+            "speech_to_text_provider": self.speech_to_text_provider,
+            "text_to_speech_provider": self.text_to_speech_provider,
             "razorpay_enabled": self.razorpay_enabled,
             "build_identifier": self.build_identifier,
         }
