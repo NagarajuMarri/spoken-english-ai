@@ -150,7 +150,7 @@ export function ConversationScreen({
     }
   }, [id, lastExpression]);
 
-  const submit = useCallback(async (text: string, retryKey?: string) => {
+  const submit = useCallback(async (text: string, retryKey?: string, voice?: {detectedLanguage:string;confidence?:number|null}) => {
     const learnerText = text.trim();
     if (!learnerText || !id || turnBusyRef.current) return;
     const key = retryKey ?? turnIdentity();
@@ -165,7 +165,7 @@ export function ConversationScreen({
     setInput("");
     dispatch({ type: "TUTOR_PROCESSING_STARTED" });
     try {
-      const result = await api.turn(id, learnerText, selectedLanguageMode, key);
+      const result = await api.turn(id, learnerText, selectedLanguageMode, key, voice);
       const spoken = `${result.tutor_message} ${result.next_question}`.trim();
       const expression = normalizeExpression(result.expression_hint);
       setMessages((items) => [...items, `${tutor.display_name}: ${spoken}`]);
@@ -202,7 +202,7 @@ export function ConversationScreen({
     const result = await api.transcribe(id, { blob: capture.blob, durationMs: capture.durationMs });
     setLastTranscript(result.transcript);
     setInput(result.transcript);
-    await submit(result.transcript);
+    await submit(result.transcript, undefined, { detectedLanguage: result.detected_language });
   }, [id, submit]);
 
   const mic = useMicrophone(consent, handleCapture);

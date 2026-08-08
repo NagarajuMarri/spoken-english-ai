@@ -31,6 +31,7 @@ from backend.app.language_review.service import (
     protected_content_digest,
 )
 from backend.app.models import AITurnAttempt, AIUsageRecord, ConversationMessage
+from backend.app.providers.tts.deterministic import DeterministicTextToSpeechProvider
 
 
 def _source_response(message="Your sentence has a small grammar change."):
@@ -81,6 +82,7 @@ def _review_content(review_request, **overrides):
 def _provider_response(content, *, status="completed", output=None):
     content = dict(content)
     content.pop("source_content_digest", None)
+    content.pop("preserved_learning_terms", None)
     return {
         "id": "resp_language_review",
         "model": "gpt-5-mini",
@@ -117,6 +119,7 @@ def test_openai_language_reviewer_uses_strict_schema_and_privacy_safe_payload():
         captured["timeout"] = timeout
         provider_content = _review_content(request)
         provider_content.pop("source_content_digest")
+        provider_content.pop("preserved_learning_terms")
         return _HTTPResponse({
             "id": "resp_language_review",
             "model": "gpt-5-mini",
@@ -272,6 +275,7 @@ def test_live_provider_shape_extracts_text_across_multiple_output_items():
     )
     content = _review_content(request)
     content.pop("source_content_digest")
+    content.pop("preserved_learning_terms")
     encoded = json.dumps(content, ensure_ascii=False)
     response = _provider_response({}, output=[
         {"type": "reasoning", "summary": []},
@@ -333,7 +337,7 @@ def test_reviewer_rejects_digest_mismatch_and_dropped_learning_term():
             learner_level="BEGINNER",
             correlation_id="correlation-1",
         )
-    with pytest.raises(ProviderOutputInvalid, match="dropped a required learning term"):
+    with pytest.raises(ProviderOutputInvalid, match="Application-controlled learning terms changed"):
         LanguageReviewService(InvalidProvider({"preserved_learning_terms": []})).review(
             source,
             language_mode=LanguageMode.ENGLISH_TELUGU,
@@ -476,7 +480,7 @@ def test_api_checkpoints_review_before_tts_and_exposes_customer_capability(clien
         assert message.tutor_response == body["tutor_message"]
 
 
-def test_review_retry_does_not_regenerate_content_or_duplicate_persistence(client, conversation):
+def test_review_failure_degrades_without_regenerating_or_duplicate_persistence(client, conversation):
     client.put(
         "/api/v1/tutors/preference",
         json={"tutor_id": "ananya", "language_mode": "ENGLISH_TELUGU"},
@@ -510,21 +514,98 @@ def test_review_retry_does_not_regenerate_content_or_duplicate_persistence(clien
     payload = {"message": "I go office yesterday."}
 
     first = client.post(route, headers=headers, json=payload)
-    assert first.status_code == 504
-    assert first.json()["error"]["code"] == "language_review_timeout"
+    assert first.status_code == 200
+    assert first.json()["language_review_status"] == "DEGRADED"
+    assert first.json()["language_review_failure_code"] == "provider_timeout"
     second = client.post(route, headers=headers, json=payload)
     assert second.status_code == 200
-    third = client.post(route, headers=headers, json=payload)
-    assert third.json() == second.json()
+    assert second.json() == first.json()
     assert content.calls == 1
-    assert reviewer.calls == 2
+    assert reviewer.calls == 1
 
     with client.app.state.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(ConversationMessage)) == 1
         attempt = session.get(AITurnAttempt, second.json()["turn_id"])
         assert attempt.status == "COMPLETED"
-        assert attempt.provider_attempts == 3
+        assert attempt.provider_attempts == 2
         usages = list(session.scalars(select(AIUsageRecord).where(
             AIUsageRecord.ai_turn_attempt_id == attempt.id
         )))
-        assert {usage.outcome for usage in usages} == {"FAILURE", "SUCCESS"}
+        assert {usage.outcome for usage in usages} == {"DEGRADED", "SUCCESS"}
+
+
+def test_five_turn_pipeline_keeps_tts_available_when_one_review_is_malformed(client, conversation):
+    client.put(
+        "/api/v1/tutors/preference",
+        json={"tutor_id": "ananya", "language_mode": "ENGLISH_TELUGU"},
+    )
+
+    class MalformedThirdReview:
+        def __init__(self):
+            self.calls = 0
+            self.good = DeterministicLanguageReviewProvider()
+
+        def review(self, request):
+            self.calls += 1
+            if self.calls == 3:
+                raise ProviderOutputInvalid(
+                    "Injected malformed presentation.", provider_requests=1,
+                    schema_path="final_text",
+                )
+            return self.good.review(request)
+
+    tts = DeterministicTextToSpeechProvider()
+    client.app.state.language_review_provider = MalformedThirdReview()
+    client.app.state.text_to_speech_provider = tts
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    turns = []
+    for index in range(5):
+        turn = client.post(
+            route,
+            headers={"Idempotency-Key": f"five-turn-reliability-{index}"},
+            json={"message": f"I want English practice turn {index}."},
+        )
+        assert turn.status_code == 200
+        turns.append(turn.json())
+        speech = client.post(f"{route}/{turn.json()['turn_id']}/speech")
+        assert speech.status_code == 200
+        assert speech.headers["content-type"].startswith("audio/wav")
+
+    assert [turn["language_review_status"] for turn in turns] == [
+        "COMPLETED", "COMPLETED", "DEGRADED", "COMPLETED", "COMPLETED",
+    ]
+    assert turns[2]["language_review_failure_code"] == "provider_schema_validation_failed"
+    assert tts.calls == 5
+    with client.app.state.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(ConversationMessage)) == 5
+
+
+def test_foreign_script_voice_misrecognition_is_clarified_and_not_kept_in_history(client, conversation):
+    class CapturingProvider(DeterministicAIProvider):
+        def __init__(self):
+            self.requests = []
+
+        def generate(self, request):
+            self.requests.append(request)
+            return super().generate(request)
+
+    provider = CapturingProvider()
+    client.app.state.llm_provider = provider
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    anomalous = client.post(
+        route,
+        headers={"Idempotency-Key": "foreign-script-stt-1"},
+        json={"message": "آری", "input_source": "VOICE", "detected_language": "fa"},
+    )
+    assert anomalous.status_code == 200
+    assert "recognition error" in provider.requests[0].current_learner_message
+    assert "Do not switch language or topic" in provider.requests[0].current_learner_message
+
+    clear = client.post(
+        route,
+        headers={"Idempotency-Key": "foreign-script-stt-2"},
+        json={"message": "Can we start English practice?"},
+    )
+    assert clear.status_code == 200
+    assert provider.requests[1].current_learner_message == "Can we start English practice?"
+    assert all("آری" not in turn.learner_message for turn in provider.requests[1].conversation_history)

@@ -5,7 +5,7 @@ export interface Account { id:string; learner_id:string; email:string; status:st
 export type LanguageMode = "ENGLISH"|"ENGLISH_TELUGU"|"TELUGU_DOMINANT";
 export interface TutorPreference { learner_id:string; tutor:Tutor; telugu_explanations_enabled:boolean; language_mode:LanguageMode }
 export interface Dashboard { learner_id:string; completed_sessions:number; current_streak_days:number; total_practice_minutes:number; preferred_tutor_id:string; subscription_tier:string; subscription_status:string }
-export interface AiTurn { turn_id:string; tutor_message:string; next_question:string; correction_explanation?:string; vocabulary_suggestions:string[]; telugu_explanation?:string; language_mode?:LanguageMode; review_changed?:boolean; review_reason_code?:string; preserved_learning_terms?:string[]; expression_hint?:string }
+export interface AiTurn { turn_id:string; tutor_message:string; next_question:string; correction_explanation?:string; vocabulary_suggestions:string[]; telugu_explanation?:string; language_mode?:LanguageMode; review_changed?:boolean; review_reason_code?:string; preserved_learning_terms?:string[]; expression_hint?:string; language_review_status?:"COMPLETED"|"DEGRADED"; language_review_failure_code?:string|null }
 export interface TutorSpeech {blob:Blob;provider:string;model:string;voice:string;cacheStatus:string;inputCharacters:number;providerRequests:number;usageClassification:string}
 export interface VoiceTranscription { transcript:string; detected_language:string; duration_ms:number; size_bytes:number }
 export interface SubscriptionView {plan_id:string;status:string;trial_remaining_days:number;payment_mode:"test";entitlements:{daily_conversations:number;voice_minutes:number};fair_use:string}

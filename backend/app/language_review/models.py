@@ -20,6 +20,11 @@ class ExpressionHint(StrEnum):
     CORRECTIVE = "CORRECTIVE"
 
 
+class LanguageReviewStatus(StrEnum):
+    COMPLETED = "COMPLETED"
+    DEGRADED = "DEGRADED"
+
+
 class LanguageReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -51,6 +56,8 @@ class LanguageReviewResult(BaseModel):
     preserved_learning_terms: list[str] = Field(max_length=20)
     expression_hint: ExpressionHint
     source_content_digest: str = Field(min_length=64, max_length=64)
+    status: LanguageReviewStatus = LanguageReviewStatus.COMPLETED
+    failure_code: str | None = Field(default=None, max_length=80)
     provider_metadata_reference: str = Field(min_length=1, max_length=100)
     usage: UsageInfo
 

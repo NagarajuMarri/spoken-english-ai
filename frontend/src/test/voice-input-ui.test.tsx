@@ -55,6 +55,7 @@ describe("voice input customer journey",()=>{
       "I practise English every morning.",
       "ENGLISH",
       expect.any(String),
+      { detectedLanguage: "en" },
     );
   });
 

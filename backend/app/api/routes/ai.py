@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 from time import perf_counter
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
@@ -50,7 +51,7 @@ from backend.app.voice.orchestration import VoiceTutorOrchestrationService
 from backend.app.tutors import get_tutor
 from backend.app.domain.enums import LanguageMode
 from backend.app.language_review.models import LanguageReviewResult
-from backend.app.language_review.service import LanguageReviewService
+from backend.app.language_review.service import LanguageReviewService, degraded_review_result
 
 router = APIRouter(prefix="/api/v1", tags=["ai-tutor"])
 logger = logging.getLogger("spoken_english.ai_turns")
@@ -58,6 +59,9 @@ logger = logging.getLogger("spoken_english.ai_turns")
 
 class AITurnCreate(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    input_source: str = Field(default="TEXT", pattern="^(TEXT|VOICE)$")
+    detected_language: str | None = Field(default=None, max_length=20)
+    stt_confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class AITurnRead(BaseModel):
@@ -75,6 +79,28 @@ class AITurnRead(BaseModel):
     preserved_learning_terms: list[str]
     expression_hint: str
     telugu_explanation: str | None
+    language_review_status: str
+    language_review_failure_code: str | None
+
+
+_ARABIC_SCRIPT = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
+
+
+def _unexpected_foreign_script(text: str) -> bool:
+    return bool(_ARABIC_SCRIPT.search(text))
+
+
+def _tutor_input(message: str, *, input_source: str, stt_confidence: float | None) -> str:
+    if input_source == "VOICE" and (
+        _unexpected_foreign_script(message)
+        or (stt_confidence is not None and stt_confidence < 0.55)
+    ):
+        return (
+            "The latest speech transcript is inconsistent with this English-training session and may "
+            "be a recognition error. Do not switch language or topic. Briefly ask the learner to repeat "
+            "what they meant in English."
+        )
+    return message
 
 
 def _provider_app_error(exc: ProviderError) -> AppError:
@@ -207,6 +233,8 @@ def _api_result(
             if review.language_mode != LanguageMode.ENGLISH
             else None
         ),
+        "language_review_status": review.status,
+        "language_review_failure_code": review.failure_code,
     }
 
 
@@ -374,9 +402,14 @@ def ai_turn(
                         learner_message=item.learner_text,
                         tutor_message=item.tutor_response,
                     )
-                    for item in conversation.messages[-3:]
-                ],
-                current_learner_message=data.message,
+                    for item in conversation.messages
+                    if not _unexpected_foreign_script(item.learner_text)
+                ][-3:],
+                current_learner_message=_tutor_input(
+                    data.message,
+                    input_source=data.input_source,
+                    stt_confidence=data.stt_confidence,
+                ),
                 correlation_id=request.state.correlation_id,
             ))
         except ProviderError as exc:
@@ -445,19 +478,40 @@ def ai_turn(
                     "The tutor turn could not be recovered. Send it again.",
                     retryable=False,
                 ) from exc
-            attempts.mark_review_failure(attempt, exc)
-            usage.record_failure_attempt(
+            language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
+            response = content_response
+            review_result = degraded_review_result(
+                content_response,
+                language_mode=language_mode,
+                learning_objective=SCENARIOS_BY_ID[conversation.scenario_id].name,
+                learner_level=principal.learner.proficiency_level,
+                correlation_id=request.state.correlation_id,
+                failure_code=exc.failure_code,
+            )
+            attempts.checkpoint_review_degraded(
+                attempt,
+                response,
+                review_result,
+                exc,
+                review_latency_ms=(perf_counter() - review_started_at) * 1000,
+            )
+            usage.record(
                 ai_turn_attempt_id=attempt.id,
                 learner_id=principal.learner.id,
                 user_id=principal.user.id,
-                provider_requests=exc.provider_requests,
+                provider_kind="language_review",
+                outcome="DEGRADED",
+                request_count=exc.provider_requests,
+                retries=max(0, exc.provider_requests - 1),
                 input_units=exc.input_units,
                 output_units=exc.output_units,
+                failed=True,
+                degraded=True,
                 commit=False,
             )
             session.commit()
             logger.warning(
-                "language_review_failure request_id=%s attempt_id=%s failure_code=%s "
+                "language_review_degraded request_id=%s attempt_id=%s failure_code=%s "
                 "provider_requests=%s retryable=%s schema_path=%s",
                 request.state.request_id,
                 attempt.id,
@@ -467,25 +521,25 @@ def ai_turn(
                 exc.schema_path or "none",
             )
             request.app.state.metrics.increment("language_review_failures")
-            raise _language_review_app_error(exc) from exc
-        attempts.checkpoint_review_success(
-            attempt,
-            response,
-            review_result,
-            review_latency_ms=(perf_counter() - review_started_at) * 1000,
-        )
-        logger.info(
-            "language_review_completed request_id=%s attempt_id=%s mode=%s changed=%s "
-            "reason=%s expression=%s provider_requests=%s",
-            request.state.request_id,
-            attempt.id,
-            review_result.language_mode,
-            review_result.review_changed,
-            review_result.review_reason_code,
-            review_result.expression_hint,
-            review_result.usage.provider_requests,
-        )
-        request.app.state.metrics.increment("language_review_requests")
+        else:
+            attempts.checkpoint_review_success(
+                attempt,
+                response,
+                review_result,
+                review_latency_ms=(perf_counter() - review_started_at) * 1000,
+            )
+            logger.info(
+                "language_review_completed request_id=%s attempt_id=%s mode=%s changed=%s "
+                "reason=%s expression=%s provider_requests=%s",
+                request.state.request_id,
+                attempt.id,
+                review_result.language_mode,
+                review_result.review_changed,
+                review_result.review_reason_code,
+                review_result.expression_hint,
+                review_result.usage.provider_requests,
+            )
+            request.app.state.metrics.increment("language_review_requests")
 
     latency_ms = float(
         attempt.result_json.get("provider_latency_ms", (perf_counter() - started_at) * 1000)

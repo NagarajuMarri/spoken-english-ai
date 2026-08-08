@@ -6,6 +6,7 @@ from backend.app.ai.exceptions import ProviderConfigurationError, ProviderOutput
 from backend.app.ai.models import AIConversationResponse, UsageInfo
 from backend.app.language_review.models import (
     ExpressionHint,
+    LanguageReviewStatus,
     LanguageMode,
     LanguageReviewRequest,
     LanguageReviewResult,
@@ -90,12 +91,9 @@ def _validate_result(request: LanguageReviewRequest, result: LanguageReviewResul
     combined_words = set(re.findall(r"[a-z]+", combined))
     has_telugu = any("\u0c00" <= character <= "\u0c7f" for character in combined)
     has_english = bool(combined_words)
-    preserved = {term.lower() for term in result.preserved_learning_terms}
-    if not preserved.issubset(LEARNING_TERM_ALLOWLIST):
-        raise ProviderOutputInvalid("Language reviewer returned an unsupported learning term.", schema_path="preserved_learning_terms")
-    if any(term not in combined_words for term in preserved):
-        raise ProviderOutputInvalid("Language reviewer did not preserve a declared learning term.", schema_path="preserved_learning_terms")
-    if any(term not in preserved or term not in combined_words for term in request.required_learning_terms):
+    if result.preserved_learning_terms != request.required_learning_terms:
+        raise ProviderOutputInvalid("Application-controlled learning terms changed.", schema_path="protected_learning_terms")
+    if any(term not in combined_words for term in request.required_learning_terms):
         raise ProviderOutputInvalid("Language reviewer dropped a required learning term.", schema_path="preserved_learning_terms")
     source_fields = (
         request.source_tutor_message,
@@ -202,3 +200,38 @@ class LanguageReviewService:
         ) != request.source_content_digest:
             raise ProviderOutputInvalid("Protected tutor content changed during review.", schema_path="protected_content")
         return reviewed, result
+
+
+def degraded_review_result(
+    response: AIConversationResponse,
+    *,
+    language_mode: LanguageMode,
+    learning_objective: str,
+    learner_level: str,
+    correlation_id: str,
+    failure_code: str,
+) -> LanguageReviewResult:
+    """Bind reviewer failure metadata to the unchanged validated response."""
+    request = build_review_request(
+        response,
+        language_mode=language_mode,
+        learning_objective=learning_objective,
+        learner_level=learner_level,
+        correlation_id=correlation_id,
+    )
+    return LanguageReviewResult(
+        final_text=response.tutor_message,
+        final_correction_explanation=response.correction_explanation,
+        final_conversation_question=response.conversation_question,
+        final_encouragement=response.encouragement,
+        language_mode=language_mode,
+        review_changed=False,
+        review_reason_code=ReviewReasonCode.NOT_REQUIRED,
+        preserved_learning_terms=request.required_learning_terms,
+        expression_hint=ExpressionHint.NEUTRAL,
+        source_content_digest=request.source_content_digest,
+        status=LanguageReviewStatus.DEGRADED,
+        failure_code=failure_code,
+        provider_metadata_reference="language-review:degraded:canonical-v1",
+        usage=UsageInfo(provider_requests=0),
+    )

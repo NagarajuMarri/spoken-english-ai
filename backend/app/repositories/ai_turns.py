@@ -93,6 +93,25 @@ class AITurnAttemptRepository:
         attempt.updated_at = utc_now()
         self.session.commit()
 
+    def checkpoint_review_degraded(
+        self, attempt, canonical_response, review_result, error, *, review_latency_ms: float,
+    ) -> None:
+        checkpoint = dict(attempt.result_json)
+        checkpoint["reviewed_response"] = canonical_response.model_dump(mode="json")
+        checkpoint["language_review"] = review_result.model_dump(mode="json")
+        checkpoint["language_review_failure"] = {
+            "failure_code": error.failure_code,
+            "schema_path": error.schema_path,
+            "provider_requests": error.provider_requests,
+        }
+        checkpoint["review_latency_ms"] = review_latency_ms
+        attempt.result_json = checkpoint
+        attempt.status = "REVIEW_SUCCEEDED"
+        attempt.failure_code = None
+        attempt.provider_attempts += error.provider_requests
+        attempt.updated_at = utc_now()
+        self.session.commit()
+
     def mark_review_failure(self, attempt: AITurnAttempt, error) -> None:
         attempt.status = "REVIEW_FAILED_RETRYABLE" if error.retryable else "REVIEW_FAILED_FINAL"
         attempt.failure_code = error.failure_code

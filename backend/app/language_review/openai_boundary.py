@@ -46,11 +46,6 @@ LANGUAGE_REVIEW_SCHEMA = {
                 "SIMPLIFIED_TEACHER_TONE",
             ],
         },
-        "preserved_learning_terms": {
-            "type": "array",
-            "maxItems": 20,
-            "items": {"type": "string"},
-        },
         "expression_hint": {
             "type": "string",
             "enum": ["NEUTRAL", "POSITIVE", "ENCOURAGING", "CORRECTIVE"],
@@ -64,7 +59,6 @@ LANGUAGE_REVIEW_SCHEMA = {
         "language_mode",
         "review_changed",
         "review_reason_code",
-        "preserved_learning_terms",
         "expression_hint",
     ],
 }
@@ -212,6 +206,9 @@ class OpenAILanguageReviewHTTPClient:
         usage = value.get("usage") or {}
         input_details = usage.get("input_tokens_details") or {}
         content["source_content_digest"] = review_request.source_content_digest
+        content["preserved_learning_terms"] = review_request.required_learning_terms
+        content["status"] = "COMPLETED"
+        content["failure_code"] = None
         content["provider_metadata_reference"] = (
             f"language-review:{value.get('model') or model}:{value.get('id') or 'response'}"
         )[:100]
