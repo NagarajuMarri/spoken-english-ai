@@ -52,7 +52,17 @@ from backend.app.tutors import get_tutor
 from backend.app.domain.enums import LanguageMode
 from backend.app.language_review.models import LanguageReviewResult
 from backend.app.language_review.service import LanguageReviewService, degraded_review_result
-from backend.app.coaching import build_coaching_outcome, tutor_input_for_retry
+from backend.app.coaching import (
+    build_coaching_outcome,
+    correction_reexplanation_input,
+    tutor_input_for_retry,
+)
+from backend.app.explanation_language import (
+    ExplanationLanguage,
+    ExplanationLanguageState,
+    explanation_policy_instruction,
+    resolve_explanation_language,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["ai-tutor"])
 logger = logging.getLogger("spoken_english.ai_turns")
@@ -70,6 +80,7 @@ class AITurnRead(BaseModel):
     tutor_message: str
     corrected_sentence: str | None
     correction_explanation: str | None
+    correction_explanation_default: str | None
     vocabulary_suggestions: list[str]
     next_question: str
     encouragement: str
@@ -86,6 +97,8 @@ class AITurnRead(BaseModel):
     coaching_mode: str
     coaching_state: str
     retry_of_turn_id: str | None
+    explanation_language: ExplanationLanguage
+    explanation_language_state: ExplanationLanguageState
 
 
 _ARABIC_SCRIPT = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
@@ -219,12 +232,22 @@ def _api_result(
     turn_id: str,
     review: LanguageReviewResult,
     coaching,
+    language_decision,
+    previous_result: dict | None,
 ) -> dict:
+    default_correction_explanation = response.correction_explanation
+    if language_decision.state == ExplanationLanguageState.ONE_TURN_OVERRIDE:
+        default_correction_explanation = (
+            (previous_result or {}).get("correction_explanation_default")
+            or (previous_result or {}).get("correction_explanation")
+            or response.correction_explanation
+        )
     return {
         "turn_id": turn_id,
         "tutor_message": response.tutor_message,
         "corrected_sentence": response.corrected_learner_sentence,
         "correction_explanation": response.correction_explanation,
+        "correction_explanation_default": default_correction_explanation,
         "vocabulary_suggestions": response.vocabulary_suggestions,
         "next_question": response.conversation_question,
         "encouragement": response.encouragement,
@@ -245,6 +268,8 @@ def _api_result(
         "coaching_mode": coaching.mode,
         "coaching_state": coaching.state,
         "retry_of_turn_id": coaching.retry_of_turn_id,
+        "explanation_language": language_decision.language,
+        "explanation_language_state": language_decision.state,
     }
 
 
@@ -312,6 +337,11 @@ def ai_turn(
         dict(previous_attempt.result_json.get("api_result", {}))
         if previous_attempt is not None else None
     )
+    default_language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
+    language_decision = resolve_explanation_language(data.message, default_language_mode)
+    if language_decision.persist_mode is not None:
+        principal.learner.language_mode = language_decision.persist_mode.value
+        principal.learner.telugu_explanations_enabled = False
     attempt = attempts.get(conversation.id, turn_key)
     content_response = None
     response = None
@@ -400,13 +430,21 @@ def ai_turn(
     started_at = perf_counter()
     if content_response is None:
         try:
+            reexplanation = correction_reexplanation_input(
+                previous_result,
+                in_english=language_decision.language == ExplanationLanguage.ENGLISH,
+            ) if language_decision.state != ExplanationLanguageState.DEFAULT_PREFERENCE else None
+            learner_input = reexplanation or tutor_input_for_retry(data.message, previous_result)
+            if not (
+                language_decision.state == ExplanationLanguageState.DEFAULT_PREFERENCE
+                and language_decision.effective_mode == LanguageMode.ENGLISH
+            ):
+                learner_input = f"{learner_input}\n\n{explanation_policy_instruction(language_decision)}"
             content_response = AIConversationService(provider).generate(AIConversationRequest(
                 learner_id=principal.learner.id,
                 conversation_id=conversation.id,
                 learner_level=principal.learner.proficiency_level,
-                preferred_language=(
-                    principal.learner.language_mode or "ENGLISH"
-                ),
+                preferred_language=language_decision.effective_mode.value,
                 tutor_id=tutor.tutor_id,
                 tutor_prompt_profile=tutor.prompt_profile,
                 tutor_vocabulary_profile=tutor.vocabulary_profile,
@@ -421,7 +459,7 @@ def ai_turn(
                     if not _unexpected_foreign_script(item.learner_text)
                 ][-3:],
                 current_learner_message=_tutor_input(
-                    tutor_input_for_retry(data.message, previous_result),
+                    learner_input,
                     input_source=data.input_source,
                     stt_confidence=data.stt_confidence,
                 ),
@@ -473,7 +511,7 @@ def ai_turn(
     if response is None or review_result is None:
         review_started_at = perf_counter()
         try:
-            language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
+            language_mode = language_decision.effective_mode
             response, review_result = LanguageReviewService(
                 request.app.state.language_review_provider
             ).review(
@@ -493,7 +531,7 @@ def ai_turn(
                     "The tutor turn could not be recovered. Send it again.",
                     retryable=False,
                 ) from exc
-            language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
+            language_mode = language_decision.effective_mode
             response = content_response
             review_result = degraded_review_result(
                 content_response,
@@ -583,13 +621,16 @@ def ai_turn(
     coaching = build_coaching_outcome(
         response,
         learner_level=principal.learner.proficiency_level,
-        language_mode=LanguageMode(principal.learner.language_mode or "ENGLISH"),
+        language_mode=language_decision.effective_mode,
         previous_result=previous_result,
         previous_turn_id=previous_attempt.id if previous_attempt is not None else None,
         learner_text=data.message,
+        explanation_language_state=language_decision.state,
     )
     response = coaching.response
-    result = _api_result(response, policy, attempt.id, review_result, coaching)
+    result = _api_result(
+        response, policy, attempt.id, review_result, coaching, language_decision, previous_result,
+    )
     try:
         session.add(AICostMetricEvent(
             ai_turn_attempt_id=attempt.id,
@@ -713,21 +754,23 @@ def synthesize_tutor_speech(
     settings = request.app.state.settings
     voice = settings.openai_tts_ananya_voice if tutor.tutor_id == "ananya" else settings.openai_tts_arjun_voice
     language_mode = LanguageMode(str(api_result.get("language_mode") or "ENGLISH"))
-    tone = "warm and patient" if tutor.tutor_id == "ananya" else "friendly and confident"
+    tone = "warm, patient, and professional" if tutor.tutor_id == "ananya" else "friendly and confident"
     if language_mode == LanguageMode.TELUGU_DOMINANT:
         instructions = (
-            f"Speak in natural contemporary Telugu with a {tone} teacher tone used in Andhra Pradesh "
-            "and Telangana. Keep the embedded English learning terms clear and do not anglicize Telugu."
+            f"Speak at a moderate teaching pace in natural contemporary Andhra/Telangana Telugu with a {tone} tone. "
+            "Use conversational Telugu-English code switching. Give embedded English examples in clear neutral "
+            "Indian English; avoid strong American or British intonation. Do not anglicize Telugu."
         )
     elif language_mode == LanguageMode.ENGLISH_TELUGU:
         instructions = (
-            f"Speak the English and Telugu parts naturally with a {tone} Indian teacher tone. "
-            "Use a natural Telugu rhythm for Telugu and pronounce English learning terms clearly."
+            f"Speak at a moderate teaching pace with a {tone} Indian teacher tone. Use native conversational "
+            "Andhra/Telangana Telugu rhythm for Telugu. Give corrected English sentences and grammar terms in "
+            "clear neutral Indian English; switch languages smoothly and avoid strong American or British intonation."
         )
     else:
         instructions = (
-            f"Speak in a {tone} Indian English accent at a natural teaching pace. "
-            "Pronounce every word clearly and preserve the written meaning."
+            f"Speak in clear neutral Indian English with a {tone} teacher tone at a moderate pace. "
+            "Avoid strong American or British intonation. Pronounce every word clearly and preserve the written meaning."
         )
     provider = request.app.state.text_to_speech_provider
     if provider is None:

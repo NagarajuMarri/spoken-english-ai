@@ -13,7 +13,12 @@ class DeterministicLanguageReviewProvider:
     def review(self, request):
         terms = request.required_learning_terms
         term_text = " ".join(terms)
-        if request.language_mode == LanguageMode.TELUGU_DOMINANT:
+        if request.language_mode == LanguageMode.ENGLISH:
+            final_text = f"Good try. Let's use {term_text} more naturally.".strip()
+            explanation = "Use the corrected form so the sentence sounds natural and grammatically clear."
+            question = "Please say the corrected English sentence once."
+            reason = ReviewReasonCode.NOT_REQUIRED
+        elif request.language_mode == LanguageMode.TELUGU_DOMINANT:
             final_text = f"చాలా బాగా ప్రయత్నించారు. {term_text} గురించి ఇప్పుడు సులభంగా చూద్దాం.".strip()
             explanation = "ఈ sentence లో అవసరమైన భాగాన్ని మాత్రమే మార్చాలి. అర్థం మాత్రం అలాగే ఉంటుంది."
             question = "ఇప్పుడు ఇదే విషయాన్ని మీ మాటల్లో ఇంకోసారి చెబుతారా?"

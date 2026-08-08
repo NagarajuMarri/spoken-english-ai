@@ -7,6 +7,7 @@ from enum import StrEnum
 
 from backend.app.ai.models import AIConversationResponse
 from backend.app.domain.enums import LanguageMode
+from backend.app.explanation_language import ExplanationLanguageState
 
 
 class CoachingMode(StrEnum):
@@ -64,6 +65,21 @@ def tutor_input_for_retry(message: str, previous_result: dict | None) -> str:
     )
 
 
+def correction_reexplanation_input(previous_result: dict | None, *, in_english: bool) -> str | None:
+    if not pending_retry(previous_result):
+        return None
+    prior = previous_result or {}
+    corrected = str(prior.get("corrected_sentence") or "").strip()
+    if not corrected:
+        return None
+    language = "clear English" if in_english else "natural conversational Telugu"
+    return (
+        f'The learner explicitly asked to re-explain the pending correction in {language}. '
+        f'The accepted corrected sentence is: "{corrected}". Re-explain the same correction evidence; '
+        "do not introduce a new correction or topic, and ask the learner to retry that sentence."
+    )
+
+
 def _acknowledgement(mode: LanguageMode) -> str:
     if mode == LanguageMode.ENGLISH:
         return "I understood what you meant."
@@ -98,11 +114,15 @@ def build_coaching_outcome(
     previous_result: dict | None = None,
     previous_turn_id: str | None = None,
     learner_text: str = "",
+    explanation_language_state: ExplanationLanguageState = ExplanationLanguageState.DEFAULT_PREFERENCE,
 ) -> CoachingOutcome:
     if pending_retry(previous_result):
         prior = previous_result or {}
         target = str(prior.get("corrected_sentence") or "")
-        if retry_matches(learner_text, target):
+        if (
+            explanation_language_state == ExplanationLanguageState.DEFAULT_PREFERENCE
+            and retry_matches(learner_text, target)
+        ):
             spoken = _join(_retry_accepted(language_mode), response.tutor_message, response.conversation_question)
             return CoachingOutcome(
                 response=response,
@@ -111,15 +131,25 @@ def build_coaching_outcome(
                 spoken_text=spoken,
                 retry_of_turn_id=previous_turn_id,
             )
-        previous_explanation = str(prior.get("correction_explanation") or "") or None
+        current_explanation = response.correction_explanation
+        previous_explanation = str(
+            prior.get("correction_explanation_default")
+            or prior.get("correction_explanation")
+            or ""
+        ) or None
+        explanation = (
+            current_explanation
+            if explanation_language_state != ExplanationLanguageState.DEFAULT_PREFERENCE and current_explanation
+            else previous_explanation
+        )
         linked = response.model_copy(update={
             "corrected_learner_sentence": target,
-            "correction_explanation": previous_explanation,
+            "correction_explanation": explanation,
         })
         spoken = _join(
             _acknowledgement(language_mode),
             _corrected_sentence(target, language_mode),
-            previous_explanation,
+            explanation,
             _retry_request(language_mode, again=True),
         )
         return CoachingOutcome(
