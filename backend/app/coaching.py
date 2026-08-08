@@ -30,6 +30,8 @@ class CoachingOutcome:
     mode: CoachingMode
     state: CoachingState
     spoken_text: str
+    incorrect_span: str | None = None
+    corrected_form: str | None = None
     retry_of_turn_id: str | None = None
 
 
@@ -92,10 +94,11 @@ def _corrected_sentence(value: str, mode: LanguageMode) -> str:
     return f'Correct sentence: "{value}"'
 
 
-def _retry_request(mode: LanguageMode, *, again: bool = False) -> str:
+def _retry_request(mode: LanguageMode, corrected_sentence: str | None = None, *, again: bool = False) -> str:
+    target = f' "{corrected_sentence}"' if corrected_sentence else ""
     if mode == LanguageMode.ENGLISH:
-        return "Please say the corrected sentence once more." if again else "Please say the corrected sentence once."
-    return "ఇప్పుడు corrected sentence ని ఇంకొకసారి చెప్పండి." if again else "ఇప్పుడు corrected sentence ని ఒకసారి చెప్పండి."
+        return f"Please say the corrected sentence once more:{target}" if again else f"Please say the corrected sentence once:{target}"
+    return f"ఇప్పుడు corrected sentence ని ఇంకొకసారి చెప్పండి:{target}" if again else f"ఇప్పుడు corrected sentence ని ఒకసారి చెప్పండి:{target}"
 
 
 def _retry_accepted(mode: LanguageMode) -> str:
@@ -104,6 +107,51 @@ def _retry_accepted(mode: LanguageMode) -> str:
 
 def _join(*parts: str | None) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _tokens(value: str) -> list[str]:
+    return re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?|[^\w\s]", value)
+
+
+def smallest_useful_error_span(learner_text: str, corrected_text: str) -> tuple[str, str]:
+    """Return aligned, compact learner/corrected fragments with grammatical context."""
+    source = [token for token in _tokens(learner_text) if token not in ".?!"]
+    target = [token for token in _tokens(corrected_text) if token not in ".?!"]
+    if not source or not target:
+        return learner_text.strip(), corrected_text.strip()
+    matcher = SequenceMatcher(None, [t.lower() for t in source], [t.lower() for t in target])
+    changes = [op for op in matcher.get_opcodes() if op[0] != "equal"]
+    if not changes:
+        return learner_text.strip(), corrected_text.strip()
+    s0, s1 = min(op[1] for op in changes), max(op[2] for op in changes)
+    t0, t1 = min(op[3] for op in changes), max(op[4] for op in changes)
+    # Include a little shared context. For short utterances, the whole sentence is clearer.
+    if len(source) <= 5 and "didn't" not in [token.lower() for token in source]:
+        return learner_text.strip().rstrip(".?!"), corrected_text.strip().rstrip(".?!")
+    source_lower = [token.lower() for token in source]
+    target_lower = [token.lower() for token in target]
+    before = 1
+    after = 2
+    if s0 > 0 and source_lower[s0 - 1] in {"didn't", "did", "doesn't", "does"}:
+        after = 0
+    elif source_lower[s0:s1] and source_lower[s0] in {"have", "has"}:
+        before = 2
+    s0, s1 = max(0, s0 - before), min(len(source), s1 + after)
+    t0, t1 = max(0, t0 - before), min(len(target), t1 + after)
+    boundaries = {"because", "but", "although", "while", "so"}
+    while s1 > s0 and source_lower[s1 - 1] in boundaries:
+        s1 -= 1
+    while t1 > t0 and target_lower[t1 - 1] in boundaries:
+        t1 -= 1
+    return " ".join(source[s0:s1]).strip(" ,.!?"), " ".join(target[t0:t1]).strip(" ,.!?")
+
+
+def _incorrect_then_correct(incorrect: str, corrected: str, mode: LanguageMode) -> str:
+    if not incorrect:
+        return _corrected_sentence(corrected, mode)
+    if mode == LanguageMode.ENGLISH:
+        return f'You said: "{incorrect}". Correct form: "{corrected}".'
+    return f'మీరు "{incorrect}" అన్నారు. Correct form: "{corrected}".'
 
 
 def build_coaching_outcome(
@@ -146,17 +194,22 @@ def build_coaching_outcome(
             "corrected_learner_sentence": target,
             "correction_explanation": explanation,
         })
+        prior_incorrect = str(prior.get("incorrect_span") or learner_text).strip()
+        prior_corrected_form = str(prior.get("corrected_form") or target).strip()
+        if explanation_language_state == ExplanationLanguageState.DEFAULT_PREFERENCE:
+            prior_incorrect, prior_corrected_form = smallest_useful_error_span(learner_text, target)
         spoken = _join(
-            _acknowledgement(language_mode),
-            _corrected_sentence(target, language_mode),
+            _incorrect_then_correct(prior_incorrect, prior_corrected_form, language_mode),
             explanation,
-            _retry_request(language_mode, again=True),
+            _retry_request(language_mode, target, again=True),
         )
         return CoachingOutcome(
             response=linked,
             mode=CoachingMode.RETRY_REQUIRED,
             state=CoachingState.WAITING_FOR_RETRY,
             spoken_text=spoken,
+            incorrect_span=prior_incorrect,
+            corrected_form=prior_corrected_form,
             retry_of_turn_id=previous_turn_id,
         )
 
@@ -171,18 +224,20 @@ def build_coaching_outcome(
         )
 
     meaningful = learner_level.upper() in {"BEGINNER", "ELEMENTARY", "A1", "A2"} or len(response.grammar_feedback) > 1
+    incorrect_span, corrected_form = smallest_useful_error_span(learner_text, corrected)
     if meaningful:
         spoken = _join(
-            _acknowledgement(language_mode),
-            _corrected_sentence(corrected, language_mode),
+            _incorrect_then_correct(incorrect_span, corrected_form, language_mode),
             explanation,
-            _retry_request(language_mode),
+            _retry_request(language_mode, corrected),
         )
         return CoachingOutcome(
             response=response,
             mode=CoachingMode.RETRY_REQUIRED,
             state=CoachingState.WAITING_FOR_RETRY,
             spoken_text=spoken,
+            incorrect_span=incorrect_span,
+            corrected_form=corrected_form,
         )
 
     return CoachingOutcome(
@@ -190,10 +245,11 @@ def build_coaching_outcome(
         mode=CoachingMode.LIGHT_CORRECTION,
         state=CoachingState.CORRECTION_PRESENTED,
         spoken_text=_join(
-            _acknowledgement(language_mode),
-            _corrected_sentence(corrected, language_mode),
+            _incorrect_then_correct(incorrect_span, corrected_form, language_mode),
             explanation,
             response.tutor_message,
             response.conversation_question,
         ),
+        incorrect_span=incorrect_span,
+        corrected_form=corrected_form,
     )

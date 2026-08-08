@@ -79,6 +79,8 @@ class AITurnRead(BaseModel):
     turn_id: str
     tutor_message: str
     corrected_sentence: str | None
+    incorrect_span: str | None
+    corrected_form: str | None
     correction_explanation: str | None
     correction_explanation_default: str | None
     vocabulary_suggestions: list[str]
@@ -246,6 +248,8 @@ def _api_result(
         "turn_id": turn_id,
         "tutor_message": response.tutor_message,
         "corrected_sentence": response.corrected_learner_sentence,
+        "incorrect_span": coaching.incorrect_span,
+        "corrected_form": coaching.corrected_form,
         "correction_explanation": response.correction_explanation,
         "correction_explanation_default": default_correction_explanation,
         "vocabulary_suggestions": response.vocabulary_suggestions,

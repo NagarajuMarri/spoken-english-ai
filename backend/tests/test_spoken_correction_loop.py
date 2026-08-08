@@ -3,7 +3,12 @@ from sqlalchemy import func, select
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
 from backend.app.ai.models import AIConversationResponse, AIConversationRequest
-from backend.app.coaching import CoachingMode, CoachingState, build_coaching_outcome
+from backend.app.coaching import (
+    CoachingMode,
+    CoachingState,
+    build_coaching_outcome,
+    smallest_useful_error_span,
+)
 from backend.app.domain.enums import LanguageMode
 from backend.app.explanation_language import (
     ExplanationLanguage,
@@ -34,6 +39,48 @@ def test_no_correction_continues_naturally():
     assert outcome.mode == CoachingMode.NO_CORRECTION
     assert outcome.state == CoachingState.NORMAL_CONVERSATION
     assert outcome.spoken_text == f"{response.tutor_message} {response.conversation_question}"
+
+
+@pytest.mark.parametrize(("learner", "corrected", "wrong", "right"), [
+    ("She don't like coffee.", "She doesn't like coffee.", "She don't like coffee", "She doesn't like coffee"),
+    ("I didn't went there.", "I didn't go there.", "didn't went", "didn't go"),
+    ("My brother have two cars.", "My brother has two cars.", "My brother have two cars", "My brother has two cars"),
+    ("I have seen him yesterday.", "I saw him yesterday.", "I have seen him yesterday", "I saw him yesterday"),
+])
+def test_short_error_span_keeps_useful_sentence_context(learner, corrected, wrong, right):
+    assert smallest_useful_error_span(learner, corrected) == (wrong, right)
+
+
+def test_long_utterance_uses_compact_clause_and_never_replays_full_answer():
+    learner = "Yesterday after finishing my work I go to my friend house because he called me in the evening."
+    corrected = "Yesterday after finishing my work I went to my friend's house because he called me in the evening."
+    wrong, right = smallest_useful_error_span(learner, corrected)
+    assert wrong == "I go to my friend house"
+    assert right == "I went to my friend's house"
+    assert wrong != learner.rstrip(".")
+
+
+def test_spoken_order_and_shared_evidence_for_meaningful_telugu_correction():
+    learner = "Yesterday after finishing my work I go to my friend house because he called me in the evening."
+    explanation = "ఇక్కడ yesterday past time కాబట్టి go కాకుండా went వాడాలి."
+    outcome = build_coaching_outcome(
+        _response(
+            corrected_learner_sentence="Yesterday after finishing my work I went to my friend's house because he called me in the evening.",
+            correction_explanation=explanation,
+            grammar_feedback=["past tense", "possessive"],
+        ),
+        learner_level="BEGINNER",
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learner_text=learner,
+    )
+    assert outcome.state == CoachingState.WAITING_FOR_RETRY
+    assert outcome.incorrect_span and outcome.corrected_form
+    wrong_at = outcome.spoken_text.index(outcome.incorrect_span)
+    right_at = outcome.spoken_text.index(outcome.corrected_form)
+    explanation_at = outcome.spoken_text.index(explanation)
+    retry_at = outcome.spoken_text.index("ఒకసారి చెప్పండి")
+    assert wrong_at < right_at < explanation_at < retry_at
+    assert learner.rstrip(".") not in outcome.spoken_text
 
 
 def test_light_correction_uses_the_same_evidence_and_continues():

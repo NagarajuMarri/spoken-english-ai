@@ -37,6 +37,8 @@ describe("native Telugu language review capability",()=>{
       tutor_message:"చాలా బాగా ప్రయత్నించారు. ఈ sentence ని ఇంకోసారి చెప్పండి.",
       next_question:"ఇప్పుడు అదే sentence చెప్పగలరా?",
       corrected_sentence:"I went to the office yesterday.",
+      incorrect_span:"go office yesterday",
+      corrected_form:"went to the office yesterday",
       correction_explanation:"ఈ sentence లో tense మాత్రమే మార్చాలి.",
       vocabulary_suggestions:[],
       telugu_explanation:"ఈ sentence లో tense మాత్రమే మార్చాలి.",
@@ -63,6 +65,8 @@ describe("native Telugu language review capability",()=>{
     expect(await screen.findByText("Native Telugu quality review")).toBeVisible();
     expect(screen.getByText(/NATURALIZED_TELUGU/)).toBeVisible();
     expect(screen.getByText(/sentence, tense/)).toBeVisible();
+    expect(screen.getByText("go office yesterday")).toBeVisible();
+    expect(screen.getByText("went to the office yesterday")).toBeVisible();
     expect(screen.getByText(/Ananya: మీ meaning clear గా ఉంది\. Correct sentence: I went to the office yesterday\./)).toBeVisible();
     expect(screen.getAllByText("ఈ sentence లో tense మాత్రమే మార్చాలి.")).toHaveLength(2);
     expect(api.speech).toHaveBeenCalledWith("conversation-language-review","turn-language-review");
