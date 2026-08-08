@@ -54,6 +54,13 @@ class LanguageReviewResult(BaseModel):
     provider_metadata_reference: str = Field(min_length=1, max_length=100)
     usage: UsageInfo
 
+    @field_validator("review_changed", mode="before")
+    @classmethod
+    def require_json_boolean(cls, value):
+        if type(value) is not bool:
+            raise ValueError("review_changed must be a JSON boolean")
+        return value
+
     @field_validator(
         "final_text", "final_correction_explanation", "final_conversation_question",
         "final_encouragement", mode="before",

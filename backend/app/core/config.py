@@ -130,6 +130,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_environment(self):
+        if (
+            self.environment != "test"
+            and self.llm_provider == "openai"
+            and self.language_review_provider != "openai"
+        ):
+            raise ValueError(
+                "language_review_provider must be openai when llm_provider is openai"
+            )
         if not 1 <= self.openai_llm_timeout_seconds <= 60:
             raise ValueError("openai_llm_timeout_seconds must be between 1 and 60")
         if self.openai_llm_max_retries not in {0, 1}:

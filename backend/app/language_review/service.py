@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 
-from backend.app.ai.exceptions import ProviderOutputInvalid
+from backend.app.ai.exceptions import ProviderConfigurationError, ProviderOutputInvalid
 from backend.app.ai.models import AIConversationResponse, UsageInfo
 from backend.app.language_review.models import (
     ExpressionHint,
@@ -172,7 +172,11 @@ class LanguageReviewService:
             )
         else:
             if self.provider is None:
-                raise ProviderOutputInvalid("Native Telugu review provider is unavailable.", schema_path="provider")
+                raise ProviderConfigurationError(
+                    "Native Telugu review provider is not configured.",
+                    provider_requests=0,
+                    schema_path="provider",
+                )
             result = self.provider.review(request)
         _validate_result(request, result)
         if language_mode == LanguageMode.ENGLISH:

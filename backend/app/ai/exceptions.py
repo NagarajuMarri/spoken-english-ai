@@ -15,7 +15,7 @@ class ProviderError(Exception):
         schema_path: str | None = None,
     ) -> None:
         super().__init__(message)
-        self.provider_requests = max(1, provider_requests)
+        self.provider_requests = max(0, provider_requests)
         self.retry_after_seconds = retry_after_seconds
         self.input_units = max(0, input_units)
         self.output_units = max(0, output_units)
@@ -24,6 +24,10 @@ class ProviderError(Exception):
 
 class ProviderUnavailable(ProviderError):
     pass
+
+
+class ProviderConfigurationError(ProviderError):
+    failure_code = "provider_configuration_error"
 
 
 class ProviderTimeout(ProviderError):

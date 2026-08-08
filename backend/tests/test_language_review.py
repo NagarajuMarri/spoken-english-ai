@@ -5,7 +5,13 @@ import pytest
 from sqlalchemy import func, select
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
-from backend.app.ai.exceptions import ProviderOutputInvalid, ProviderTimeout
+from backend.app.ai.exceptions import (
+    ProviderConfigurationError,
+    ProviderIncompleteResponse,
+    ProviderOutputInvalid,
+    ProviderRefusal,
+    ProviderTimeout,
+)
 from backend.app.ai.models import AIConversationRequest, UsageInfo
 from backend.app.domain.enums import LanguageMode
 from backend.app.language_review.deterministic import DeterministicLanguageReviewProvider
@@ -72,6 +78,29 @@ def _review_content(review_request, **overrides):
     return content
 
 
+def _provider_response(content, *, status="completed", output=None):
+    content = dict(content)
+    content.pop("source_content_digest", None)
+    return {
+        "id": "resp_language_review",
+        "model": "gpt-5-mini",
+        "status": status,
+        "output": output if output is not None else [{
+            "type": "message",
+            "content": [{"type": "output_text", "text": json.dumps(content, ensure_ascii=False)}],
+        }],
+        "usage": {"input_tokens": 12, "output_tokens": 8},
+    }
+
+
+def _call_provider(request, response):
+    provider = OpenAILanguageReviewProvider(
+        OpenAILanguageReviewHTTPClient("secret-key", lambda *_args, **_kwargs: _HTTPResponse(response)),
+        model="gpt-5-mini", max_retries=0,
+    )
+    return provider.review(request)
+
+
 def test_openai_language_reviewer_uses_strict_schema_and_privacy_safe_payload():
     captured = {}
     source = _source_response()
@@ -86,13 +115,15 @@ def test_openai_language_reviewer_uses_strict_schema_and_privacy_safe_payload():
     def opener(outgoing, timeout):
         captured["request"] = outgoing
         captured["timeout"] = timeout
+        provider_content = _review_content(request)
+        provider_content.pop("source_content_digest")
         return _HTTPResponse({
             "id": "resp_language_review",
             "model": "gpt-5-mini",
             "status": "completed",
             "output": [{
                 "type": "message",
-                "content": [{"type": "output_text", "text": json.dumps(_review_content(request), ensure_ascii=False)}],
+                "content": [{"type": "output_text", "text": json.dumps(provider_content, ensure_ascii=False)}],
             }],
             "usage": {"input_tokens": 120, "output_tokens": 80},
         })
@@ -112,6 +143,8 @@ def test_openai_language_reviewer_uses_strict_schema_and_privacy_safe_payload():
     assert outgoing.get_header("Authorization") == "Bearer secret-key"
     assert "secret-key" not in outgoing.data.decode()
     assert "private-correlation" not in outgoing.data.decode()
+    assert request.source_content_digest not in outgoing.data.decode()
+    assert "source_content_digest" not in body["text"]["format"]["schema"]["properties"]
     assert body["store"] is False
     assert body["text"]["format"] == {
         "type": "json_schema",
@@ -143,6 +176,108 @@ def test_english_mode_is_exact_pass_through_without_provider_call():
     assert result.review_changed is False
     assert result.review_reason_code == ReviewReasonCode.NOT_REQUIRED
     assert result.usage.provider_requests == 0
+
+
+def test_missing_live_reviewer_is_configuration_failure_without_fake_request_count():
+    with pytest.raises(ProviderConfigurationError) as captured:
+        LanguageReviewService(None).review(
+            _source_response(), language_mode=LanguageMode.ENGLISH_TELUGU,
+            learning_objective="Daily conversation", learner_level="BEGINNER",
+            correlation_id="correlation-1",
+        )
+    assert captured.value.failure_code == "provider_configuration_error"
+    assert captured.value.provider_requests == 0
+    assert captured.value.schema_path == "provider"
+
+
+@pytest.mark.parametrize(
+    ("mode", "changed", "reason", "terms"),
+    [
+        ("ENGLISH", False, "NOT_REQUIRED", []),
+        ("ENGLISH_TELUGU", True, "IMPROVED_CODE_SWITCHING", []),
+        ("TELUGU_DOMINANT", True, "NATURALIZED_TELUGU", ["grammar", "sentence"]),
+    ],
+)
+def test_live_provider_shapes_validate_for_every_language_mode(mode, changed, reason, terms):
+    source = _source_response()
+    request = build_review_request(
+        source, language_mode=LanguageMode(mode), learning_objective="Daily conversation",
+        learner_level="BEGINNER", correlation_id="correlation-1",
+    )
+    content = _review_content(
+        request, language_mode=mode, review_changed=changed,
+        review_reason_code=reason, preserved_learning_terms=terms,
+    )
+    result = _call_provider(request, _provider_response(content))
+    assert result.language_mode == LanguageMode(mode)
+    assert result.review_changed is changed
+    assert result.source_content_digest == request.source_content_digest
+
+
+@pytest.mark.parametrize(
+    ("mutation", "path"),
+    [
+        ({"final_encouragement": None}, "final_encouragement"),
+        ({"unexpected_wrapper": {}}, "unexpected.unexpected_wrapper"),
+        ({"language_mode": "MIXED"}, "language_mode"),
+        ({"review_changed": "true"}, "review_changed"),
+        ({"expression_hint": None}, "expression_hint"),
+    ],
+)
+def test_live_provider_shape_rejects_invalid_contract(mutation, path):
+    source = _source_response()
+    request = build_review_request(
+        source, language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation", learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+    content = _review_content(request)
+    content.update(mutation)
+    with pytest.raises(ProviderOutputInvalid) as captured:
+        _call_provider(request, _provider_response(content))
+    assert path in (captured.value.schema_path or "")
+
+
+def test_live_provider_shape_rejects_missing_field_refusal_and_incomplete():
+    source = _source_response()
+    request = build_review_request(
+        source, language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation", learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+    content = _review_content(request)
+    content.pop("final_text")
+    with pytest.raises(ProviderOutputInvalid) as missing:
+        _call_provider(request, _provider_response(content))
+    assert missing.value.schema_path == "missing.final_text"
+
+    refusal = _provider_response({}, output=[{
+        "type": "message", "content": [{"type": "refusal", "refusal": "cannot comply"}],
+    }])
+    with pytest.raises(ProviderRefusal):
+        _call_provider(request, refusal)
+
+    incomplete = _provider_response({}, status="incomplete", output=[])
+    incomplete["incomplete_details"] = {"reason": "max_output_tokens"}
+    with pytest.raises(ProviderIncompleteResponse):
+        _call_provider(request, incomplete)
+
+
+def test_live_provider_shape_extracts_text_across_multiple_output_items():
+    source = _source_response()
+    request = build_review_request(
+        source, language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation", learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+    content = _review_content(request)
+    content.pop("source_content_digest")
+    encoded = json.dumps(content, ensure_ascii=False)
+    response = _provider_response({}, output=[
+        {"type": "reasoning", "summary": []},
+        {"type": "message", "content": [{"type": "output_text", "text": encoded}]},
+    ])
+    assert _call_provider(request, response).final_text == content["final_text"]
 
 
 @pytest.mark.parametrize("mode", [LanguageMode.ENGLISH_TELUGU, LanguageMode.TELUGU_DOMINANT])

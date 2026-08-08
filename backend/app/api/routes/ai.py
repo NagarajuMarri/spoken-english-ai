@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
 from backend.app.ai.exceptions import (
+    ProviderConfigurationError,
     ProviderConnectionError,
     ProviderContextLimit,
     ProviderError,
@@ -80,6 +81,13 @@ def _provider_app_error(exc: ProviderError) -> AppError:
     headers = {}
     if exc.retry_after_seconds is not None:
         headers["Retry-After"] = str(exc.retry_after_seconds)
+    if isinstance(exc, ProviderConfigurationError):
+        return AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "llm_provider_not_configured",
+            "The tutor language service is not configured. Contact support.",
+            retryable=False,
+        )
     if isinstance(exc, ProviderTimeout):
         return AppError(
             status.HTTP_504_GATEWAY_TIMEOUT,
@@ -167,6 +175,7 @@ def _failure_from_attempt(attempt: AITurnAttempt, *, language_review: bool = Fal
         "provider_refusal": ProviderRefusal,
         "provider_malformed_response": ProviderMalformedResponse,
         "provider_schema_validation_failed": ProviderOutputInvalid,
+        "provider_configuration_error": ProviderConfigurationError,
     }
     error_type = error_types.get(attempt.failure_code or "", ProviderUnavailable)
     error = error_type("Stored provider failure.")
@@ -214,6 +223,7 @@ def _language_review_app_error(exc: ProviderError) -> AppError:
         "llm_malformed_response": "language_review_malformed",
         "llm_schema_validation_failed": "language_review_validation_failed",
         "llm_unavailable": "language_review_unavailable",
+        "llm_provider_not_configured": "language_review_provider_not_configured",
     }.get(base.code, "language_review_unavailable")
     return AppError(
         base.status_code,

@@ -4,6 +4,7 @@ import json
 import logging
 import socket
 from time import sleep
+from typing import cast
 from urllib import error, request as urllib_request
 
 from pydantic import ValidationError
@@ -33,7 +34,7 @@ LANGUAGE_REVIEW_SCHEMA = {
         "final_encouragement": {"type": "string", "minLength": 1, "maxLength": 300},
         "language_mode": {
             "type": "string",
-            "enum": ["ENGLISH_TELUGU", "TELUGU_DOMINANT"],
+            "enum": ["ENGLISH", "ENGLISH_TELUGU", "TELUGU_DOMINANT"],
         },
         "review_changed": {"type": "boolean"},
         "review_reason_code": {
@@ -54,7 +55,6 @@ LANGUAGE_REVIEW_SCHEMA = {
             "type": "string",
             "enum": ["NEUTRAL", "POSITIVE", "ENCOURAGING", "CORRECTIVE"],
         },
-        "source_content_digest": {"type": "string", "minLength": 64, "maxLength": 64},
     },
     "required": [
         "final_text",
@@ -66,7 +66,6 @@ LANGUAGE_REVIEW_SCHEMA = {
         "review_reason_code",
         "preserved_learning_terms",
         "expression_hint",
-        "source_content_digest",
     ],
 }
 
@@ -95,12 +94,15 @@ class OpenAILanguageReviewHTTPClient:
             "use natural Telugu explanation where it helps. In TELUGU_DOMINANT mode, explain mainly in Telugu "
             "while retaining useful English learning terms such as grammar, tense, sentence, verb, noun, "
             "pronunciation, confidence, fluency, and practice. Do not mix languages randomly. Return only the "
-            "requested structured fields and never expose reasoning. Copy source_content_digest exactly."
+            "requested structured fields and never expose reasoning. The application owns integrity digests; "
+            "do not return or invent a digest or any field outside the schema."
         )
 
     @staticmethod
     def _input(review_request) -> str:
-        safe = review_request.model_dump(mode="json", exclude={"correlation_id"})
+        safe = review_request.model_dump(
+            mode="json", exclude={"correlation_id", "source_content_digest"}
+        )
         return json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
 
     def review_structured(
@@ -182,8 +184,34 @@ class OpenAILanguageReviewHTTPClient:
             )
         helper._log_response_shape(value)
         content = helper._structured_content(value, provider_requests)
+        returned_fields = set(content)
+        expected_fields = set(cast(list[str], LANGUAGE_REVIEW_SCHEMA["required"]))
+        missing_fields = sorted(expected_fields - returned_fields)
+        unexpected_fields = sorted(returned_fields - expected_fields)
+        if missing_fields or unexpected_fields:
+            shape = helper._response_shape(value)
+            path = (
+                f"missing.{missing_fields[0]}" if missing_fields
+                else f"unexpected.{unexpected_fields[0]}"
+            )
+            logger.warning(
+                "language_review_schema_failure status=%s output_item_types=%s "
+                "returned_fields=%s missing_fields=%s unexpected_fields=%s "
+                "schema_path=%s classification=validation language_mode=%s",
+                shape["status"], shape["output_item_types"],
+                ",".join(sorted(returned_fields)) or "none",
+                ",".join(missing_fields) or "none",
+                ",".join(unexpected_fields) or "none",
+                path, review_request.language_mode,
+            )
+            raise ProviderOutputInvalid(
+                "Language review structured output fields were invalid.",
+                provider_requests=provider_requests,
+                schema_path=path[:200],
+            )
         usage = value.get("usage") or {}
         input_details = usage.get("input_tokens_details") or {}
+        content["source_content_digest"] = review_request.source_content_digest
         content["provider_metadata_reference"] = (
             f"language-review:{value.get('model') or model}:{value.get('id') or 'response'}"
         )[:100]
@@ -205,6 +233,19 @@ class OpenAILanguageReviewHTTPClient:
                 else "unexpected_field"
                 for part in location
             ) or "root"
+            shape = helper._response_shape(value)
+            logger.warning(
+                "language_review_schema_failure status=%s output_item_types=%s "
+                "returned_fields=%s missing_fields=%s unexpected_fields=%s "
+                "schema_path=%s classification=validation language_mode=%s",
+                shape["status"],
+                shape["output_item_types"],
+                ",".join(sorted(returned_fields)) or "none",
+                ",".join(missing_fields) or "none",
+                ",".join(unexpected_fields) or "none",
+                path[:200],
+                review_request.language_mode,
+            )
             raise ProviderOutputInvalid(
                 "Language review structured output was invalid.",
                 provider_requests=provider_requests,
