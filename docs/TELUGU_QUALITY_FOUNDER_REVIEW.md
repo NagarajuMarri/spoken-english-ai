@@ -1,16 +1,16 @@
 # Feature 6 — Native Telugu founder review
 
-Status: **BLOCKED — founder language acceptance required**
+Status: **ACCEPTED — founder language acceptance passed on 8 August 2026**
 
 Acceptance question for every sample:
 
 > Does this sound like a native Telugu English teacher speaking naturally to a student?
 
 The first founder review accepted cases 2, 4, 6, 7, 10, and 11. Cases 1, 3, 5, 8, 9, and 12
-were revised using the founder's conversational Telugu direction. Review all 12 regenerated
-responses in `backend/evals/telugu_quality.json` and mark each case `ACCEPT`, `REVISE`, or
-`REJECT`. Automated checks cover structure and protected-content preservation; they do not
-certify native Telugu quality.
+were revised using the founder's conversational Telugu direction. The founder subsequently
+marked all 12 regenerated responses `ACCEPT`. Automated checks continue to cover structure
+and protected-content preservation; the founder decision supplies the required native-language
+judgment.
 
 The revision guardrails include the founder-preferred phrases `మాట్లాడే practice`,
 `ఇంకొంచెం natural English గా`, `మీ update clear గా ఉంటుంది`, and `difference అర్థమైందా?`.
@@ -93,5 +93,8 @@ Release acceptance requires all four evidence classes:
 3. `RUNTIME_EVIDENCE`
 4. `FOUNDER_LANGUAGE_ACCEPTANCE`
 
-Feature 5 OpenAI TTS is **ACCEPTED**. Feature 7 avatar synchronization must not start until
-Feature 6 receives founder language acceptance.
+Feature 5 OpenAI TTS is **ACCEPTED**. Feature 6 Native Telugu Language Review is **ACCEPTED**.
+The accepted Feature 6 branch and commit are
+`agent/rc1-feature-6-telugu-language-review` at
+`ba7b1b9dcf904d185e848f6ea8ab1aa8b60e6356`. The 12 accepted examples above are frozen
+unless a later regression requires a reviewed change.

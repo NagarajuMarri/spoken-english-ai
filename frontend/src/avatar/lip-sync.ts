@@ -1,5 +1,58 @@
-export type SyncStatus="NOT_AVAILABLE"|"APPROXIMATE"|"VISEME_TIMED"|"SYNCHRONIZED"|"FAILED";
-export interface VisemeEvent{identifier:string;start_ms:number;end_ms:number;confidence?:number}
-export interface LipSyncContract{audio_reference:string;duration_ms:number;timing_source:"PROVIDER"|"APPROXIMATE"|"NONE";visemes:VisemeEvent[];fallback_mode:"APPROXIMATE"|"STATIC";status:SyncStatus}
-export function approximateLipSync(audio_reference:string,duration_ms:number,step=180):LipSyncContract{const visemes:VisemeEvent[]=[];for(let start=0;start<duration_ms;start+=step)visemes.push({identifier:(start/step)%2?"OPEN":"REST",start_ms:start,end_ms:Math.min(duration_ms,start+step),confidence:.5});return{audio_reference,duration_ms,timing_source:"APPROXIMATE",visemes,fallback_mode:"APPROXIMATE",status:"APPROXIMATE"}}
-export class LipSyncPlayer{private timers:number[]=[];play(contract:LipSyncContract,onViseme:(id:string)=>void,onEnd:()=>void){this.cancel();for(const event of contract.visemes)this.timers.push(window.setTimeout(()=>onViseme(event.identifier),event.start_ms));this.timers.push(window.setTimeout(()=>{this.cancel();onEnd()},contract.duration_ms))}cancel(){this.timers.forEach(clearTimeout);this.timers=[]}}
+export type SyncStatus = "NOT_AVAILABLE" | "APPROXIMATE" | "VISEME_TIMED" | "SYNCHRONIZED" | "FAILED";
+export type MouthShape = "REST" | "SMALL" | "MEDIUM" | "WIDE";
+
+export interface VisemeEvent {
+  identifier: MouthShape;
+  start_ms: number;
+  end_ms: number;
+  confidence?: number;
+}
+
+export interface LipSyncContract {
+  audio_reference: string;
+  duration_ms: number;
+  timing_source: "PROVIDER" | "APPROXIMATE" | "NONE";
+  visemes: VisemeEvent[];
+  fallback_mode: "APPROXIMATE" | "STATIC";
+  status: SyncStatus;
+}
+
+const APPROXIMATE_CYCLE: readonly MouthShape[] = ["SMALL", "MEDIUM", "WIDE", "MEDIUM"];
+
+export function approximateLipSync(
+  audioReference: string,
+  durationMs: number,
+  stepMs = 120,
+): LipSyncContract {
+  const boundedDuration = Math.max(0, durationMs);
+  const visemes: VisemeEvent[] = [];
+  for (let start = 0; start < boundedDuration; start += stepMs) {
+    visemes.push({
+      identifier: APPROXIMATE_CYCLE[Math.floor(start / stepMs) % APPROXIMATE_CYCLE.length],
+      start_ms: start,
+      end_ms: Math.min(boundedDuration, start + stepMs),
+      confidence: 0.5,
+    });
+  }
+  return {
+    audio_reference: audioReference,
+    duration_ms: boundedDuration,
+    timing_source: "APPROXIMATE",
+    visemes,
+    fallback_mode: "APPROXIMATE",
+    status: "APPROXIMATE",
+  };
+}
+
+export function mouthShapeAtPlaybackTime(currentTimeMs: number, durationMs: number): MouthShape {
+  if (!Number.isFinite(currentTimeMs) || currentTimeMs < 0) return "REST";
+  if (Number.isFinite(durationMs) && durationMs > 0 && currentTimeMs >= durationMs) return "REST";
+  return APPROXIMATE_CYCLE[Math.floor(currentTimeMs / 120) % APPROXIMATE_CYCLE.length];
+}
+
+export function mouthShapeFromContract(contract: LipSyncContract, currentTimeMs: number): MouthShape {
+  const event = contract.visemes.find(
+    (candidate) => currentTimeMs >= candidate.start_ms && currentTimeMs < candidate.end_ms,
+  );
+  return event?.identifier ?? "REST";
+}

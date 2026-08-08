@@ -97,4 +97,5 @@ def test_learner_frontend_and_tutor_assets_are_served(client):
     assert "Your English" in javascript.text
     assert "MediaRecorder" in javascript.text
     assert "sessionStorage" in javascript.text
-    assert "APPROXIMATE" in javascript.text
+    assert "AUDIO_LIFECYCLE" in javascript.text
+    assert "requestAnimationFrame" in javascript.text

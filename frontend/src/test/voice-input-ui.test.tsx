@@ -42,6 +42,7 @@ describe("voice input customer journey",()=>{
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
     expect(screen.getByText(/Microphone: recording/)).toBeVisible();
+    await waitFor(()=>expect(screen.getByLabelText(/tutor status: listening/)).toHaveAttribute("data-state", "LISTENING"));
     await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
     await waitFor(()=>expect(api.transcribe).toHaveBeenCalledOnce());
     const capture=vi.mocked(api.transcribe).mock.calls[0][1];

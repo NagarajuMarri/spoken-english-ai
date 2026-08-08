@@ -1,2 +1,28 @@
-import{afterEach,describe,expect,it,vi}from"vitest";import{approximateLipSync,LipSyncPlayer}from"../avatar/lip-sync";
-describe("lip sync boundary",()=>{afterEach(()=>vi.useRealTimers());it("creates bounded deterministic visemes",()=>{const a=approximateLipSync("audio",500,200),b=approximateLipSync("audio",500,200);expect(a).toEqual(b);expect(a.visemes.at(-1)?.end_ms).toBe(500)});it("classifies fallback honestly",()=>expect(approximateLipSync("audio",200).status).toBe("APPROXIMATE"));it("sequences and completes",()=>{vi.useFakeTimers();const seen:string[]=[];new LipSyncPlayer().play(approximateLipSync("a",360,180),x=>seen.push(x),()=>seen.push("END"));vi.runAllTimers();expect(seen).toEqual(["REST","OPEN","END"])});it("cancels pending events",()=>{vi.useFakeTimers();const seen:string[]=[];const player=new LipSyncPlayer();player.play(approximateLipSync("a",360),x=>seen.push(x),()=>seen.push("END"));player.cancel();vi.runAllTimers();expect(seen).toEqual([])})});
+import { describe, expect, it } from "vitest";
+import { approximateLipSync, mouthShapeAtPlaybackTime, mouthShapeFromContract } from "../avatar/lip-sync";
+
+describe("lip sync boundary", () => {
+  it("creates bounded deterministic provider-neutral visemes", () => {
+    const first = approximateLipSync("audio", 500, 120);
+    const second = approximateLipSync("audio", 500, 120);
+    expect(first).toEqual(second);
+    expect(first.visemes.at(-1)?.end_ms).toBe(500);
+  });
+
+  it("classifies the non-phoneme fallback honestly", () => {
+    expect(approximateLipSync("audio", 200).status).toBe("APPROXIMATE");
+  });
+
+  it("derives mouth shapes from real playback position without timers", () => {
+    expect(mouthShapeAtPlaybackTime(0, 1000)).toBe("SMALL");
+    expect(mouthShapeAtPlaybackTime(120, 1000)).toBe("MEDIUM");
+    expect(mouthShapeAtPlaybackTime(240, 1000)).toBe("WIDE");
+    expect(mouthShapeAtPlaybackTime(1000, 1000)).toBe("REST");
+  });
+
+  it("can consume provider visemes later without changing the renderer", () => {
+    const contract = approximateLipSync("audio", 500, 120);
+    expect(mouthShapeFromContract(contract, 240)).toBe("WIDE");
+    expect(mouthShapeFromContract(contract, 600)).toBe("REST");
+  });
+});

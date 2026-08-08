@@ -1,2 +1,41 @@
-import{useEffect,useRef,useState}from"react";import type{Tutor}from"../models";import type{AvatarState}from"../avatar/machine";import{LipSyncPlayer,approximateLipSync}from"../avatar/lip-sync";
-export function Avatar({tutor,state,reducedMotion=false}:{tutor:Tutor;state:AvatarState;reducedMotion?:boolean}){const[mouth,setMouth]=useState("REST");const player=useRef(new LipSyncPlayer());useEffect(()=>{const active=player.current;if(state==="SPEAKING"&&!reducedMotion)active.play(approximateLipSync("browser-native",900),setMouth,()=>setMouth("REST"));else active.cancel();return()=>active.cancel()},[state,reducedMotion]);return <figure className={`avatar ${state.toLowerCase()} ${reducedMotion?"reduced-motion":""}`} aria-label={`${tutor.display_name} tutor status: ${state.toLowerCase()}`}><img src={tutor.avatar_profile} alt={`${tutor.display_name}, animated 2D Indian-English tutor`}/><i className="eyelid left"/><i className="eyelid right"/><span className={`mouth ${mouth.toLowerCase()}`} aria-hidden="true">|||||</span><figcaption aria-live="polite">{state.toLowerCase()}</figcaption></figure>}
+import { createRendererFrame } from "../avatar/renderer";
+import type { TutorPresentation } from "../avatar/machine";
+import type { Tutor } from "../models";
+
+export function Avatar({
+  tutor,
+  presentation,
+  reducedMotion = false,
+}: {
+  tutor: Tutor;
+  presentation: TutorPresentation;
+  reducedMotion?: boolean;
+}) {
+  const frame = createRendererFrame(presentation, reducedMotion);
+  const stateLabel = frame.state.toLowerCase();
+  const expressionLabel = frame.expression.toLowerCase();
+  return (
+    <figure
+      className={`avatar ${stateLabel} expression-${expressionLabel} ${reducedMotion ? "reduced-motion" : ""}`}
+      data-state={frame.state}
+      data-expression={frame.expression}
+      data-mouth={frame.mouth}
+      data-tutor={tutor.tutor_id}
+      aria-label={`${tutor.display_name} tutor status: ${stateLabel}; expression: ${expressionLabel}`}
+    >
+      <img src={tutor.avatar_profile} alt={`${tutor.display_name}, animated 2D Indian-English tutor`} />
+      <span className="state-aura" aria-hidden="true" />
+      <span className="listening-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+      <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+      <i className={`eyelid left ${frame.blinkEnabled ? "blink-enabled" : ""}`} aria-hidden="true" />
+      <i className={`eyelid right ${frame.blinkEnabled ? "blink-enabled" : ""}`} aria-hidden="true" />
+      <i className="expression-brow left" aria-hidden="true" />
+      <i className="expression-brow right" aria-hidden="true" />
+      <span className={`mouth mouth-${frame.mouth.toLowerCase()}`} aria-hidden="true" />
+      <figcaption aria-live="polite">
+        <strong>{stateLabel}</strong>
+        {frame.expression !== "NEUTRAL" && <span>{expressionLabel}</span>}
+      </figcaption>
+    </figure>
+  );
+}

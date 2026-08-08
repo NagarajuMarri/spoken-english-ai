@@ -22,7 +22,7 @@ beforeEach(()=>{
  Object.defineProperty(URL,"revokeObjectURL",{configurable:true,value:vi.fn()});
 });
 it("plays valid OpenAI audio and exposes start end mute stop and replay controls",async()=>{
- render(<TutorAudioPlayer speech={firstSpeech} spokenText="You are improving. What happened next?"/>);
+ render(<TutorAudioPlayer speech={firstSpeech} spokenText="You are improving. What happened next?" playbackId="turn-one"/>);
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(1));
  expect(screen.getByText(/Provider: openai · Model: gpt-4o-mini-tts · Voice: marin/)).toBeVisible();
  const player=screen.getByLabelText(/Tutor audio for/);
@@ -43,16 +43,16 @@ it("plays valid OpenAI audio and exposes start end mute stop and replay controls
 
 it("handles Chrome autoplay blocking with an explicit user play path",async()=>{
  play.mockRejectedValueOnce(new DOMException("blocked","NotAllowedError")).mockResolvedValueOnce(undefined);
- render(<TutorAudioPlayer speech={firstSpeech} spokenText="Tutor response"/>);
+ render(<TutorAudioPlayer speech={firstSpeech} spokenText="Tutor response" playbackId="turn-one"/>);
  expect(await screen.findByRole("status")).toHaveTextContent("Chrome blocked autoplay");
  await userEvent.click(screen.getByRole("button",{name:"Play tutor voice"}));
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(2));
 });
 
 it("cancels the prior source and plays the second consecutive response once",async()=>{
- const{rerender}=render(<TutorAudioPlayer speech={firstSpeech} spokenText="First response"/>);
+ const{rerender}=render(<TutorAudioPlayer speech={firstSpeech} spokenText="First response" playbackId="turn-one"/>);
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(1));
- rerender(<TutorAudioPlayer speech={secondSpeech} spokenText="Second response"/>);
+ rerender(<TutorAudioPlayer speech={secondSpeech} spokenText="Second response" playbackId="turn-two"/>);
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(2));
  expect(pause).toHaveBeenCalled();
  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:first");

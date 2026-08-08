@@ -6,3 +6,41 @@ header{display:flex;align-items:center;gap:1rem;padding:1rem 4vw;border-bottom:1
 .public-nav{position:sticky;top:0;z-index:5}.landing{max-width:1200px;margin:auto;min-height:80vh;padding:10vh 5vw;display:grid;grid-template-columns:1.3fr .7fr;gap:6vw;align-items:center}.landing h1,.public-page h1{font:700 clamp(2.6rem,5vw,5.2rem)/1 Georgia;margin:.4rem 0 1.5rem}.landing>section>p{font-size:1.15rem;line-height:1.7;max-width:700px}.launch-card,.pricing article{background:#fffdf8;border:1px solid #cfc6b8;border-radius:26px;padding:2rem;box-shadow:0 18px 45px #5b463013}.launch-card strong{font:700 2rem Georgia}.launch-card li{margin:1rem 0}.release-note{font-size:.9rem!important;color:#5d6d68}.public-page{max-width:1050px;margin:auto;padding:8vh 5vw;line-height:1.75}.pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}.pricing strong{font:700 2.4rem Georgia}.legal-links{font-size:.85rem;text-align:center}.legal-links a{margin:.3rem;color:#335f55}@media(max-width:720px){.landing,.pricing{grid-template-columns:1fr}.landing{padding-top:5vh}}
 .tutor-audio{margin:1rem 0;padding:1rem;border:1px solid #cfc6b8;border-radius:16px;background:#f7f2e8;text-align:left}.tutor-audio audio{width:100%}.audio-actions{display:flex;gap:.5rem;flex-wrap:wrap;margin:.75rem 0}.audio-actions button{padding:.55rem .85rem}.ai-disclosure,.audio-evidence{font-size:.86rem;color:#536761}.ai-disclosure{font-weight:700}
 .language-mode-picker{margin:1.5rem auto;max-width:760px;border:1px solid #cfc6b8;border-radius:20px;padding:1rem;text-align:left;background:#fffdf8}.language-mode-picker legend{font-weight:800;padding:0 .5rem}.language-mode-picker label{display:flex;align-items:flex-start;gap:.8rem;padding:.75rem;border-radius:12px}.language-mode-picker label:has(input:checked){background:#e4f0ea}.language-mode-picker strong,.language-mode-picker small{display:block}.language-mode-picker small{margin-top:.2rem;color:#536761;line-height:1.4}.capability-note{padding:.75rem 1rem;border-radius:12px;background:#e4f0ea;color:#244b42;text-align:left}
+
+/* Feature 7: renderer-neutral state is expressed by data attributes/classes.
+   Motion is presentation-only; audio lifecycle remains owned by TutorAudioPlayer. */
+.avatar{--avatar-accent:#5b7f75;isolation:isolate;box-shadow:0 0 0 5px #fffdf8,0 0 0 8px var(--avatar-accent);transition:box-shadow .2s ease,transform .2s ease}
+.avatar img{position:relative;z-index:1}
+.avatar figcaption{z-index:8;display:flex;gap:.45rem;align-items:center;text-transform:capitalize;white-space:nowrap}
+.avatar figcaption span{font-size:.78rem;background:#fff2;padding:.18rem .42rem;border-radius:12px}
+.state-aura{position:absolute;z-index:2;inset:0;border-radius:inherit;pointer-events:none;box-shadow:inset 0 -55px 70px #15352f22}
+.avatar.listening{--avatar-accent:#c84e33;animation:listening-pulse 1.2s ease-in-out infinite}
+.avatar.thinking{--avatar-accent:#d19533}
+.avatar.speaking{--avatar-accent:#238065}
+.avatar.error{--avatar-accent:#a72d22}
+.avatar.expression-positive{--expression-color:#1b8a57}
+.avatar.expression-encouraging{--expression-color:#d27b22}
+.avatar.expression-corrective{--expression-color:#b9563f}
+.avatar.speaking img{animation:none;transform:scale(1.008)}
+.eyelid{z-index:4;animation:none;pointer-events:none}
+.eyelid.blink-enabled{animation:natural-blink 5.5s infinite}
+.expression-brow{display:none;position:absolute;z-index:5;top:32%;width:12%;height:5px;border-radius:6px;background:var(--expression-color,#70432f);box-shadow:0 1px 2px #fff8}
+.expression-brow.left{left:34%}.expression-brow.right{right:33%}
+.expression-positive .expression-brow,.expression-encouraging .expression-brow,.expression-corrective .expression-brow{display:block}
+.expression-positive .expression-brow.left,.expression-positive .expression-brow.right{transform:rotate(-4deg)}
+.expression-encouraging .expression-brow.left{transform:rotate(-10deg)}.expression-encouraging .expression-brow.right{transform:rotate(10deg)}
+.expression-corrective .expression-brow.left{transform:rotate(9deg)}.expression-corrective .expression-brow.right{transform:rotate(-9deg)}
+.mouth{z-index:6;left:50%;top:63%;display:none;width:34px;height:8px;transform:translate(-50%,-50%);color:transparent;opacity:1;border:3px solid #7e352d;border-top-width:1px;border-radius:5px 5px 18px 18px;background:#b85b54;box-shadow:0 0 0 2px #fff7;transition:width 70ms linear,height 70ms linear,border-radius 70ms linear}
+.speaking .mouth{display:block;opacity:1;animation:none}
+.speaking .mouth-small{width:28px;height:7px}.speaking .mouth-medium{width:34px;height:13px;border-radius:8px 8px 18px 18px}.speaking .mouth-wide{width:39px;height:20px;border-radius:50%}
+.avatar[data-tutor="ananya"] .mouth{top:47%}.avatar[data-tutor="ananya"] .eyelid{top:36%}.avatar[data-tutor="ananya"] .expression-brow{top:31%}
+.avatar[data-tutor="arjun"] .mouth{top:43%}.avatar[data-tutor="arjun"] .eyelid{top:31%}.avatar[data-tutor="arjun"] .expression-brow{top:26%}
+.listening-wave,.thinking-dots{display:none;position:absolute;z-index:7;left:50%;bottom:54px;transform:translateX(-50%);align-items:center;justify-content:center;gap:4px;background:#15352fdd;padding:.5rem .7rem;border-radius:16px}
+.listening-wave{height:34px}.listening .listening-wave{display:flex}.listening-wave i{display:block;width:4px;height:12px;border-radius:4px;background:#fff;animation:wave-bar .75s ease-in-out infinite alternate}.listening-wave i:nth-child(2),.listening-wave i:nth-child(4){animation-delay:.12s}.listening-wave i:nth-child(3){animation-delay:.24s}
+.thinking .thinking-dots{display:flex}.thinking-dots i{display:block;width:8px;height:8px;border-radius:50%;background:#fff;animation:thinking-dot 1s ease-in-out infinite}.thinking-dots i:nth-child(2){animation-delay:.15s}.thinking-dots i:nth-child(3){animation-delay:.3s}
+.avatar-sync-evidence{margin:.9rem auto 0;max-width:500px;padding:.65rem .8rem;border-radius:12px;background:#edf1ec;color:#36534c;line-height:1.35}.avatar-sync-evidence small{color:#536761}
+@keyframes natural-blink{0%,45%,49%,100%{height:0}47%{height:2.2%}}
+@keyframes listening-pulse{50%{box-shadow:0 0 0 5px #fffdf8,0 0 0 14px #c84e3344}}
+@keyframes wave-bar{to{height:26px}}
+@keyframes thinking-dot{0%,70%,100%{transform:translateY(0);opacity:.55}35%{transform:translateY(-6px);opacity:1}}
+@media(prefers-reduced-motion:reduce){.avatar .eyelid,.avatar .mouth,.avatar .listening-wave,.avatar .thinking-dots{display:none!important}.avatar{transform:none!important}}
