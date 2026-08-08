@@ -6,7 +6,7 @@
     "language_mode": "ENGLISH_TELUGU",
     "learner_input": "I went office yesterday.",
     "protected_result": "I went to the office yesterday.",
-    "response": "చాలా బాగా చెప్పారు. ఈ sentence లో office ముందు ‘to the’ పెట్టాలి: ‘I went to the office yesterday.’ ఇక్కడ tense మాత్రం సరైనదే. ఇప్పుడు corrected sentence ని ఇంకోసారి చెప్పండి.",
+    "response": "చాలా బాగా చెప్పారు. చిన్న correction మాత్రమే ఉంది. ‘I went office yesterday’ బదులుగా ‘I went to the office yesterday’ అని చెప్పాలి. ఇక్కడ tense correct గానే ఉంది. ఇప్పుడు ఈ sentence ని మరోసారి చెప్పండి.",
     "preserved_learning_terms": ["sentence", "tense"]
   },
   {
@@ -26,7 +26,7 @@
     "language_mode": "TELUGU_DOMINANT",
     "learner_input": "I am afraid to speak.",
     "protected_result": "Build speaking confidence through short daily practice.",
-    "response": "మాట్లాడేటప్పుడు కొంచెం భయం రావడం సహజమే. తప్పు అవుతుందేమో అని ఆగిపోకండి. రోజూ రెండు చిన్న sentences చెప్పే practice చేస్తే confidence నెమ్మదిగా పెరుగుతుంది. ఈరోజు మీ గురించి ఒక చిన్న sentence చెప్పగలరా?",
+    "response": "మాట్లాడేటప్పుడు కొంచెం భయం రావడం సహజమే. తప్పు అవుతుందేమో అని ఆగిపోవద్దు. రోజూ రెండు చిన్న sentences తో మాట్లాడే practice చేయండి. అలా చేస్తే confidence నెమ్మదిగా పెరుగుతుంది. ఈరోజు మీ గురించి ఒక చిన్న sentence చెప్పగలరా?",
     "preserved_learning_terms": ["sentence", "practice", "confidence"]
   },
   {
@@ -46,7 +46,7 @@
     "language_mode": "ENGLISH_TELUGU",
     "learner_input": "How can I update my manager?",
     "protected_result": "The issue is under investigation, and I will share the next update by 3 PM.",
-    "response": "Manager కి update ఇస్తున్నప్పుడు status, action, next update time—ఈ మూడు స్పష్టంగా చెప్పండి: ‘The issue is under investigation, and I will share the next update by 3 PM.’ ఇలా చెబితే sentence professional గా, clear గా ఉంటుంది.",
+    "response": "Manager కి update ఇచ్చేటప్పుడు status ఏంటి, ఇప్పుడు ఏ action తీసుకుంటున్నారు, next update ఎప్పుడు ఇస్తారు—ఈ మూడు చెప్పండి: ‘The issue is under investigation, and I will share the next update by 3 PM.’ ఈ sentence వాడితే మీ update clear గా ఉంటుంది, professional గానూ అనిపిస్తుంది.",
     "preserved_learning_terms": ["sentence"]
   },
   {
@@ -76,7 +76,7 @@
     "language_mode": "ENGLISH_TELUGU",
     "learner_input": "I think remote work good because save time.",
     "protected_result": "I think remote work is good because it saves time.",
-    "response": "మీ opinion బాగా చెప్పారు. sentence పూర్తి కావడానికి రెండు చిన్న changes చేయాలి: ‘remote work is good’ మరియు ‘it saves time.’ Final sentence: ‘I think remote work is good because it saves time.’ ఇప్పుడు దీనికి ఇంకో reason జోడిస్తారా?",
+    "response": "మీ opinion బాగుంది. ఇంకొంచెం natural English గా చెప్పాలంటే రెండు చిన్న changes చేయాలి: ‘remote work is good’ మరియు ‘it saves time.’ Final sentence: ‘I think remote work is good because it saves time.’ ఇప్పుడు ఇంకో reason కూడా జోడించి చెప్పగలరా?",
     "preserved_learning_terms": ["sentence"]
   },
   {
@@ -86,7 +86,7 @@
     "language_mode": "TELUGU_DOMINANT",
     "learner_input": "When use present perfect?",
     "protected_result": "Use present perfect for a past action connected to the present.",
-    "response": "Present perfect tense ని గతంలో జరిగిన పని ఇప్పటికీ ప్రభావం చూపుతున్నప్పుడు వాడతాం. ఉదాహరణకు, ‘I have lost my keys’ అంటే keys ఇప్పుడు కూడా దొరకలేదు. కానీ పని ఎప్పుడు జరిగిందో స్పష్టంగా చెప్పాలంటే simple past వాడాలి: ‘I lost my keys yesterday.’ ఈ రెండు sentences లో తేడా గమనించారా?",
+    "response": "గతంలో జరిగిన పని ప్రభావం ఇప్పుడు కూడా ఉన్నప్పుడు present perfect tense వాడతాం. ఉదాహరణకు, ‘I have lost my keys’ అంటే keys ఇంకా దొరకలేదు. కానీ ఆ పని ఎప్పుడు జరిగిందో స్పష్టంగా చెప్పాలంటే simple past వాడాలి: ‘I lost my keys yesterday.’ ఈ రెండు sentences మధ్య difference అర్థమైందా?",
     "preserved_learning_terms": ["tense", "sentence"]
   },
   {
@@ -116,7 +116,7 @@
     "language_mode": "TELUGU_DOMINANT",
     "learner_input": "Explain noun and verb.",
     "protected_result": "A noun names a person, place, thing, or idea; a verb shows an action or state.",
-    "response": "Noun అంటే person, place, thing లేదా idea కి పేరు చెప్పే word. Verb అంటే action లేదా state ని చూపించే word. ‘Ravi runs’ అనే sentence లో ‘Ravi’ noun, ‘runs’ verb. ఇప్పుడు మీరు ఒక noun, ఒక verb ఉన్న చిన్న sentence చెబుతారా?",
+    "response": "Noun అనేది person, place, thing లేదా idea ని సూచించే word. Verb అనేది action లేదా state ని చూపించే word. ‘Ravi runs’ అనే sentence లో ‘Ravi’ noun, ‘runs’ verb. ఇప్పుడు noun, verb రెండూ ఉండే చిన్న sentence మీరు చెప్పగలరా?",
     "preserved_learning_terms": ["noun", "verb", "sentence"]
   }
 ]

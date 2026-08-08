@@ -19,7 +19,11 @@ from backend.app.language_review.openai_boundary import (
     OpenAILanguageReviewHTTPClient,
     OpenAILanguageReviewProvider,
 )
-from backend.app.language_review.service import LanguageReviewService, build_review_request
+from backend.app.language_review.service import (
+    LanguageReviewService,
+    build_review_request,
+    protected_content_digest,
+)
 from backend.app.models import AITurnAttempt, AIUsageRecord, ConversationMessage
 
 
@@ -268,11 +272,41 @@ def test_telugu_quality_evaluation_set_covers_release_scenarios():
         "Telugu + English technical terms",
     }
     forbidden = {"యొక్క", "చేయబడింది", "ఉపయోగించబడుతుంది", "ప్రయత్నము", "సంభాషణము"}
+    forbidden_phrases = {"పేరు చెప్పే word", "తేడా గమనించారా"}
     for case in cases:
         assert any("\u0c00" <= character <= "\u0c7f" for character in case["response"])
         assert not forbidden.intersection(case["response"].split())
+        assert not any(phrase in case["response"] for phrase in forbidden_phrases)
         for term in case["preserved_learning_terms"]:
             assert term.lower() in case["response"].lower()
+
+    responses = {case["id"]: case["response"] for case in cases}
+    assert "చిన్న correction మాత్రమే ఉంది" in responses["grammar-correction-beginner"]
+    assert "మాట్లాడే practice" in responses["encouragement-after-hesitation"]
+    assert "మీ update clear గా ఉంటుంది" in responses["workplace-update"]
+    assert "ఇంకొంచెం natural English గా" in responses["intermediate-opinion"]
+    assert "difference అర్థమైందా?" in responses["complex-perfect-tense"]
+    assert "idea ని సూచించే word" in responses["technical-terms-code-switch"]
+
+
+def test_presentation_revisions_preserve_protected_content_digest():
+    source = _source_response()
+    learning_objective = "Daily conversation"
+    original_digest = protected_content_digest(
+        source,
+        learning_objective=learning_objective,
+    )
+    revised = source.model_copy(update={
+        "tutor_message": "మాట్లాడే practice చేస్తే confidence పెరుగుతుంది.",
+        "correction_explanation": "ఈ sentence ని ఇంకొంచెం natural English గా చెప్పండి.",
+        "conversation_question": "difference అర్థమైందా?",
+        "encouragement": "చాలా బాగా చేస్తున్నారు.",
+    })
+
+    assert protected_content_digest(
+        revised,
+        learning_objective=learning_objective,
+    ) == original_digest
 
 
 def test_api_checkpoints_review_before_tts_and_exposes_customer_capability(client, conversation):
