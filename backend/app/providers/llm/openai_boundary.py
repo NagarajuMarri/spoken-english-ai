@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import socket
 from time import sleep
+from typing import TypedDict
 from urllib import error, request as urllib_request
 
 from backend.app.ai.exceptions import (
@@ -12,12 +14,23 @@ from backend.app.ai.exceptions import (
     ProviderIncompleteResponse,
     ProviderMalformedResponse,
     ProviderRateLimited,
+    ProviderRefusal,
     ProviderServiceError,
     ProviderTimeout,
     ProviderUnavailable,
 )
+from backend.app.ai.models import AIConversationResponse
 from backend.app.ai.prompts import safe_prompt_context
 from backend.app.ai.validation import validate_provider_output
+
+
+logger = logging.getLogger("spoken_english.openai_responses")
+
+
+class _ProviderErrorMetadata(TypedDict):
+    provider_requests: int
+    input_units: int
+    output_units: int
 
 
 TUTOR_RESPONSE_SCHEMA = {
@@ -108,37 +121,145 @@ class OpenAIResponsesHTTPClient:
         )
 
     @staticmethod
-    def _output_text(value: dict, provider_requests: int) -> str:
-        if value.get("status") == "incomplete":
-            input_units, output_units = OpenAIResponsesHTTPClient._usage(value)
-            reason = str((value.get("incomplete_details") or {}).get("reason") or "unknown")
+    def _shape_token(value: object) -> str:
+        if not isinstance(value, str) or not value or len(value) > 40:
+            return "unknown"
+        return value if all(character.isalnum() or character in "_-" for character in value) else "unknown"
+
+    @classmethod
+    def _response_shape(cls, value: dict) -> dict[str, str]:
+        output = value.get("output")
+        output_items = output if isinstance(output, list) else []
+        output_types: list[str] = []
+        content_types: list[str] = []
+        for item in output_items:
+            if not isinstance(item, dict):
+                output_types.append("invalid")
+                continue
+            output_types.append(cls._shape_token(item.get("type")))
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for part in content:
+                content_types.append(
+                    cls._shape_token(part.get("type")) if isinstance(part, dict) else "invalid"
+                )
+        incomplete_details = value.get("incomplete_details")
+        incomplete_reason = (
+            cls._shape_token(incomplete_details.get("reason"))
+            if isinstance(incomplete_details, dict)
+            else "none"
+        )
+        return {
+            "status": cls._shape_token(value.get("status")),
+            "output_item_types": ",".join(output_types) or "none",
+            "content_item_types": ",".join(content_types) or "none",
+            "incomplete_reason": incomplete_reason,
+        }
+
+    @classmethod
+    def _log_response_shape(
+        cls,
+        value: dict,
+        *,
+        schema_path: str = "none",
+        level: int = logging.INFO,
+    ) -> None:
+        shape = cls._response_shape(value)
+        logger.log(
+            level,
+            "openai_response_shape status=%s output_item_types=%s content_item_types=%s "
+            "incomplete_reason=%s schema_path=%s",
+            shape["status"],
+            shape["output_item_types"],
+            shape["content_item_types"],
+            shape["incomplete_reason"],
+            schema_path,
+        )
+
+    @classmethod
+    def _structured_content(cls, value: dict, provider_requests: int) -> dict:
+        input_units, output_units = cls._usage(value)
+        error_metadata: _ProviderErrorMetadata = {
+            "provider_requests": provider_requests,
+            "input_units": input_units,
+            "output_units": output_units,
+        }
+        status_value = value.get("status")
+        if status_value == "incomplete":
+            incomplete_details = value.get("incomplete_details")
+            reason = (
+                cls._shape_token(incomplete_details.get("reason"))
+                if isinstance(incomplete_details, dict)
+                else "unknown"
+            )
             raise ProviderIncompleteResponse(
                 f"OpenAI response was incomplete ({reason}).",
-                provider_requests=provider_requests,
-                input_units=input_units,
-                output_units=output_units,
+                **error_metadata,
             )
-        if any(
-            content.get("type") == "refusal"
-            for item in value.get("output", [])
-            for content in item.get("content", [])
-        ):
+        if status_value in {"failed", "cancelled", "queued", "in_progress"}:
+            raise ProviderServiceError(
+                "OpenAI response did not complete.",
+                **error_metadata,
+            )
+        if status_value != "completed":
             raise ProviderMalformedResponse(
-                "OpenAI response was refused.", provider_requests=provider_requests
+                "OpenAI response status was missing or invalid.",
+                **error_metadata,
             )
-        texts = [
-            content.get("text", "")
-            for item in value.get("output", [])
-            for content in item.get("content", [])
-            if content.get("type") == "output_text"
-        ]
-        output = "".join(texts).strip()
-        if not output:
+
+        output = value.get("output")
+        if not isinstance(output, list):
+            raise ProviderMalformedResponse(
+                "OpenAI response output was malformed.",
+                **error_metadata,
+            )
+        text_parts: list[str] = []
+        refusal_found = False
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            content_items = item.get("content")
+            if not isinstance(content_items, list):
+                continue
+            for content in content_items:
+                if not isinstance(content, dict):
+                    continue
+                if content.get("type") == "refusal":
+                    refusal_found = True
+                elif content.get("type") == "output_text":
+                    text = content.get("text")
+                    if not isinstance(text, str):
+                        raise ProviderMalformedResponse(
+                            "OpenAI output text was malformed.",
+                            **error_metadata,
+                        )
+                    if text:
+                        text_parts.append(text)
+        if refusal_found:
+            raise ProviderRefusal(
+                "OpenAI response was refused.",
+                **error_metadata,
+            )
+        output_text = "".join(text_parts).strip()
+        if not output_text:
             raise ProviderMalformedResponse(
                 "OpenAI response did not contain structured output.",
-                provider_requests=provider_requests,
+                **error_metadata,
             )
-        return output
+        try:
+            content = json.loads(output_text)
+        except json.JSONDecodeError as exc:
+            raise ProviderMalformedResponse(
+                "OpenAI structured output was malformed.",
+                **error_metadata,
+            ) from exc
+        if not isinstance(content, dict):
+            raise ProviderMalformedResponse(
+                "OpenAI structured output was malformed.",
+                **error_metadata,
+            )
+        return content
 
     @staticmethod
     def _retry_after(exc: error.HTTPError) -> int | None:
@@ -187,7 +308,7 @@ class OpenAIResponsesHTTPClient:
         max_retries: int,
         reasoning_effort: str,
         max_output_tokens: int,
-    ) -> dict:
+    ) -> AIConversationResponse:
         payload = json.dumps({
             "model": model,
             "instructions": self._instructions(context),
@@ -258,18 +379,8 @@ class OpenAIResponsesHTTPClient:
                 "OpenAI response body was malformed.",
                 provider_requests=provider_requests,
             )
-        try:
-            content = json.loads(self._output_text(value, provider_requests))
-        except json.JSONDecodeError as exc:
-            raise ProviderMalformedResponse(
-                "OpenAI structured output was malformed.",
-                provider_requests=provider_requests,
-            ) from exc
-        if not isinstance(content, dict):
-            raise ProviderMalformedResponse(
-                "OpenAI structured output was malformed.",
-                provider_requests=provider_requests,
-            )
+        self._log_response_shape(value)
+        content = self._structured_content(value, provider_requests)
         usage = value.get("usage") or {}
         input_details = usage.get("input_tokens_details") or {}
         content["provider_metadata_reference"] = (
@@ -281,7 +392,21 @@ class OpenAIResponsesHTTPClient:
             "output_units": int(usage.get("output_tokens") or 0),
             "provider_requests": provider_requests,
         }
-        return content
+        input_units, output_units = self._usage(value)
+        try:
+            return validate_provider_output(
+                content,
+                provider_requests=provider_requests,
+                input_units=input_units,
+                output_units=output_units,
+            )
+        except ProviderError as exc:
+            self._log_response_shape(
+                value,
+                schema_path=exc.schema_path or "root",
+                level=logging.WARNING,
+            )
+            raise
 
 
 class OpenAICompatibleAIProvider:

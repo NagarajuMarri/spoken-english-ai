@@ -12,12 +12,14 @@ class ProviderError(Exception):
         retry_after_seconds: int | None = None,
         input_units: int = 0,
         output_units: int = 0,
+        schema_path: str | None = None,
     ) -> None:
         super().__init__(message)
         self.provider_requests = max(1, provider_requests)
         self.retry_after_seconds = retry_after_seconds
         self.input_units = max(0, input_units)
         self.output_units = max(0, output_units)
+        self.schema_path = schema_path
 
 
 class ProviderUnavailable(ProviderError):
@@ -51,6 +53,10 @@ class ProviderContextLimit(ProviderError):
 class ProviderIncompleteResponse(ProviderError):
     failure_code = "provider_incomplete_response"
     retryable = True
+
+
+class ProviderRefusal(ProviderError):
+    failure_code = "provider_refusal"
 
 
 class ProviderMalformedResponse(ProviderError):

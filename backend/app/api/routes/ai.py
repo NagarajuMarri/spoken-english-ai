@@ -17,6 +17,7 @@ from backend.app.ai.exceptions import (
     ProviderMalformedResponse,
     ProviderOutputInvalid,
     ProviderRateLimited,
+    ProviderRefusal,
     ProviderServiceError,
     ProviderTimeout,
     ProviderUnavailable,
@@ -100,7 +101,7 @@ def _provider_app_error(exc: ProviderError) -> AppError:
         )
     if isinstance(exc, ProviderContextLimit):
         return AppError(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             "llm_context_limit",
             "This turn is too long for the tutor. Shorten it and send again.",
             retryable=False,
@@ -112,6 +113,13 @@ def _provider_app_error(exc: ProviderError) -> AppError:
             "The tutor response ended before it was complete. Retry this turn safely.",
             headers,
             retryable=True,
+        )
+    if isinstance(exc, ProviderRefusal):
+        return AppError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "llm_refused",
+            "The tutor cannot answer this request. Rephrase it and send again.",
+            retryable=False,
         )
     if isinstance(exc, ProviderMalformedResponse):
         return AppError(
@@ -143,6 +151,7 @@ def _failure_from_attempt(attempt: AITurnAttempt) -> AppError:
         "provider_service_error": ProviderServiceError,
         "provider_context_limit": ProviderContextLimit,
         "provider_incomplete_response": ProviderIncompleteResponse,
+        "provider_refusal": ProviderRefusal,
         "provider_malformed_response": ProviderMalformedResponse,
         "provider_schema_validation_failed": ProviderOutputInvalid,
     }
@@ -312,12 +321,13 @@ def ai_turn(
             session.commit()
             logger.warning(
                 "llm_provider_failure request_id=%s attempt_id=%s failure_code=%s "
-                "provider_requests=%s retryable=%s",
+                "provider_requests=%s retryable=%s schema_path=%s",
                 request.state.request_id,
                 attempt.id,
                 exc.failure_code,
                 exc.provider_requests,
                 exc.retryable,
+                exc.schema_path or "none",
             )
             request.app.state.metrics.increment(
                 "ai_provider_timeouts"

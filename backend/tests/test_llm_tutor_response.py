@@ -1,4 +1,5 @@
 import json
+import logging
 from io import BytesIO
 from urllib import error
 
@@ -13,6 +14,7 @@ from backend.app.ai.exceptions import (
     ProviderMalformedResponse,
     ProviderOutputInvalid,
     ProviderRateLimited,
+    ProviderRefusal,
     ProviderServiceError,
     ProviderTimeout,
     ProviderUnavailable,
@@ -21,7 +23,11 @@ from backend.app.ai.models import AIConversationRequest, ConversationHistoryTurn
 from backend.app.core.config import Settings
 from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
 from backend.app.providers.llm import build_llm_provider
-from backend.app.providers.llm.openai_boundary import OpenAICompatibleAIProvider, OpenAIResponsesHTTPClient
+from backend.app.providers.llm.openai_boundary import (
+    TUTOR_RESPONSE_SCHEMA,
+    OpenAICompatibleAIProvider,
+    OpenAIResponsesHTTPClient,
+)
 from backend.app.repositories.conversations import ConversationRepository, TurnSequenceConflict
 
 
@@ -80,6 +86,7 @@ def test_responses_client_sends_three_complete_turns_and_uses_provider_usage():
         return _HTTPResponse({
             "id": "resp_live_test",
             "model": "gpt-5-mini-2025-08-07",
+            "status": "completed",
             "output": [{
                 "type": "message",
                 "content": [{"type": "output_text", "text": json.dumps(content)}],
@@ -112,6 +119,17 @@ def test_responses_client_sends_three_complete_turns_and_uses_provider_usage():
     assert body["store"] is False
     assert body["text"]["format"]["type"] == "json_schema"
     assert body["text"]["format"]["strict"] is True
+    assert body["text"]["format"]["name"] == "speakmate_tutor_response"
+    assert body["text"]["format"]["schema"] == TUTOR_RESPONSE_SCHEMA
+    schema = body["text"]["format"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["properties"]["corrected_learner_sentence"]["type"] == ["string", "null"]
+    assert schema["properties"]["correction_explanation"]["type"] == ["string", "null"]
+    assert schema["properties"]["learning_signals"]["additionalProperties"] is False
+    assert set(schema["properties"]["learning_signals"]["required"]) == set(
+        schema["properties"]["learning_signals"]["properties"]
+    )
     assert body["reasoning"] == {"effort": "minimal"}
     assert body["max_output_tokens"] == 4096
     assert [item["role"] for item in body["input"]] == [
@@ -123,6 +141,141 @@ def test_responses_client_sends_three_complete_turns_and_uses_provider_usage():
     assert result.usage.cached_input_units == 23
     assert result.usage.output_units == 45
     assert result.provider_metadata_reference.startswith("openai:gpt-5-mini-2025-08-07:resp_live_test")
+
+
+def test_responses_client_accepts_multiple_output_items_and_nullable_fields(caplog):
+    caplog.set_level(logging.INFO, logger="spoken_english.openai_responses")
+    content = _content()
+    content.pop("provider_metadata_reference")
+    content.pop("usage")
+    content["corrected_learner_sentence"] = None
+    content["correction_explanation"] = None
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient(
+            "secret-key",
+            lambda *_args, **_kwargs: _HTTPResponse({
+                "id": "resp_multiple_items",
+                "model": "gpt-5-mini",
+                "status": "completed",
+                "output": [
+                    {"type": "reasoning", "summary": []},
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": json.dumps(content)}],
+                    },
+                ],
+                "usage": {"input_tokens": 18, "output_tokens": 12},
+            }),
+        ),
+        model="gpt-5-mini",
+        max_retries=0,
+    )
+
+    result = provider.generate(_request())
+
+    assert result.corrected_learner_sentence is None
+    assert result.correction_explanation is None
+    assert "status=completed" in caplog.text
+    assert "output_item_types=reasoning,message" in caplog.text
+    assert "content_item_types=output_text" in caplog.text
+
+
+def test_responses_client_classifies_refusal_separately_without_logging_content(caplog):
+    caplog.set_level(logging.INFO, logger="spoken_english.openai_responses")
+    refusal_text = "private refusal explanation"
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient(
+            "secret-key",
+            lambda *_args, **_kwargs: _HTTPResponse({
+                "id": "resp_refusal",
+                "model": "gpt-5-mini",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "refusal", "refusal": refusal_text}],
+                }],
+                "usage": {"input_tokens": 11, "output_tokens": 4},
+            }),
+        ),
+        model="gpt-5-mini",
+        max_retries=0,
+    )
+
+    with pytest.raises(ProviderRefusal) as captured:
+        provider.generate(_request())
+
+    assert captured.value.input_units == 11
+    assert captured.value.output_units == 4
+    assert "content_item_types=refusal" in caplog.text
+    assert refusal_text not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("mutation", "schema_path"),
+    [
+        ("missing_required", "tutor_message"),
+        ("unexpected_extra", "unexpected_field"),
+    ],
+)
+def test_responses_client_rejects_schema_divergence_with_sanitized_path(
+    mutation, schema_path, caplog,
+):
+    learner_content = "private learner content must not be logged"
+    content = _content()
+    content.pop("provider_metadata_reference")
+    content.pop("usage")
+    if mutation == "missing_required":
+        content.pop("tutor_message")
+    else:
+        content[learner_content] = "private extra value"
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient(
+            "secret-key",
+            lambda *_args, **_kwargs: _HTTPResponse({
+                "id": "resp_schema_failure",
+                "model": "gpt-5-mini",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": json.dumps(content)}],
+                }],
+                "usage": {"input_tokens": 14, "output_tokens": 8},
+            }),
+        ),
+        model="gpt-5-mini",
+        max_retries=0,
+    )
+
+    with pytest.raises(ProviderOutputInvalid) as captured:
+        provider.generate(_request(current_learner_message=learner_content))
+
+    assert captured.value.schema_path == schema_path
+    assert f"schema_path={schema_path}" in caplog.text
+    assert learner_content not in caplog.text
+    assert "private extra value" not in caplog.text
+
+
+def test_responses_client_rejects_empty_completed_output():
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient(
+            "secret-key",
+            lambda *_args, **_kwargs: _HTTPResponse({
+                "id": "resp_empty",
+                "model": "gpt-5-mini",
+                "status": "completed",
+                "output": [
+                    {"type": "reasoning", "summary": []},
+                    {"type": "message", "content": []},
+                ],
+                "usage": {"input_tokens": 9, "output_tokens": 0},
+            }),
+        ),
+        model="gpt-5-mini",
+        max_retries=0,
+    )
+
+    with pytest.raises(ProviderMalformedResponse):
+        provider.generate(_request())
 
 
 def test_openai_provider_failure_does_not_log_key_or_learner_content(caplog):
@@ -158,6 +311,7 @@ def test_responses_client_retries_one_transient_failure_and_reports_actual_reque
         return _HTTPResponse({
             "id": "resp_recovered",
             "model": "gpt-5-mini",
+            "status": "completed",
             "output": [{
                 "type": "message",
                 "content": [{"type": "output_text", "text": json.dumps(content)}],
@@ -301,6 +455,7 @@ def test_ai_turn_uses_provider_for_greetings_carries_three_turns_and_persists_us
             "llm_incomplete_response",
             True,
         ),
+        (ProviderRefusal("raw refusal detail"), 422, "llm_refused", False),
         (ProviderMalformedResponse("raw malformed detail"), 502, "llm_malformed_response", False),
         (ProviderOutputInvalid("raw schema detail"), 502, "llm_schema_validation_failed", False),
         (ProviderUnavailable("raw provider detail"), 503, "llm_unavailable", False),

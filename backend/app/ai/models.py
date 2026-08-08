@@ -1,7 +1,9 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UsageInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     input_units: int = Field(default=0, ge=0)
     cached_input_units: int = Field(default=0, ge=0)
     output_units: int = Field(default=0, ge=0)
@@ -9,10 +11,12 @@ class UsageInfo(BaseModel):
 
 
 class LearningSignals(BaseModel):
-    grammar_focus: list[str] = Field(default_factory=list, max_length=5)
-    vocabulary: list[str] = Field(default_factory=list, max_length=8)
-    confidence: int = Field(default=50, ge=0, le=100)
-    fluency: int = Field(default=50, ge=0, le=100)
+    model_config = ConfigDict(extra="forbid")
+
+    grammar_focus: list[str] = Field(max_length=5)
+    vocabulary: list[str] = Field(max_length=8)
+    confidence: int = Field(ge=0, le=100)
+    fluency: int = Field(ge=0, le=100)
 
 
 class ConversationHistoryTurn(BaseModel):
@@ -43,11 +47,13 @@ class AIConversationRequest(BaseModel):
 
 
 class AIConversationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     tutor_message: str = Field(min_length=1, max_length=2000)
-    corrected_learner_sentence: str | None = Field(default=None, max_length=2000)
-    correction_explanation: str | None = Field(default=None, max_length=1000)
-    grammar_feedback: list[str] = Field(default_factory=list, max_length=5)
-    vocabulary_suggestions: list[str] = Field(default_factory=list, max_length=8)
+    corrected_learner_sentence: str | None = Field(max_length=2000)
+    correction_explanation: str | None = Field(max_length=1000)
+    grammar_feedback: list[str] = Field(max_length=5)
+    vocabulary_suggestions: list[str] = Field(max_length=8)
     conversation_question: str = Field(min_length=1, max_length=500)
     encouragement: str = Field(min_length=1, max_length=300)
     detected_level: str = Field(max_length=30)
