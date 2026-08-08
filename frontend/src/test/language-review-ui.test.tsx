@@ -36,6 +36,7 @@ describe("native Telugu language review capability",()=>{
       turn_id:"turn-language-review",
       tutor_message:"చాలా బాగా ప్రయత్నించారు. ఈ sentence ని ఇంకోసారి చెప్పండి.",
       next_question:"ఇప్పుడు అదే sentence చెప్పగలరా?",
+      corrected_sentence:"I went to the office yesterday.",
       correction_explanation:"ఈ sentence లో tense మాత్రమే మార్చాలి.",
       vocabulary_suggestions:[],
       telugu_explanation:"ఈ sentence లో tense మాత్రమే మార్చాలి.",
@@ -44,6 +45,10 @@ describe("native Telugu language review capability",()=>{
       review_reason_code:"NATURALIZED_TELUGU",
       preserved_learning_terms:["sentence","tense"],
       expression_hint:"CORRECTIVE",
+      spoken_text:"మీ meaning clear గా ఉంది. Correct sentence: I went to the office yesterday. ఈ sentence లో tense మాత్రమే మార్చాలి. ఇప్పుడు corrected sentence ని ఒకసారి చెప్పండి.",
+      coaching_mode:"RETRY_REQUIRED",
+      coaching_state:"WAITING_FOR_RETRY",
+      retry_of_turn_id:null,
     });
     vi.spyOn(api,"speech").mockResolvedValue({
       blob:new Blob([new Uint8Array(64)],{type:"audio/mpeg"}),provider:"openai",
@@ -58,6 +63,8 @@ describe("native Telugu language review capability",()=>{
     expect(await screen.findByText("Native Telugu quality review")).toBeVisible();
     expect(screen.getByText(/NATURALIZED_TELUGU/)).toBeVisible();
     expect(screen.getByText(/sentence, tense/)).toBeVisible();
+    expect(screen.getByText(/Ananya: మీ meaning clear గా ఉంది\. Correct sentence: I went to the office yesterday\./)).toBeVisible();
+    expect(screen.getAllByText("ఈ sentence లో tense మాత్రమే మార్చాలి.")).toHaveLength(2);
     expect(api.speech).toHaveBeenCalledWith("conversation-language-review","turn-language-review");
   });
 });

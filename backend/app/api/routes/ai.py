@@ -52,6 +52,7 @@ from backend.app.tutors import get_tutor
 from backend.app.domain.enums import LanguageMode
 from backend.app.language_review.models import LanguageReviewResult
 from backend.app.language_review.service import LanguageReviewService, degraded_review_result
+from backend.app.coaching import build_coaching_outcome, tutor_input_for_retry
 
 router = APIRouter(prefix="/api/v1", tags=["ai-tutor"])
 logger = logging.getLogger("spoken_english.ai_turns")
@@ -81,6 +82,10 @@ class AITurnRead(BaseModel):
     telugu_explanation: str | None
     language_review_status: str
     language_review_failure_code: str | None
+    spoken_text: str
+    coaching_mode: str
+    coaching_state: str
+    retry_of_turn_id: str | None
 
 
 _ARABIC_SCRIPT = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
@@ -213,6 +218,7 @@ def _api_result(
     policy: AdaptivePolicy,
     turn_id: str,
     review: LanguageReviewResult,
+    coaching,
 ) -> dict:
     return {
         "turn_id": turn_id,
@@ -235,6 +241,10 @@ def _api_result(
         ),
         "language_review_status": review.status,
         "language_review_failure_code": review.failure_code,
+        "spoken_text": coaching.spoken_text,
+        "coaching_mode": coaching.mode,
+        "coaching_state": coaching.state,
+        "retry_of_turn_id": coaching.retry_of_turn_id,
     }
 
 
@@ -297,6 +307,11 @@ def ai_turn(
     provider = request.app.state.llm_provider
     turn_key = idempotency_key or request.state.request_id
     attempts = AITurnAttemptRepository(session)
+    previous_attempt = attempts.latest_completed(conversation.id)
+    previous_result = (
+        dict(previous_attempt.result_json.get("api_result", {}))
+        if previous_attempt is not None else None
+    )
     attempt = attempts.get(conversation.id, turn_key)
     content_response = None
     response = None
@@ -406,7 +421,7 @@ def ai_turn(
                     if not _unexpected_foreign_script(item.learner_text)
                 ][-3:],
                 current_learner_message=_tutor_input(
-                    data.message,
+                    tutor_input_for_retry(data.message, previous_result),
                     input_source=data.input_source,
                     stt_confidence=data.stt_confidence,
                 ),
@@ -565,7 +580,16 @@ def ai_turn(
         cost_classification="ESTIMATE_FROM_PROVIDER_REPORTED_USAGE",
     )
     policy = AdaptivePolicy.decide(level=principal.learner.proficiency_level, correctness=0.7, repeated_mistakes=1, confidence=60)
-    result = _api_result(response, policy, attempt.id, review_result)
+    coaching = build_coaching_outcome(
+        response,
+        learner_level=principal.learner.proficiency_level,
+        language_mode=LanguageMode(principal.learner.language_mode or "ENGLISH"),
+        previous_result=previous_result,
+        previous_turn_id=previous_attempt.id if previous_attempt is not None else None,
+        learner_text=data.message,
+    )
+    response = coaching.response
+    result = _api_result(response, policy, attempt.id, review_result, coaching)
     try:
         session.add(AICostMetricEvent(
             ai_turn_attempt_id=attempt.id,
@@ -681,9 +705,7 @@ def synthesize_tutor_speech(
         raise AppError(status.HTTP_404_NOT_FOUND, "tutor_turn_not_found", "Completed tutor turn not found.")
 
     api_result = ai_attempt.result_json.get("api_result", {})
-    tutor_message = str(api_result.get("tutor_message") or "").strip()
-    next_question = str(api_result.get("next_question") or "").strip()
-    spoken_text = " ".join(value for value in (tutor_message, next_question) if value)
+    spoken_text = str(api_result.get("spoken_text") or "").strip()
     if not spoken_text:
         raise AppError(status.HTTP_422_UNPROCESSABLE_CONTENT, "tts_empty_text", "This tutor turn has no speech text.")
 

@@ -19,6 +19,14 @@ class AITurnAttemptRepository:
             AITurnAttempt.idempotency_key == idempotency_key,
         ))
 
+    def latest_completed(self, conversation_id: str) -> AITurnAttempt | None:
+        return self.session.scalar(
+            select(AITurnAttempt).where(
+                AITurnAttempt.conversation_id == conversation_id,
+                AITurnAttempt.status == "COMPLETED",
+            ).order_by(AITurnAttempt.completed_at.desc(), AITurnAttempt.created_at.desc()).limit(1)
+        )
+
     def create(
         self,
         *,

@@ -166,7 +166,7 @@ export function ConversationScreen({
     dispatch({ type: "TUTOR_PROCESSING_STARTED" });
     try {
       const result = await api.turn(id, learnerText, selectedLanguageMode, key, voice);
-      const spoken = `${result.tutor_message} ${result.next_question}`.trim();
+      const spoken = result.spoken_text || `${result.tutor_message} ${result.next_question}`.trim();
       const expression = normalizeExpression(result.expression_hint);
       setMessages((items) => [...items, `${tutor.display_name}: ${spoken}`]);
       setSpokenText(spoken);
