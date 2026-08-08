@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -34,6 +35,8 @@ from backend.app.providers.stt import build_speech_to_text_provider
 from backend.app.providers.tts import build_text_to_speech_provider
 import backend.app.models  # noqa: F401
 
+logger = logging.getLogger("spoken_english.startup")
+
 
 def create_app(settings=None) -> FastAPI:
     settings = settings or get_settings()
@@ -66,6 +69,13 @@ def create_app(settings=None) -> FastAPI:
     application.state.llm_provider = build_llm_provider(settings)
     application.state.speech_to_text_provider = build_speech_to_text_provider(settings)
     application.state.text_to_speech_provider = build_text_to_speech_provider(settings)
+    logger.info(
+        "runtime_providers build=%s llm=%s stt=%s tts=%s",
+        settings.build_identifier,
+        settings.llm_provider,
+        settings.speech_to_text_provider,
+        settings.text_to_speech_provider,
+    )
     application.state.object_storage = None
     if settings.object_storage_backend == "s3":
         import boto3

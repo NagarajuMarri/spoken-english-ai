@@ -2,7 +2,7 @@ import{beforeEach,expect,it,vi}from"vitest";
 import{fireEvent,render,screen,waitFor}from"@testing-library/react";
 import userEvent from"@testing-library/user-event";
 import{api}from"../api/client";
-import type{TutorSpeech}from"../models";
+import type{AiTurn,TutorSpeech}from"../models";
 import{RouterProvider}from"../routes/router";
 import{ConversationScreen}from"../screens/ExperienceScreens";
 import{TutorAudioPlayer}from"../voice/TutorAudioPlayer";
@@ -73,6 +73,44 @@ it("retrieves OpenAI speech for the exact visible tutor turn without browser syn
  expect(api.speech).toHaveBeenCalledWith("conversation-feature-5","ai-turn-feature-5");
  expect(await screen.findByText(/Provider: openai/)).toBeVisible();
  expect(browserSpeak).not.toHaveBeenCalled();
+});
+
+it("does not silently skip TTS when a stale tutor response omits the turn identity",async()=>{
+ const warning=vi.spyOn(console,"warn").mockImplementation(()=>undefined);
+ vi.spyOn(api,"conversation").mockResolvedValue({id:"conversation-stale-shape"});
+ vi.spyOn(api,"turn").mockResolvedValue({tutor_message:"The text response remains visible.",next_question:"Can you try again?",vocabulary_suggestions:[]} as unknown as AiTurn);
+ const speechRequest=vi.spyOn(api,"speech");
+ render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+ await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
+ await userEvent.type(screen.getByLabelText("Your message"),"Hello tutor.");
+ await userEvent.click(screen.getByRole("button",{name:"Send"}));
+ expect(await screen.findByText(/The text response remains visible/)).toBeVisible();
+ expect(await screen.findByRole("alert")).toHaveTextContent("turn identity is missing");
+ expect(screen.getByText(/TTS request not made: tutor response omitted its turn identity/)).toBeVisible();
+ expect(speechRequest).not.toHaveBeenCalled();
+ expect(warning).toHaveBeenCalledWith("speakmate_tts_event",{event:"request_not_made",reason:"missing_turn_id"});
+});
+
+it("requests and plays audio after each of two consecutive tutor turns",async()=>{
+ vi.spyOn(api,"conversation").mockResolvedValue({id:"conversation-two-turns"});
+ vi.spyOn(api,"turn")
+  .mockResolvedValueOnce({turn_id:"turn-one",tutor_message:"First tutor answer.",next_question:"First question?",vocabulary_suggestions:[]})
+  .mockResolvedValueOnce({turn_id:"turn-two",tutor_message:"Second tutor answer.",next_question:"Second question?",vocabulary_suggestions:[]});
+ const speechRequest=vi.spyOn(api,"speech")
+  .mockResolvedValueOnce(firstSpeech)
+  .mockResolvedValueOnce(secondSpeech);
+ render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+ await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
+ const input=screen.getByLabelText("Your message");
+ await userEvent.type(input,"First learner turn.");
+ await userEvent.click(screen.getByRole("button",{name:"Send"}));
+ await waitFor(()=>expect(speechRequest).toHaveBeenNthCalledWith(1,"conversation-two-turns","turn-one"));
+ await userEvent.type(input,"Second learner turn.");
+ await userEvent.click(screen.getByRole("button",{name:"Send"}));
+ await waitFor(()=>expect(speechRequest).toHaveBeenNthCalledWith(2,"conversation-two-turns","turn-two"));
+ expect(speechRequest).toHaveBeenCalledTimes(2);
+ expect(play).toHaveBeenCalledTimes(2);
+ expect(await screen.findByText(/Voice: cedar/)).toBeVisible();
 });
 
 it("keeps tutor text usable when TTS fails and offers an explicit audio-only retry",async()=>{

@@ -13,6 +13,7 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
  const[lastTranscript,setLastTranscript]=useState("");
  const[turnError,setTurnError]=useState("");
  const[audioError,setAudioError]=useState("");
+ const[audioPathStatus,setAudioPathStatus]=useState("Waiting for the first tutor response.");
  const[audioBusy,setAudioBusy]=useState(false);
  const[speech,setSpeech]=useState<TutorSpeech|null>(null);
  const[spokenText,setSpokenText]=useState("");
@@ -29,10 +30,26 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
  useEffect(()=>{api.conversation(account.learner_id).then(x=>setId(x.id)).catch(()=>dispatch("ERROR"))},[account.learner_id]);
 
  const loadSpeech=useCallback(async(turnId:string)=>{
-  if(!id||!turnId)return;
+  if(!id||!turnId){
+   setAudioPathStatus("TTS request not made: missing conversation or tutor turn identity.");
+   console.warn("speakmate_tts_event",{event:"request_not_made",reason:"missing_identity"});
+   return;
+  }
   setAudioBusy(true);setAudioError("");
-  try{setSpeech(await api.speech(id,turnId))}
-  catch(error){setAudioError(error instanceof Error?error.message:"Tutor voice is temporarily unavailable.")}
+  setAudioPathStatus("Requesting OpenAI tutor audio from the backend…");
+  console.info("speakmate_tts_event",{event:"request_started"});
+  try{
+   const nextSpeech=await api.speech(id,turnId);
+   setSpeech(nextSpeech);
+   setAudioPathStatus("OpenAI tutor audio received. Starting Chrome playback…");
+   console.info("speakmate_tts_event",{event:"audio_fetch_succeeded",provider:nextSpeech.provider,model:nextSpeech.model,voice:nextSpeech.voice,content_type:nextSpeech.blob.type,size_bytes:nextSpeech.blob.size});
+  }
+  catch(error){
+   const backendFailure=error instanceof ApiError;
+   setAudioError(error instanceof Error?error.message:"Tutor voice is temporarily unavailable.");
+   setAudioPathStatus(backendFailure?"Backend TTS request failed. Use Retry OpenAI voice.":"Audio fetch failed before a backend response. Check the browser network connection.");
+   console.warn("speakmate_tts_event",backendFailure?{event:"backend_tts_failed",status:error.status,code:error.code,retryable:error.retryable}:{event:"audio_fetch_failed",reason:"network_or_browser"});
+  }
   finally{setAudioBusy(false)}
  },[id]);
 
@@ -43,6 +60,7 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
   turnBusyRef.current=true;
   setTurnError("");
   setAudioError("");
+  setAudioPathStatus("Waiting for the tutor text response before requesting audio…");
   setSpeech(null);
   setTurnBusy(true);
   if(!retryKey)setMessages(items=>[...items,`You: ${learnerText}`]);
@@ -57,7 +75,14 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
    setSpokenText(spoken);
    setFeedback({grammar:result.correction_explanation||"That sentence works well.",words:result.vocabulary_suggestions,telugu:result.telugu_explanation||"Telugu explanation will appear when the conversation provider supplies it."});
    setPendingTurn(null);
-   if(result.turn_id){setLastSpeechTurn(result.turn_id);await loadSpeech(result.turn_id)}
+   if(!result.turn_id){
+    setAudioError("Tutor audio was not requested because the completed tutor turn identity is missing. Reload the latest frontend and retry.");
+    setAudioPathStatus("TTS request not made: tutor response omitted its turn identity.");
+    console.warn("speakmate_tts_event",{event:"request_not_made",reason:"missing_turn_id"});
+   }else{
+    setLastSpeechTurn(result.turn_id);
+    await loadSpeech(result.turn_id);
+   }
   }catch(error){
    dispatch("ERROR");
    const retryable=error instanceof ApiError?error.retryable:true;
@@ -79,4 +104,4 @@ export function ConversationScreen({account,tutor,telugu}:{account:Account;tutor
  },[id,submit]);
  const mic=useMicrophone(consent,handleCapture);
 
- return <div className="conversation-layout"><section className="studio"><Avatar tutor={tutor} state={machine.state} reducedMotion={reduced}/><div className="transcript" aria-live="polite">{messages.map((m,i)=><p key={i}>{m}</p>)}</div><TutorAudioPlayer speech={speech} spokenText={spokenText}/>{audioBusy&&<p role="status">Generating OpenAI tutor voice…</p>}{audioError&&<div><p role="alert">{audioError}</p>{lastSpeechTurn&&<button disabled={audioBusy} onClick={()=>void loadSpeech(lastSpeechTurn)}>Retry OpenAI voice</button>}</div>}<label htmlFor="message">Your message</label><div className="composer"><input id="message" value={input} disabled={turnBusy} onChange={e=>setInput(e.target.value)}/><button disabled={turnBusy} onClick={()=>void submit(input,pendingTurn?.retryable&&pendingTurn.text===input.trim()?pendingTurn.key:undefined)}>{turnBusy?"Waiting for tutor…":"Send"}</button></div>{turnError&&<div><p role="alert">{turnError}</p>{pendingTurn?.retryable&&<button disabled={turnBusy} onClick={()=>void submit(pendingTurn.text,pendingTurn.key)}>Retry tutor response</button>}</div>}<fieldset><legend>Voice controls</legend><label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to voice processing for this turn</label><p aria-live="polite">Microphone: {mic.state}{mic.state==="recording"?` · ${Math.ceil(mic.elapsed/1000)} seconds`:""}</p><p>Browser permission: {mic.permission}</p><button disabled={!consent||!id||turnBusy||mic.state==="recording"||mic.state==="processing"} onClick={()=>void mic.start()}>{mic.state==="denied"?"Retry microphone":"Start microphone"}</button><button disabled={mic.state!=="recording"} onClick={mic.stop}>Stop and transcribe</button><button disabled={mic.state!=="recording"} onClick={mic.cancel}>Cancel</button>{lastTranscript&&<p aria-live="polite" aria-label="Recognized speech"><strong>We heard:</strong> {lastTranscript}</p>}{mic.errorMessage&&<p role="alert">{mic.errorMessage} {mic.state==="denied"&&"Enable microphone access in Chrome site settings, then retry."}</p>}</fieldset></section><aside className="coach" aria-live="polite"><h2>Live coaching</h2><h3>Grammar correction</h3><p>{feedback.grammar}</p><h3>Vocabulary</h3><div className="chips">{feedback.words.length?feedback.words.map(w=><span key={w}>{w}</span>):<span>No suggestions yet.</span>}</div>{telugu&&<><h3>Telugu explanation</h3><p>{feedback.telugu}</p></>}</aside></div>}
+ return <div className="conversation-layout"><section className="studio"><Avatar tutor={tutor} state={machine.state} reducedMotion={reduced}/><div className="transcript" aria-live="polite">{messages.map((m,i)=><p key={i}>{m}</p>)}</div><TutorAudioPlayer speech={speech} spokenText={spokenText}/><p className="audio-path-status" role="status" aria-live="polite"><strong>Audio path:</strong> {audioPathStatus}</p>{audioBusy&&<p role="status">Generating OpenAI tutor voice…</p>}{audioError&&<div><p role="alert">{audioError}</p>{lastSpeechTurn&&<button disabled={audioBusy} onClick={()=>void loadSpeech(lastSpeechTurn)}>Retry OpenAI voice</button>}</div>}<label htmlFor="message">Your message</label><div className="composer"><input id="message" value={input} disabled={turnBusy} onChange={e=>setInput(e.target.value)}/><button disabled={turnBusy} onClick={()=>void submit(input,pendingTurn?.retryable&&pendingTurn.text===input.trim()?pendingTurn.key:undefined)}>{turnBusy?"Waiting for tutor…":"Send"}</button></div>{turnError&&<div><p role="alert">{turnError}</p>{pendingTurn?.retryable&&<button disabled={turnBusy} onClick={()=>void submit(pendingTurn.text,pendingTurn.key)}>Retry tutor response</button>}</div>}<fieldset><legend>Voice controls</legend><label><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I consent to voice processing for this turn</label><p aria-live="polite">Microphone: {mic.state}{mic.state==="recording"?` · ${Math.ceil(mic.elapsed/1000)} seconds`:""}</p><p>Browser permission: {mic.permission}</p><button disabled={!consent||!id||turnBusy||mic.state==="recording"||mic.state==="processing"} onClick={()=>void mic.start()}>{mic.state==="denied"?"Retry microphone":"Start microphone"}</button><button disabled={mic.state!=="recording"} onClick={mic.stop}>Stop and transcribe</button><button disabled={mic.state!=="recording"} onClick={mic.cancel}>Cancel</button>{lastTranscript&&<p aria-live="polite" aria-label="Recognized speech"><strong>We heard:</strong> {lastTranscript}</p>}{mic.errorMessage&&<p role="alert">{mic.errorMessage} {mic.state==="denied"&&"Enable microphone access in Chrome site settings, then retry."}</p>}</fieldset></section><aside className="coach" aria-live="polite"><h2>Live coaching</h2><h3>Grammar correction</h3><p>{feedback.grammar}</p><h3>Vocabulary</h3><div className="chips">{feedback.words.length?feedback.words.map(w=><span key={w}>{w}</span>):<span>No suggestions yet.</span>}</div>{telugu&&<><h3>Telugu explanation</h3><p>{feedback.telugu}</p></>}</aside></div>}

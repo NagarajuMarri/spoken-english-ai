@@ -468,6 +468,11 @@ def synthesize_tutor_speech(
     session: Session = Depends(get_db),
 ):
     """Return the exact completed tutor turn as provider-generated audio."""
+    logger.info(
+        "tts_request_received request_id=%s provider=%s",
+        request.state.request_id,
+        request.app.state.settings.text_to_speech_provider,
+    )
     enforce_rate_limit(request, "voice_turn", principal.user.id)
     conversation = session.get(Conversation, conversation_id)
     if conversation is None:

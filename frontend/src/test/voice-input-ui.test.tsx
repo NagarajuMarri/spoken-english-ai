@@ -31,7 +31,8 @@ beforeEach(()=>{
   Object.defineProperty(navigator,"permissions",{configurable:true,value:{query:vi.fn().mockResolvedValue({state:"prompt",addEventListener:vi.fn(),removeEventListener:vi.fn()})}});
   vi.spyOn(api,"conversation").mockResolvedValue({id:"conversation-voice"});
   vi.spyOn(api,"transcribe").mockResolvedValue({transcript:"I practise English every morning.",detected_language:"en",duration_ms:500,size_bytes:5});
-  vi.spyOn(api,"turn").mockResolvedValue({tutor_message:"Thank you.",next_question:"What next?",vocabulary_suggestions:[]});
+  vi.spyOn(api,"turn").mockResolvedValue({turn_id:"voice-input-turn",tutor_message:"Thank you.",next_question:"What next?",vocabulary_suggestions:[]});
+  vi.spyOn(api,"speech").mockRejectedValue(new Error("Audio is outside this STT-only test."));
 });
 
 describe("voice input customer journey",()=>{

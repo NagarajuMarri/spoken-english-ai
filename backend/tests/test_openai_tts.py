@@ -231,4 +231,6 @@ def test_tts_logs_shape_only_and_never_speech_or_credentials(client, conversatio
     logs = caplog.text
     assert secret_text not in logs
     assert "secret-key" not in logs
+    assert "tts_request_received" in logs
+    assert "provider=fake" in logs
     assert "tts_generation_completed" in logs

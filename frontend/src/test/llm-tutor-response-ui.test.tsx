@@ -10,7 +10,8 @@ it("shows a provider-safe tutor failure and allows the learner to retry",async()
   vi.spyOn(api,"conversation").mockResolvedValue({id:"conversation-1"});
   vi.spyOn(api,"turn")
     .mockRejectedValueOnce(new ApiError(503,"The tutor could not connect. Retry this turn.","llm_connection_error",true,"req-1"))
-    .mockResolvedValueOnce({tutor_message:"Recovered response.",next_question:"What happened next?",vocabulary_suggestions:[]});
+    .mockResolvedValueOnce({turn_id:"recovered-turn",tutor_message:"Recovered response.",next_question:"What happened next?",vocabulary_suggestions:[]});
+  vi.spyOn(api,"speech").mockRejectedValue(new Error("Audio is outside this LLM-only test."));
   render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
   await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
   await userEvent.type(screen.getByLabelText("Your message"),"Please help me practise.");
@@ -51,10 +52,12 @@ it("allows a safe same-turn retry after an incomplete OpenAI response",async()=>
       "req-3",
     ))
     .mockResolvedValueOnce({
+      turn_id:"recovered-incomplete-turn",
       tutor_message:"I can continue now.",
       next_question:"What would you like to discuss?",
       vocabulary_suggestions:[],
     });
+  vi.spyOn(api,"speech").mockRejectedValue(new Error("Audio is outside this LLM-only test."));
   render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
   await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
   await userEvent.type(screen.getByLabelText("Your message"),"Please continue.");
