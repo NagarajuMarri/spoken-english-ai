@@ -60,6 +60,8 @@ class UsageService:
         learner_id,
         user_id,
         provider_requests,
+        input_units=0,
+        output_units=0,
         commit=True,
     ):
         record = self.session.scalar(select(AIUsageRecord).where(
@@ -75,12 +77,16 @@ class UsageService:
                 outcome="FAILURE",
                 request_count=provider_requests,
                 retries=max(0, provider_requests - 1),
+                input_units=input_units,
+                output_units=output_units,
                 failed=True,
             )
             self.session.add(record)
         else:
             record.request_count += provider_requests
             record.retries += max(0, provider_requests - 1)
+            record.input_units += input_units
+            record.output_units += output_units
             record.failed = True
         if commit:
             self.session.commit()

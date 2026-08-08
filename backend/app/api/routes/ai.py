@@ -13,6 +13,7 @@ from backend.app.ai.exceptions import (
     ProviderConnectionError,
     ProviderContextLimit,
     ProviderError,
+    ProviderIncompleteResponse,
     ProviderMalformedResponse,
     ProviderOutputInvalid,
     ProviderRateLimited,
@@ -104,6 +105,14 @@ def _provider_app_error(exc: ProviderError) -> AppError:
             "This turn is too long for the tutor. Shorten it and send again.",
             retryable=False,
         )
+    if isinstance(exc, ProviderIncompleteResponse):
+        return AppError(
+            status.HTTP_502_BAD_GATEWAY,
+            "llm_incomplete_response",
+            "The tutor response ended before it was complete. Retry this turn safely.",
+            headers,
+            retryable=True,
+        )
     if isinstance(exc, ProviderMalformedResponse):
         return AppError(
             status.HTTP_502_BAD_GATEWAY,
@@ -133,6 +142,7 @@ def _failure_from_attempt(attempt: AITurnAttempt) -> AppError:
         "provider_rate_limit": ProviderRateLimited,
         "provider_service_error": ProviderServiceError,
         "provider_context_limit": ProviderContextLimit,
+        "provider_incomplete_response": ProviderIncompleteResponse,
         "provider_malformed_response": ProviderMalformedResponse,
         "provider_schema_validation_failed": ProviderOutputInvalid,
     }
@@ -295,6 +305,8 @@ def ai_turn(
                 learner_id=principal.learner.id,
                 user_id=principal.user.id,
                 provider_requests=exc.provider_requests,
+                input_units=exc.input_units,
+                output_units=exc.output_units,
                 commit=False,
             )
             session.commit()

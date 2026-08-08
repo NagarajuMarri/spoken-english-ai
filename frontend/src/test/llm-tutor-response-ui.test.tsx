@@ -39,3 +39,30 @@ it("does not offer automatic retry for a non-transient provider response",async(
   expect(await screen.findByRole("alert")).toHaveTextContent("could not be validated");
   expect(screen.queryByRole("button",{name:"Retry tutor response"})).not.toBeInTheDocument();
 });
+
+it("allows a safe same-turn retry after an incomplete OpenAI response",async()=>{
+  vi.spyOn(api,"conversation").mockResolvedValue({id:"conversation-3"});
+  vi.spyOn(api,"turn")
+    .mockRejectedValueOnce(new ApiError(
+      502,
+      "The tutor response ended before it was complete. Retry this turn safely.",
+      "llm_incomplete_response",
+      true,
+      "req-3",
+    ))
+    .mockResolvedValueOnce({
+      tutor_message:"I can continue now.",
+      next_question:"What would you like to discuss?",
+      vocabulary_suggestions:[],
+    });
+  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+  await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
+  await userEvent.type(screen.getByLabelText("Your message"),"Please continue.");
+  await userEvent.click(screen.getByRole("button",{name:"Send"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("ended before it was complete");
+  const firstKey=vi.mocked(api.turn).mock.calls[0][3];
+  await userEvent.click(screen.getByRole("button",{name:"Retry tutor response"}));
+  expect(await screen.findByText(/I can continue now/)).toBeVisible();
+  expect(vi.mocked(api.turn).mock.calls[1][3]).toBe(firstKey);
+  expect(screen.getAllByText("You: Please continue.")).toHaveLength(1);
+});

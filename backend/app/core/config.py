@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     openai_llm_model: str = "gpt-5-mini"
     openai_llm_timeout_seconds: int = 45
     openai_llm_max_retries: int = 1
+    openai_llm_reasoning_effort: str = "minimal"
+    openai_llm_max_output_tokens: int = 4096
     openai_llm_input_usd_per_million: float = 0.25
     openai_llm_cached_input_usd_per_million: float = 0.025
     openai_llm_output_usd_per_million: float = 2.0
@@ -120,6 +122,10 @@ class Settings(BaseSettings):
             raise ValueError("openai_llm_timeout_seconds must be between 1 and 60")
         if self.openai_llm_max_retries not in {0, 1}:
             raise ValueError("openai_llm_max_retries must be 0 or 1")
+        if self.openai_llm_reasoning_effort not in {"minimal", "low", "medium", "high"}:
+            raise ValueError("openai_llm_reasoning_effort must be minimal, low, medium, or high")
+        if not 1024 <= self.openai_llm_max_output_tokens <= 25_000:
+            raise ValueError("openai_llm_max_output_tokens must be between 1024 and 25000")
         if self.environment != "production":
             return self
         missing = []

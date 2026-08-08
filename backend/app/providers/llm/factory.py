@@ -9,6 +9,8 @@ def build_llm_provider(settings):
             model=settings.openai_llm_model,
             timeout_seconds=settings.openai_llm_timeout_seconds,
             max_retries=settings.openai_llm_max_retries,
+            reasoning_effort=settings.openai_llm_reasoning_effort,
+            max_output_tokens=settings.openai_llm_max_output_tokens,
         )
     if settings.llm_provider == "fake":
         if settings.environment != "test":

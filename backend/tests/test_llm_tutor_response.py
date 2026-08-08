@@ -9,6 +9,7 @@ from backend.app.ai.deterministic_provider import DeterministicAIProvider
 from backend.app.ai.exceptions import (
     ProviderConnectionError,
     ProviderContextLimit,
+    ProviderIncompleteResponse,
     ProviderMalformedResponse,
     ProviderOutputInvalid,
     ProviderRateLimited,
@@ -111,6 +112,8 @@ def test_responses_client_sends_three_complete_turns_and_uses_provider_usage():
     assert body["store"] is False
     assert body["text"]["format"]["type"] == "json_schema"
     assert body["text"]["format"]["strict"] is True
+    assert body["reasoning"] == {"effort": "minimal"}
+    assert body["max_output_tokens"] == 4096
     assert [item["role"] for item in body["input"]] == [
         "user", "assistant", "user", "assistant", "user", "assistant", "user",
     ]
@@ -174,7 +177,7 @@ def test_responses_client_retries_one_transient_failure_and_reports_actual_reque
     assert result.usage.provider_requests == 2
 
 
-def test_responses_client_does_not_retry_context_or_malformed_output():
+def test_responses_client_classifies_incomplete_and_does_not_retry_malformed_output():
     calls = 0
 
     def context_failure(*_args, **_kwargs):
@@ -197,13 +200,36 @@ def test_responses_client_does_not_retry_context_or_malformed_output():
         provider.generate(_request())
     assert calls == 1
 
-    malformed = OpenAICompatibleAIProvider(
+    incomplete = OpenAICompatibleAIProvider(
         OpenAIResponsesHTTPClient(
             "secret-key",
             lambda *_args, **_kwargs: _HTTPResponse({
                 "id": "resp_incomplete",
                 "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
                 "output": [],
+                "usage": {"input_tokens": 120, "output_tokens": 900},
+            }),
+        ),
+        model="gpt-5-mini",
+        max_retries=1,
+    )
+    with pytest.raises(ProviderIncompleteResponse) as captured:
+        incomplete.generate(_request())
+    assert captured.value.provider_requests == 1
+    assert captured.value.input_units == 120
+    assert captured.value.output_units == 900
+
+    malformed = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient(
+            "secret-key",
+            lambda *_args, **_kwargs: _HTTPResponse({
+                "id": "resp_malformed",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "not-json"}],
+                }],
             }),
         ),
         model="gpt-5-mini",
@@ -267,6 +293,14 @@ def test_ai_turn_uses_provider_for_greetings_carries_three_turns_and_persists_us
         (ProviderRateLimited("raw limit detail"), 429, "llm_rate_limited", True),
         (ProviderServiceError("raw service detail"), 502, "llm_provider_error", True),
         (ProviderContextLimit("raw context detail"), 422, "llm_context_limit", False),
+        (
+            ProviderIncompleteResponse(
+                "raw incomplete detail", input_units=120, output_units=900,
+            ),
+            502,
+            "llm_incomplete_response",
+            True,
+        ),
         (ProviderMalformedResponse("raw malformed detail"), 502, "llm_malformed_response", False),
         (ProviderOutputInvalid("raw schema detail"), 502, "llm_schema_validation_failed", False),
         (ProviderUnavailable("raw provider detail"), 503, "llm_unavailable", False),
@@ -295,6 +329,8 @@ def test_ai_turn_maps_provider_failures_without_persisting_a_message(
         assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 0
         usage = db.scalar(select(AIUsageRecord).where(AIUsageRecord.outcome == "FAILURE"))
         assert usage.failed is True
+        assert usage.input_units == provider_error.input_units
+        assert usage.output_units == provider_error.output_units
         assert db.scalar(select(func.count()).select_from(AIUsageRecord).where(
             AIUsageRecord.outcome == "SUCCESS"
         )) == 0
@@ -363,6 +399,62 @@ def test_transient_failure_retries_with_same_identity_and_persists_exactly_once(
     assert provider.requests[-1].conversation_history[-1].learner_message == payload["message"]
 
 
+def test_incomplete_openai_turn_can_be_retried_safely_and_is_persisted_once(
+    client, learner, conversation,
+):
+    class IncompleteOnceProvider:
+        def __init__(self):
+            self.requests = []
+
+        def generate(self, request):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                raise ProviderIncompleteResponse(
+                    "max output tokens reached",
+                    input_units=160,
+                    output_units=900,
+                )
+            return _content("Recovered after an incomplete OpenAI response.")
+
+    provider = IncompleteOnceProvider()
+    client.app.state.llm_provider = provider
+    headers = {"Idempotency-Key": "turn-incomplete-0001"}
+    payload = {"message": "Please continue our conversation."}
+
+    failed = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+    recovered = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+    replayed = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json=payload,
+        headers=headers,
+    )
+
+    assert failed.status_code == 502
+    assert failed.json()["error"]["code"] == "llm_incomplete_response"
+    assert failed.json()["error"]["retryable"] is True
+    assert recovered.status_code == 200
+    assert replayed.json() == recovered.json()
+    assert len(provider.requests) == 2
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 1
+        assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 1
+        assert db.scalar(select(func.count()).select_from(AIUsageRecord).where(
+            AIUsageRecord.outcome == "SUCCESS"
+        )) == 1
+        failure = db.scalar(select(AIUsageRecord).where(AIUsageRecord.outcome == "FAILURE"))
+        assert failure.request_count == 1
+        assert failure.input_units == 160
+        assert failure.output_units == 900
+
+
 def test_persistence_retry_reuses_checkpoint_without_second_provider_call(
     client, learner, conversation, monkeypatch,
 ):
@@ -416,3 +508,5 @@ def test_llm_provider_configuration_fails_closed_outside_tests():
         _env_file=None,
     ))
     assert provider.name == "openai-compatible"
+    assert provider.reasoning_effort == "minimal"
+    assert provider.max_output_tokens == 4096

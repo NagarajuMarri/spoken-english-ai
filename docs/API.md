@@ -8,6 +8,9 @@
 - `POST /api/v1/learners/{id}/daily-plan/generate`
 
 Voice processing requires `Idempotency-Key`. AI tutor turns also accept this header; the browser sends one stable key per learner turn and reuses it for safe recovery. A completed retry returns the stored result without another provider call. Responses contain validated learner-facing fields, request/correlation identifiers, processing status, and degraded-feature labels—not provider payloads or configuration.
+
+OpenAI responses that end at the configured output limit return `502 llm_incomplete_response` with `retryable: true`. The failed call's reported token usage is retained as failure usage, no tutor success is persisted, and a browser retry reuses the original turn identity. Genuinely malformed or schema-invalid provider output remains separately classified.
+
 # Voice input
 
 `POST /api/v1/conversations/{conversation_id}/transcriptions` accepts an authenticated raw audio request (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav`, or `audio/mpeg`) with `X-Audio-Duration-Ms` and explicit `X-Voice-Processing-Consent: accepted`. It returns the normalized transcript, detected language, captured duration and byte count. Raw audio is transient request data and is not persisted by this endpoint.

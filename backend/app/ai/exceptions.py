@@ -10,10 +10,14 @@ class ProviderError(Exception):
         *,
         provider_requests: int = 1,
         retry_after_seconds: int | None = None,
+        input_units: int = 0,
+        output_units: int = 0,
     ) -> None:
         super().__init__(message)
         self.provider_requests = max(1, provider_requests)
         self.retry_after_seconds = retry_after_seconds
+        self.input_units = max(0, input_units)
+        self.output_units = max(0, output_units)
 
 
 class ProviderUnavailable(ProviderError):
@@ -42,6 +46,11 @@ class ProviderServiceError(ProviderError):
 
 class ProviderContextLimit(ProviderError):
     failure_code = "provider_context_limit"
+
+
+class ProviderIncompleteResponse(ProviderError):
+    failure_code = "provider_incomplete_response"
+    retryable = True
 
 
 class ProviderMalformedResponse(ProviderError):
