@@ -7,6 +7,7 @@ from backend.app.schemas.tutors import (
     LearnerDashboardRead, TutorPreferenceRead, TutorPreferenceUpdate, TutorRead,
 )
 from backend.app.services.tutors import TutorExperienceService
+from backend.app.domain.enums import LanguageMode
 
 router = APIRouter(prefix="/api/v1/tutors", tags=["tutors"])
 
@@ -24,7 +25,7 @@ def get_preference(principal: Principal = Depends(current_principal), session: S
 @router.put("/preference", response_model=TutorPreferenceRead)
 def update_preference(data: TutorPreferenceUpdate, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
     return TutorExperienceService(session).update_preference(
-        principal.learner, data.tutor_id, data.telugu_explanations_enabled
+        principal.learner, data.tutor_id, data.language_mode or LanguageMode.ENGLISH
     )
 
 

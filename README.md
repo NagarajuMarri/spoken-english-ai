@@ -2,6 +2,18 @@
 
 Spoken English AI is a voice-first learning product for Indian learners, initially Telugu-speaking adults and students who know some English but lack speaking confidence. It is designed around realistic practice, supportive delayed corrections, and a structured path from Starter to Intermediate.
 
+## RC1 feature gates
+
+- Feature 5 — OpenAI TTS / audible tutor speech: **ACCEPTED** by the founder in Windows Chrome.
+- Feature 6 — Native Telugu language-quality review: **BLOCKED** pending founder language acceptance.
+- Feature 7 — Avatar expressions / audio synchronization: **NOT STARTED** until Feature 6 is accepted.
+
+Native Telugu quality review is a first-class learner capability. Learners choose English,
+English with Telugu explanation, or Telugu-dominant explanation. Telugu modes pass through a
+separate structured review stage before persistence, TTS, and presentation; review cannot edit
+correction results, evaluation signals, difficulty, or learning objectives. See
+`docs/TELUGU_QUALITY_FOUNDER_REVIEW.md` and `docs/REUSABLE_REVIEW_PIPELINE.md`.
+
 ## Milestone 1 boundary
 
 Milestones 1–3 established the product, onboarding, conversations, curriculum, and progress. Milestone 4 adds consent-aware simulated voice practice, auditable consent, metadata-only audio lifecycle management, and an explicitly synthetic pronunciation double. Authentication, real audio, frontends, object storage, and paid providers remain excluded.

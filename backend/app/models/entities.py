@@ -30,6 +30,7 @@ class Learner(Base):
     daily_goal_minutes: Mapped[int] = mapped_column(Integer, default=10)
     preferred_tutor_id: Mapped[str] = mapped_column(String(50), default="ananya")
     telugu_explanations_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    language_mode: Mapped[str] = mapped_column(String(30), default="ENGLISH")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

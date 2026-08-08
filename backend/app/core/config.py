@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     llm_provider: str = "disabled"
     speech_to_text_provider: str = "disabled"
     text_to_speech_provider: str = "disabled"
+    language_review_provider: str = "disabled"
     auto_create_tables: bool = True
     temporary_audio_expiration_hours: int = 24
     jwt_secret: str = ""
@@ -90,6 +91,11 @@ class Settings(BaseSettings):
     openai_llm_input_usd_per_million: float = 0.25
     openai_llm_cached_input_usd_per_million: float = 0.025
     openai_llm_output_usd_per_million: float = 2.0
+    openai_language_review_model: str = "gpt-5-mini"
+    openai_language_review_timeout_seconds: int = 45
+    openai_language_review_max_retries: int = 1
+    openai_language_review_reasoning_effort: str = "minimal"
+    openai_language_review_max_output_tokens: int = 2048
     openai_stt_model: str = "gpt-4o-mini-transcribe"
     openai_tts_model: str = "gpt-4o-mini-tts"
     openai_tts_timeout_seconds: int = 30
@@ -132,6 +138,14 @@ class Settings(BaseSettings):
             raise ValueError("openai_llm_reasoning_effort must be minimal, low, medium, or high")
         if not 1024 <= self.openai_llm_max_output_tokens <= 25_000:
             raise ValueError("openai_llm_max_output_tokens must be between 1024 and 25000")
+        if not 1 <= self.openai_language_review_timeout_seconds <= 60:
+            raise ValueError("openai_language_review_timeout_seconds must be between 1 and 60")
+        if self.openai_language_review_max_retries not in {0, 1}:
+            raise ValueError("openai_language_review_max_retries must be 0 or 1")
+        if self.openai_language_review_reasoning_effort not in {"minimal", "low", "medium", "high"}:
+            raise ValueError("openai_language_review_reasoning_effort is unsupported")
+        if not 1024 <= self.openai_language_review_max_output_tokens <= 8192:
+            raise ValueError("openai_language_review_max_output_tokens must be between 1024 and 8192")
         if not 1 <= self.openai_tts_timeout_seconds <= 60:
             raise ValueError("openai_tts_timeout_seconds must be between 1 and 60")
         if self.openai_tts_max_retries != 0:
@@ -181,6 +195,10 @@ class Settings(BaseSettings):
             missing.append("text_to_speech_provider")
         elif not self.openai_api_key:
             missing.append("openai_api_key")
+        if self.language_review_provider != "openai":
+            missing.append("language_review_provider")
+        elif not self.openai_api_key:
+            missing.append("openai_api_key")
         if self.razorpay_enabled and not self.razorpay_webhook_secret:
             missing.append("razorpay_webhook_secret")
         if self.razorpay_enabled and self.razorpay_mode != "test":
@@ -208,6 +226,7 @@ class Settings(BaseSettings):
             "redis_configured": bool(self.redis_url),
             "object_storage_backend": self.object_storage_backend,
             "llm_provider": self.llm_provider,
+            "language_review_provider": self.language_review_provider,
             "speech_to_text_provider": self.speech_to_text_provider,
             "text_to_speech_provider": self.text_to_speech_provider,
             "razorpay_enabled": self.razorpay_enabled,
@@ -246,10 +265,12 @@ class Settings(BaseSettings):
             self.llm_provider in {"disabled", "fake", "rule_based", "openai"}
             and self.speech_to_text_provider in {"disabled", "fake", "openai"}
             and self.text_to_speech_provider in {"disabled", "fake", "openai"}
+            and self.language_review_provider in {"disabled", "fake", "openai"}
             and ("openai" not in {
                 self.llm_provider,
                 self.speech_to_text_provider,
                 self.text_to_speech_provider,
+                self.language_review_provider,
             } or bool(self.openai_api_key))
             and reset_delivery_ready
         )

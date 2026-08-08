@@ -22,6 +22,12 @@ class NativeLanguage(StrEnum):
     ENGLISH = "English"
 
 
+class LanguageMode(StrEnum):
+    ENGLISH = "ENGLISH"
+    ENGLISH_TELUGU = "ENGLISH_TELUGU"
+    TELUGU_DOMINANT = "TELUGU_DOMINANT"
+
+
 class LessonSessionStatus(StrEnum):
     STARTED = "STARTED"
     IN_PROGRESS = "IN_PROGRESS"

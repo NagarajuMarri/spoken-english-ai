@@ -113,7 +113,8 @@ def test_production_requires_openai_tts_and_factory_wires_the_locked_provider():
         cors_origins="https://app.example.com", trusted_hosts="app.example.com",
         object_storage_backend="s3", object_storage_bucket="private",
         password_reset_delivery_provider="smtp", smtp_host="smtp.example.com",
-        llm_provider="openai", speech_to_text_provider="openai", openai_api_key="test-key", _env_file=None,
+        llm_provider="openai", language_review_provider="openai",
+        speech_to_text_provider="openai", openai_api_key="test-key", _env_file=None,
     )
     with pytest.raises(ValueError, match="text_to_speech_provider"):
         Settings(**base, text_to_speech_provider="disabled")

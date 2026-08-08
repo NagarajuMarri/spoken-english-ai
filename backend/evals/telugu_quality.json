@@ -1,0 +1,122 @@
+[
+  {
+    "id": "grammar-correction-beginner",
+    "category": "grammar correction",
+    "learner_level": "BEGINNER",
+    "language_mode": "ENGLISH_TELUGU",
+    "learner_input": "I went office yesterday.",
+    "protected_result": "I went to the office yesterday.",
+    "response": "చాలా బాగా చెప్పారు. ఈ sentence లో office ముందు ‘to the’ పెట్టాలి: ‘I went to the office yesterday.’ ఇక్కడ tense మాత్రం సరైనదే. ఇప్పుడు corrected sentence ని ఇంకోసారి చెప్పండి.",
+    "preserved_learning_terms": ["sentence", "tense"]
+  },
+  {
+    "id": "pronunciation-explanation",
+    "category": "pronunciation explanation",
+    "learner_level": "BEGINNER",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "How do I say comfortable?",
+    "protected_result": "COMF-tuh-bul",
+    "response": "‘comfortable’ pronunciation ని నాలుగు భాగాలుగా కాకుండా మూడు beats లాగా చెప్పండి: ‘COMF-tuh-bul’. ముందు నెమ్మదిగా చెప్పి, తర్వాత సహజమైన speed లో practice చేయండి.",
+    "preserved_learning_terms": ["pronunciation", "practice"]
+  },
+  {
+    "id": "encouragement-after-hesitation",
+    "category": "encouragement",
+    "learner_level": "BEGINNER",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "I am afraid to speak.",
+    "protected_result": "Build speaking confidence through short daily practice.",
+    "response": "మాట్లాడేటప్పుడు కొంచెం భయం రావడం సహజమే. తప్పు అవుతుందేమో అని ఆగిపోకండి. రోజూ రెండు చిన్న sentences చెప్పే practice చేస్తే confidence నెమ్మదిగా పెరుగుతుంది. ఈరోజు మీ గురించి ఒక చిన్న sentence చెప్పగలరా?",
+    "preserved_learning_terms": ["sentence", "practice", "confidence"]
+  },
+  {
+    "id": "mistake-correction-polite",
+    "category": "mistake correction",
+    "learner_level": "ELEMENTARY",
+    "language_mode": "ENGLISH_TELUGU",
+    "learner_input": "She don't like tea.",
+    "protected_result": "She doesn't like tea.",
+    "response": "మీ meaning స్పష్టంగా ఉంది. చిన్న grammar change మాత్రమే: ‘She doesn’t like tea.’ ‘She’ తో ‘don’t’ కాకుండా ‘doesn’t’ వాడాలి. ఇప్పుడు అదే pattern తో ఇంకో sentence ప్రయత్నిస్తారా?",
+    "preserved_learning_terms": ["grammar", "sentence"]
+  },
+  {
+    "id": "workplace-update",
+    "category": "workplace English",
+    "learner_level": "INTERMEDIATE",
+    "language_mode": "ENGLISH_TELUGU",
+    "learner_input": "How can I update my manager?",
+    "protected_result": "The issue is under investigation, and I will share the next update by 3 PM.",
+    "response": "Manager కి update ఇస్తున్నప్పుడు status, action, next update time—ఈ మూడు స్పష్టంగా చెప్పండి: ‘The issue is under investigation, and I will share the next update by 3 PM.’ ఇలా చెబితే sentence professional గా, clear గా ఉంటుంది.",
+    "preserved_learning_terms": ["sentence"]
+  },
+  {
+    "id": "daily-conversation-request",
+    "category": "daily conversation",
+    "learner_level": "BEGINNER",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "Ask shopkeeper for water.",
+    "protected_result": "Could I have a bottle of water, please?",
+    "response": "Shop లో మర్యాదగా అడగాలంటే, ‘Could I have a bottle of water, please?’ అని చెప్పండి. ‘Give me water’ కంటే ఈ sentence సహజంగా, polite గా ఉంటుంది. ఒకసారి మీరు చెప్పి చూడండి.",
+    "preserved_learning_terms": ["sentence"]
+  },
+  {
+    "id": "beginner-self-introduction",
+    "category": "beginner learner",
+    "learner_level": "STARTER",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "Myself Raju.",
+    "protected_result": "My name is Raju. / I am Raju.",
+    "response": "పరిచయం చేసుకునేటప్పుడు ‘Myself Raju’ అనకుండా, ‘My name is Raju’ లేదా ‘I am Raju’ అని చెప్పండి. రెండూ natural English sentences. ఇప్పుడు మీ ఊరు కూడా కలిపి చెప్పగలరా?",
+    "preserved_learning_terms": ["sentence"]
+  },
+  {
+    "id": "intermediate-opinion",
+    "category": "intermediate learner",
+    "learner_level": "INTERMEDIATE",
+    "language_mode": "ENGLISH_TELUGU",
+    "learner_input": "I think remote work good because save time.",
+    "protected_result": "I think remote work is good because it saves time.",
+    "response": "మీ opinion బాగా చెప్పారు. sentence పూర్తి కావడానికి రెండు చిన్న changes చేయాలి: ‘remote work is good’ మరియు ‘it saves time.’ Final sentence: ‘I think remote work is good because it saves time.’ ఇప్పుడు దీనికి ఇంకో reason జోడిస్తారా?",
+    "preserved_learning_terms": ["sentence"]
+  },
+  {
+    "id": "complex-perfect-tense",
+    "category": "complex explanation",
+    "learner_level": "INTERMEDIATE",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "When use present perfect?",
+    "protected_result": "Use present perfect for a past action connected to the present.",
+    "response": "Present perfect tense ని గతంలో జరిగిన పని ఇప్పటికీ ప్రభావం చూపుతున్నప్పుడు వాడతాం. ఉదాహరణకు, ‘I have lost my keys’ అంటే keys ఇప్పుడు కూడా దొరకలేదు. కానీ పని ఎప్పుడు జరిగిందో స్పష్టంగా చెప్పాలంటే simple past వాడాలి: ‘I lost my keys yesterday.’ ఈ రెండు sentences లో తేడా గమనించారా?",
+    "preserved_learning_terms": ["tense", "sentence"]
+  },
+  {
+    "id": "positive-feedback-fluency",
+    "category": "positive feedback",
+    "learner_level": "ELEMENTARY",
+    "language_mode": "ENGLISH_TELUGU",
+    "learner_input": "I usually wake up at six and go for a walk.",
+    "protected_result": "The learner used the simple present correctly.",
+    "response": "Excellent! ఈ sentence చాలా natural గా ఉంది. ‘usually’ ని సరైన place లో వాడారు, tense కూడా correct గా ఉంది. ఇలాగే ఇంకో morning routine sentence చెబితే మీ fluency ఇంకా బాగా పెరుగుతుంది.",
+    "preserved_learning_terms": ["sentence", "tense", "fluency"]
+  },
+  {
+    "id": "telugu-dominant-prepositions",
+    "category": "Telugu-dominant response",
+    "learner_level": "BEGINNER",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "I am in bus.",
+    "protected_result": "I am on the bus.",
+    "response": "Bus, train, plane లాంటి public transport గురించి చెప్పేటప్పుడు సాధారణంగా ‘on’ వాడతాం. అందుకే correct sentence: ‘I am on the bus.’ Car లేదా taxi అయితే ‘in’ వాడతాం. ఇప్పుడు train తో ఒక sentence చెప్పండి.",
+    "preserved_learning_terms": ["sentence"]
+  },
+  {
+    "id": "technical-terms-code-switch",
+    "category": "Telugu + English technical terms",
+    "learner_level": "ELEMENTARY",
+    "language_mode": "TELUGU_DOMINANT",
+    "learner_input": "Explain noun and verb.",
+    "protected_result": "A noun names a person, place, thing, or idea; a verb shows an action or state.",
+    "response": "Noun అంటే person, place, thing లేదా idea కి పేరు చెప్పే word. Verb అంటే action లేదా state ని చూపించే word. ‘Ravi runs’ అనే sentence లో ‘Ravi’ noun, ‘runs’ verb. ఇప్పుడు మీరు ఒక noun, ఒక verb ఉన్న చిన్న sentence చెబుతారా?",
+    "preserved_learning_terms": ["noun", "verb", "sentence"]
+  }
+]

@@ -33,6 +33,7 @@ from backend.app.providers.llm import build_llm_provider
 from backend.app.providers.password_reset import build_password_reset_delivery
 from backend.app.providers.stt import build_speech_to_text_provider
 from backend.app.providers.tts import build_text_to_speech_provider
+from backend.app.language_review import build_language_review_provider
 import backend.app.models  # noqa: F401
 
 logger = logging.getLogger("spoken_english.startup")
@@ -69,10 +70,12 @@ def create_app(settings=None) -> FastAPI:
     application.state.llm_provider = build_llm_provider(settings)
     application.state.speech_to_text_provider = build_speech_to_text_provider(settings)
     application.state.text_to_speech_provider = build_text_to_speech_provider(settings)
+    application.state.language_review_provider = build_language_review_provider(settings)
     logger.info(
-        "runtime_providers build=%s llm=%s stt=%s tts=%s",
+        "runtime_providers build=%s llm=%s language_review=%s stt=%s tts=%s",
         settings.build_identifier,
         settings.llm_provider,
+        settings.language_review_provider,
         settings.speech_to_text_provider,
         settings.text_to_speech_provider,
     )

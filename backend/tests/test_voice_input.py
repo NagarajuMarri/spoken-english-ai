@@ -155,8 +155,9 @@ def test_production_requires_openai_stt_policy():
         Settings(**base, speech_to_text_provider="disabled")
     configured = Settings(
         **base,
-        llm_provider="openai",
-        speech_to_text_provider="openai",
+            llm_provider="openai",
+            language_review_provider="openai",
+            speech_to_text_provider="openai",
         text_to_speech_provider="openai",
         openai_api_key="test-key",
     )

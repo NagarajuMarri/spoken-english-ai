@@ -12,7 +12,7 @@ it("shows a provider-safe tutor failure and allows the learner to retry",async()
     .mockRejectedValueOnce(new ApiError(503,"The tutor could not connect. Retry this turn.","llm_connection_error",true,"req-1"))
     .mockResolvedValueOnce({turn_id:"recovered-turn",tutor_message:"Recovered response.",next_question:"What happened next?",vocabulary_suggestions:[]});
   vi.spyOn(api,"speech").mockRejectedValue(new Error("Audio is outside this LLM-only test."));
-  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH"/></RouterProvider>);
   await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
   await userEvent.type(screen.getByLabelText("Your message"),"Please help me practise.");
   await userEvent.click(screen.getByRole("button",{name:"Send"}));
@@ -33,7 +33,7 @@ it("does not offer automatic retry for a non-transient provider response",async(
   vi.spyOn(api,"turn").mockRejectedValue(
     new ApiError(502,"The tutor response could not be validated. Send the turn again.","llm_schema_validation_failed",false,"req-2"),
   );
-  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH"/></RouterProvider>);
   await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
   await userEvent.type(screen.getByLabelText("Your message"),"Please check this.");
   await userEvent.click(screen.getByRole("button",{name:"Send"}));
@@ -58,7 +58,7 @@ it("allows a safe same-turn retry after an incomplete OpenAI response",async()=>
       vocabulary_suggestions:[],
     });
   vi.spyOn(api,"speech").mockRejectedValue(new Error("Audio is outside this LLM-only test."));
-  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+  render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH"/></RouterProvider>);
   await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
   await userEvent.type(screen.getByLabelText("Your message"),"Please continue.");
   await userEvent.click(screen.getByRole("button",{name:"Send"}));

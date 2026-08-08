@@ -5,6 +5,7 @@ from backend.app.core.errors import AppError
 from backend.app.repositories.learners import DuplicateEmailError, LearnerRepository
 from backend.app.schemas.learners import LearnerCreate, OnboardingUpdate
 from backend.app.tutors import get_tutor
+from backend.app.domain.enums import LanguageMode
 
 
 class LearnerService:
@@ -29,4 +30,8 @@ class LearnerService:
         except KeyError as error:
             raise AppError(422, "unknown_tutor", "Select an enabled tutor.") from error
         learner = self.get(learner_id)
-        return self.repository.update_onboarding(learner, **data.model_dump(mode="json"))
+        values = data.model_dump(mode="json")
+        language_mode = data.language_mode or LanguageMode.ENGLISH
+        values["telugu_explanations_enabled"] = language_mode != LanguageMode.ENGLISH
+        values["language_mode"] = language_mode.value
+        return self.repository.update_onboarding(learner, **values)

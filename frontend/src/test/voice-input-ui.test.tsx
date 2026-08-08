@@ -37,7 +37,7 @@ beforeEach(()=>{
 
 describe("voice input customer journey",()=>{
   it("moves captured bytes through STT into visible learner text and the conversation pipeline",async()=>{
-    render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+    render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH"/></RouterProvider>);
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
@@ -52,14 +52,14 @@ describe("voice input customer journey",()=>{
     expect(api.turn).toHaveBeenCalledWith(
       "conversation-voice",
       "I practise English every morning.",
-      false,
+      "ENGLISH",
       expect.any(String),
     );
   });
 
   it("shows a safe STT error and does not submit an invented learner message",async()=>{
     vi.mocked(api.transcribe).mockRejectedValue(new ApiError(422,"No clear speech was detected."));
-    render(<RouterProvider><ConversationScreen account={account} tutor={ananya} telugu={false}/></RouterProvider>);
+    render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH"/></RouterProvider>);
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));

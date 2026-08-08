@@ -1,4 +1,4 @@
-import type { Account, AiTurn, Dashboard, ProgressDetail, SubscriptionView, TokenPair, Tutor, TutorPreference, TutorSpeech, VoiceTranscription } from "../models";
+import type { Account, AiTurn, Dashboard, LanguageMode, ProgressDetail, SubscriptionView, TokenPair, Tutor, TutorPreference, TutorSpeech, VoiceTranscription } from "../models";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 export class ApiError extends Error {
@@ -58,11 +58,11 @@ export const api={
   logout:(refresh_token:string)=>raw<void>("/api/v1/auth/logout",{method:"POST",body:JSON.stringify({refresh_token})}),
   logoutAll:()=>raw<void>("/api/v1/auth/logout-all",{method:"POST"}),
   tutors:()=>raw<Tutor[]>("/api/v1/tutors"), preference:()=>raw<TutorPreference>("/api/v1/tutors/preference"),
-  savePreference:(tutor_id:string,telugu_explanations_enabled:boolean)=>raw<TutorPreference>("/api/v1/tutors/preference",{method:"PUT",body:JSON.stringify({tutor_id,telugu_explanations_enabled})}),
+  savePreference:(tutor_id:string,language_mode:LanguageMode)=>raw<TutorPreference>("/api/v1/tutors/preference",{method:"PUT",body:JSON.stringify({tutor_id,language_mode})}),
   dashboard:()=>raw<Dashboard>("/api/v1/tutors/dashboard"),
   conversation:(learner_id:string)=>raw<{id:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:"daily-conversation"})}),
   transcribe:(id:string,capture:{blob:Blob;durationMs:number})=>raw<VoiceTranscription>(`/api/v1/conversations/${id}/transcriptions`,{method:"POST",headers:{"Content-Type":capture.blob.type,"X-Audio-Duration-Ms":String(capture.durationMs),"X-Voice-Processing-Consent":"accepted"},body:capture.blob}),
-  turn:(id:string,message:string,include_telugu_explanation:boolean,idempotencyKey:string)=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({message,include_telugu_explanation})}),
+  turn:(id:string,message:string,_languageMode:LanguageMode,idempotencyKey:string)=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({message})}),
   speech:(id:string,turnId:string)=>speechRaw(`/api/v1/conversations/${id}/ai-turns/${turnId}/speech`),
   feedback:(body:{rating:number;category:string;severity:string;message:string;contact_allowed:boolean;screenshot_name?:string})=>raw<{accepted:boolean;message:string}>("/api/v1/launch/feedback",{method:"POST",body:JSON.stringify(body)}),
   subscription:()=>raw<SubscriptionView>("/api/v1/launch/subscription"),

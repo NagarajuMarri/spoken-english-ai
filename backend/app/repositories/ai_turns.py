@@ -45,6 +45,12 @@ class AITurnAttemptRepository:
         attempt.updated_at = utc_now()
         self.session.commit()
 
+    def mark_review_in_progress(self, attempt: AITurnAttempt) -> None:
+        attempt.status = "REVIEW_IN_PROGRESS"
+        attempt.failure_code = None
+        attempt.updated_at = utc_now()
+        self.session.commit()
+
     def checkpoint_provider_success(
         self,
         attempt: AITurnAttempt,
@@ -64,6 +70,31 @@ class AITurnAttemptRepository:
 
     def mark_provider_failure(self, attempt: AITurnAttempt, error) -> None:
         attempt.status = "FAILED_RETRYABLE" if error.retryable else "FAILED_FINAL"
+        attempt.failure_code = error.failure_code
+        attempt.provider_attempts += error.provider_requests
+        attempt.updated_at = utc_now()
+
+    def checkpoint_review_success(
+        self,
+        attempt: AITurnAttempt,
+        reviewed_response,
+        review_result,
+        *,
+        review_latency_ms: float,
+    ) -> None:
+        checkpoint = dict(attempt.result_json)
+        checkpoint["reviewed_response"] = reviewed_response.model_dump(mode="json")
+        checkpoint["language_review"] = review_result.model_dump(mode="json")
+        checkpoint["review_latency_ms"] = review_latency_ms
+        attempt.result_json = checkpoint
+        attempt.status = "REVIEW_SUCCEEDED"
+        attempt.failure_code = None
+        attempt.provider_attempts += review_result.usage.provider_requests
+        attempt.updated_at = utc_now()
+        self.session.commit()
+
+    def mark_review_failure(self, attempt: AITurnAttempt, error) -> None:
+        attempt.status = "REVIEW_FAILED_RETRYABLE" if error.retryable else "REVIEW_FAILED_FINAL"
         attempt.failure_code = error.failure_code
         attempt.provider_attempts += error.provider_requests
         attempt.updated_at = utc_now()

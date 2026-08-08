@@ -17,6 +17,7 @@ def client(tmp_path):
         llm_provider="fake",
         speech_to_text_provider="fake",
         text_to_speech_provider="fake",
+        language_review_provider="fake",
         password_reset_delivery_provider="memory",
         _env_file=None,
     )

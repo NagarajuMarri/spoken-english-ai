@@ -47,6 +47,9 @@ from backend.app.usage.service import UsageService
 from backend.app.voice.models import VoiceTutorResult
 from backend.app.voice.orchestration import VoiceTutorOrchestrationService
 from backend.app.tutors import get_tutor
+from backend.app.domain.enums import LanguageMode
+from backend.app.language_review.models import LanguageReviewResult
+from backend.app.language_review.service import LanguageReviewService
 
 router = APIRouter(prefix="/api/v1", tags=["ai-tutor"])
 logger = logging.getLogger("spoken_english.ai_turns")
@@ -65,6 +68,12 @@ class AITurnRead(BaseModel):
     next_question: str
     encouragement: str
     adaptive_policy: dict
+    language_mode: LanguageMode
+    review_changed: bool
+    review_reason_code: str
+    preserved_learning_terms: list[str]
+    expression_hint: str
+    telugu_explanation: str | None
 
 
 def _provider_app_error(exc: ProviderError) -> AppError:
@@ -147,7 +156,7 @@ def _provider_app_error(exc: ProviderError) -> AppError:
     )
 
 
-def _failure_from_attempt(attempt: AITurnAttempt) -> AppError:
+def _failure_from_attempt(attempt: AITurnAttempt, *, language_review: bool = False) -> AppError:
     error_types = {
         "provider_timeout": ProviderTimeout,
         "provider_connection_error": ProviderConnectionError,
@@ -160,10 +169,16 @@ def _failure_from_attempt(attempt: AITurnAttempt) -> AppError:
         "provider_schema_validation_failed": ProviderOutputInvalid,
     }
     error_type = error_types.get(attempt.failure_code or "", ProviderUnavailable)
-    return _provider_app_error(error_type("Stored provider failure."))
+    error = error_type("Stored provider failure.")
+    return _language_review_app_error(error) if language_review else _provider_app_error(error)
 
 
-def _api_result(response: AIConversationResponse, policy: AdaptivePolicy, turn_id: str) -> dict:
+def _api_result(
+    response: AIConversationResponse,
+    policy: AdaptivePolicy,
+    turn_id: str,
+    review: LanguageReviewResult,
+) -> dict:
     return {
         "turn_id": turn_id,
         "tutor_message": response.tutor_message,
@@ -173,7 +188,40 @@ def _api_result(response: AIConversationResponse, policy: AdaptivePolicy, turn_i
         "next_question": response.conversation_question,
         "encouragement": response.encouragement,
         "adaptive_policy": policy.__dict__,
+        "language_mode": review.language_mode,
+        "review_changed": review.review_changed,
+        "review_reason_code": review.review_reason_code,
+        "preserved_learning_terms": review.preserved_learning_terms,
+        "expression_hint": review.expression_hint,
+        "telugu_explanation": (
+            response.correction_explanation
+            if review.language_mode != LanguageMode.ENGLISH
+            else None
+        ),
     }
+
+
+def _language_review_app_error(exc: ProviderError) -> AppError:
+    base = _provider_app_error(exc)
+    code = {
+        "llm_timeout": "language_review_timeout",
+        "llm_connection_error": "language_review_connection_error",
+        "llm_rate_limited": "language_review_rate_limited",
+        "llm_provider_error": "language_review_provider_error",
+        "llm_context_limit": "language_review_context_limit",
+        "llm_incomplete_response": "language_review_incomplete",
+        "llm_refused": "language_review_refused",
+        "llm_malformed_response": "language_review_malformed",
+        "llm_schema_validation_failed": "language_review_validation_failed",
+        "llm_unavailable": "language_review_unavailable",
+    }.get(base.code, "language_review_unavailable")
+    return AppError(
+        base.status_code,
+        code,
+        "The native-language review could not be completed. Retry this turn safely.",
+        base.headers,
+        retryable=base.retryable,
+    )
 
 
 class VoiceProcessRequest(BaseModel):
@@ -212,7 +260,9 @@ def ai_turn(
     turn_key = idempotency_key or request.state.request_id
     attempts = AITurnAttemptRepository(session)
     attempt = attempts.get(conversation.id, turn_key)
+    content_response = None
     response = None
+    review_result = None
     needs_provider = False
     if attempt is not None:
         if attempt.learner_id != principal.learner.id or attempt.learner_text != data.message:
@@ -226,11 +276,27 @@ def ai_turn(
             completed_result = dict(attempt.result_json["api_result"])
             completed_result.setdefault("turn_id", attempt.id)
             return completed_result
-        if attempt.status == "PROVIDER_SUCCEEDED":
-            response = AIConversationResponse.model_validate(attempt.result_json["provider_response"])
+        if attempt.status in {"PROVIDER_SUCCEEDED", "REVIEW_FAILED_RETRYABLE"}:
+            content_response = AIConversationResponse.model_validate(
+                attempt.result_json["provider_response"]
+            )
+            if attempt.status == "REVIEW_FAILED_RETRYABLE":
+                attempts.mark_review_in_progress(attempt)
+        elif attempt.status == "REVIEW_SUCCEEDED":
+            content_response = AIConversationResponse.model_validate(
+                attempt.result_json["provider_response"]
+            )
+            response = AIConversationResponse.model_validate(
+                attempt.result_json["reviewed_response"]
+            )
+            review_result = LanguageReviewResult.model_validate(
+                attempt.result_json["language_review"]
+            )
         elif attempt.status == "FAILED_FINAL":
             raise _failure_from_attempt(attempt)
-        elif attempt.status == "IN_PROGRESS":
+        elif attempt.status == "REVIEW_FAILED_FINAL":
+            raise _failure_from_attempt(attempt, language_review=True)
+        elif attempt.status in {"IN_PROGRESS", "REVIEW_IN_PROGRESS"}:
             raise AppError(
                 status.HTTP_409_CONFLICT,
                 "ai_turn_in_progress",
@@ -279,16 +345,14 @@ def ai_turn(
         )
 
     started_at = perf_counter()
-    if response is None:
+    if content_response is None:
         try:
-            response = AIConversationService(provider).generate(AIConversationRequest(
+            content_response = AIConversationService(provider).generate(AIConversationRequest(
                 learner_id=principal.learner.id,
                 conversation_id=conversation.id,
                 learner_level=principal.learner.proficiency_level,
                 preferred_language=(
-                    principal.learner.native_language
-                    if principal.learner.telugu_explanations_enabled
-                    else "English"
+                    principal.learner.language_mode or "ENGLISH"
                 ),
                 tutor_id=tutor.tutor_id,
                 tutor_prompt_profile=tutor.prompt_profile,
@@ -344,13 +408,78 @@ def ai_turn(
             raise _provider_app_error(exc) from exc
         attempts.checkpoint_provider_success(
             attempt,
-            response,
+            content_response,
             provider_latency_ms=(perf_counter() - started_at) * 1000,
         )
 
+    if response is None or review_result is None:
+        review_started_at = perf_counter()
+        try:
+            language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
+            response, review_result = LanguageReviewService(
+                request.app.state.language_review_provider
+            ).review(
+                content_response,
+                language_mode=language_mode,
+                learning_objective=SCENARIOS_BY_ID[conversation.scenario_id].name,
+                learner_level=principal.learner.proficiency_level,
+                correlation_id=request.state.correlation_id,
+            )
+        except ProviderError as exc:
+            session.rollback()
+            attempt = attempts.get(conversation.id, turn_key)
+            if attempt is None:
+                raise AppError(
+                    status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    "ai_turn_state_lost",
+                    "The tutor turn could not be recovered. Send it again.",
+                    retryable=False,
+                ) from exc
+            attempts.mark_review_failure(attempt, exc)
+            usage.record_failure_attempt(
+                ai_turn_attempt_id=attempt.id,
+                learner_id=principal.learner.id,
+                user_id=principal.user.id,
+                provider_requests=exc.provider_requests,
+                input_units=exc.input_units,
+                output_units=exc.output_units,
+                commit=False,
+            )
+            session.commit()
+            logger.warning(
+                "language_review_failure request_id=%s attempt_id=%s failure_code=%s "
+                "provider_requests=%s retryable=%s schema_path=%s",
+                request.state.request_id,
+                attempt.id,
+                exc.failure_code,
+                exc.provider_requests,
+                exc.retryable,
+                exc.schema_path or "none",
+            )
+            request.app.state.metrics.increment("language_review_failures")
+            raise _language_review_app_error(exc) from exc
+        attempts.checkpoint_review_success(
+            attempt,
+            response,
+            review_result,
+            review_latency_ms=(perf_counter() - review_started_at) * 1000,
+        )
+        logger.info(
+            "language_review_completed request_id=%s attempt_id=%s mode=%s changed=%s "
+            "reason=%s expression=%s provider_requests=%s",
+            request.state.request_id,
+            attempt.id,
+            review_result.language_mode,
+            review_result.review_changed,
+            review_result.review_reason_code,
+            review_result.expression_hint,
+            review_result.usage.provider_requests,
+        )
+        request.app.state.metrics.increment("language_review_requests")
+
     latency_ms = float(
         attempt.result_json.get("provider_latency_ms", (perf_counter() - started_at) * 1000)
-    )
+    ) + float(attempt.result_json.get("review_latency_ms", 0))
     cached_input = min(response.usage.cached_input_units, response.usage.input_units)
     uncached_input = response.usage.input_units - cached_input
     estimated_cost_usd = (
@@ -372,7 +501,7 @@ def ai_turn(
         cost_classification="ESTIMATE_FROM_PROVIDER_REPORTED_USAGE",
     )
     policy = AdaptivePolicy.decide(level=principal.learner.proficiency_level, correctness=0.7, repeated_mistakes=1, confidence=60)
-    result = _api_result(response, policy, attempt.id)
+    result = _api_result(response, policy, attempt.id, review_result)
     try:
         session.add(AICostMetricEvent(
             ai_turn_attempt_id=attempt.id,
@@ -497,14 +626,23 @@ def synthesize_tutor_speech(
     tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
     settings = request.app.state.settings
     voice = settings.openai_tts_ananya_voice if tutor.tutor_id == "ananya" else settings.openai_tts_arjun_voice
-    instructions = (
-        "Speak in a warm, patient Indian English accent at a natural teaching pace. "
-        "Pronounce every word clearly and preserve the written meaning."
-        if tutor.tutor_id == "ananya"
-        else
-        "Speak in a friendly, confident Indian English accent at a natural teaching pace. "
-        "Pronounce every word clearly and preserve the written meaning."
-    )
+    language_mode = LanguageMode(str(api_result.get("language_mode") or "ENGLISH"))
+    tone = "warm and patient" if tutor.tutor_id == "ananya" else "friendly and confident"
+    if language_mode == LanguageMode.TELUGU_DOMINANT:
+        instructions = (
+            f"Speak in natural contemporary Telugu with a {tone} teacher tone used in Andhra Pradesh "
+            "and Telangana. Keep the embedded English learning terms clear and do not anglicize Telugu."
+        )
+    elif language_mode == LanguageMode.ENGLISH_TELUGU:
+        instructions = (
+            f"Speak the English and Telugu parts naturally with a {tone} Indian teacher tone. "
+            "Use a natural Telugu rhythm for Telugu and pronounce English learning terms clearly."
+        )
+    else:
+        instructions = (
+            f"Speak in a {tone} Indian English accent at a natural teaching pace. "
+            "Pronounce every word clearly and preserve the written meaning."
+        )
     provider = request.app.state.text_to_speech_provider
     if provider is None:
         raise AppError(status.HTTP_503_SERVICE_UNAVAILABLE, "tts_unavailable", "Tutor voice is unavailable.", retryable=True)
@@ -541,7 +679,7 @@ def synthesize_tutor_speech(
     try:
         result = provider.synthesize(TextToSpeechRequest(
             text=spoken_text,
-            language="en-IN",
+            language="te-IN" if language_mode != LanguageMode.ENGLISH else "en-IN",
             voice_reference=voice,
             speaking_rate=settings.openai_tts_speed,
             instructions=instructions,

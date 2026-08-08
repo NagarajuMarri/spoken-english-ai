@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.errors import AppError
 from backend.app.models.entities import Learner, ProgressRecord
 from backend.app.tutors import TUTORS, get_tutor
+from backend.app.domain.enums import LanguageMode
 
 
 class TutorExperienceService:
@@ -22,17 +23,19 @@ class TutorExperienceService:
             "learner_id": learner.id,
             "tutor": tutor.public_dict(),
             "telugu_explanations_enabled": learner.telugu_explanations_enabled,
+            "language_mode": learner.language_mode,
         }
 
     def update_preference(
-        self, learner: Learner, tutor_id: str, telugu_explanations_enabled: bool
+        self, learner: Learner, tutor_id: str, language_mode: LanguageMode
     ) -> dict:
         try:
             tutor = get_tutor(tutor_id)
         except KeyError as error:
             raise AppError(422, "unknown_tutor", "Select an enabled tutor.") from error
         learner.preferred_tutor_id = tutor.tutor_id
-        learner.telugu_explanations_enabled = telugu_explanations_enabled
+        learner.language_mode = language_mode.value
+        learner.telugu_explanations_enabled = language_mode != LanguageMode.ENGLISH
         self.session.commit()
         self.session.refresh(learner)
         return self.preference(learner)
