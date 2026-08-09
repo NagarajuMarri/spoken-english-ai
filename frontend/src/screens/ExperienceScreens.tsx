@@ -171,7 +171,7 @@ export function ConversationScreen({
       setMessages((items) => [...items, `${tutor.display_name}: ${spoken}`]);
       setSpokenText(spoken);
       setLastExpression(expression);
-      setFeedback({ grammar: result.correction_explanation || "That sentence works well.", incorrect: result.incorrect_span || "", corrected: result.corrected_form || result.corrected_sentence || "", words: result.vocabulary_suggestions, telugu: result.telugu_explanation || "Telugu explanation will appear when the conversation provider supplies it." });
+      setFeedback({ grammar: result.correction_explanation || (result.coaching_state === "WAITING_FOR_RETRY" ? "Almost—please try the corrected sentence once more." : "That sentence works well."), incorrect: result.incorrect_span || "", corrected: result.corrected_form || result.corrected_sentence || "", words: result.vocabulary_suggestions, telugu: result.telugu_explanation || "Telugu explanation will appear when the conversation provider supplies it." });
       setLanguageReview({ changed: Boolean(result.review_changed), reason: result.review_reason_code || "NOT_REQUIRED", terms: result.preserved_learning_terms || [] });
       setPendingTurn(null);
       dispatch({ type: "TUTOR_RESPONSE_READY", expression });
@@ -202,7 +202,7 @@ export function ConversationScreen({
     const result = await api.transcribe(id, { blob: capture.blob, durationMs: capture.durationMs });
     setLastTranscript(result.transcript);
     setInput(result.transcript);
-    await submit(result.transcript, undefined, { detectedLanguage: result.detected_language });
+    await submit(result.transcript, undefined, { detectedLanguage: result.detected_language, confidence: result.confidence });
   }, [id, submit]);
 
   const mic = useMicrophone(consent, handleCapture);

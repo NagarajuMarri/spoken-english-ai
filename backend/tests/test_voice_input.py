@@ -8,6 +8,7 @@ from backend.app.ai.exceptions import ProviderUnavailable
 from backend.app.core.config import Settings
 from backend.app.providers.stt.contracts import SpeechToTextResult
 from backend.app.providers.stt.openai_boundary import OpenAICompatibleSTTProvider, OpenAITranscriptionHTTPClient
+from backend.app.transcript_safety import UnusableTranscript, safe_transcript
 
 
 def wav_fixture(duration_ms=250):
@@ -43,6 +44,7 @@ def test_real_audio_bytes_reach_stt_and_transcript_returns(client, conversation)
                 "type": request.content_type,
                 "duration": request.duration_seconds,
                 "filename": request.filename,
+                "language": request.language_hint,
             })
             return SpeechToTextResult(
                 transcript="I practise English every morning.", detected_language="en", confidence=0.98,
@@ -57,10 +59,14 @@ def test_real_audio_bytes_reach_stt_and_transcript_returns(client, conversation)
     assert response.json() == {
         "transcript": "I practise English every morning.",
         "detected_language": "en",
+        "confidence": 0.98,
         "duration_ms": 250,
         "size_bytes": len(audio),
     }
-    assert received == {"audio": audio, "type": "audio/wav", "duration": 0.25, "filename": "speech.wav"}
+    assert received == {
+        "audio": audio, "type": "audio/wav", "duration": 0.25,
+        "filename": "speech.wav", "language": "te",
+    }
 
 
 @pytest.mark.parametrize("unsafe", ["...", "\u0301\u0301", "   "])
@@ -77,6 +83,93 @@ def test_unusable_voice_transcript_is_rejected(client, conversation, unsafe):
     response = transcribe(client, conversation["id"])
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "no_speech_detected"
+
+
+def test_malformed_telugu_graphemes_are_rejected():
+    with pytest.raises(UnusableTranscript):
+        safe_transcript("ో ం ి ీ ి ం ి ్ ై ్ ం")
+
+
+@pytest.mark.parametrize("malformed", ["కిీ", "క్ి"])
+def test_invalid_telugu_vowel_and_virama_sequences_are_rejected(malformed):
+    with pytest.raises(UnusableTranscript):
+        safe_transcript(malformed, expected_language="te")
+
+
+def test_valid_complex_telugu_graphemes_are_accepted():
+    transcript = "క్షేత్రంలో ప్రశ్న అడగండి"
+    assert safe_transcript(transcript, expected_language="te") == transcript
+
+
+def test_kannada_dominant_transcript_is_rejected_when_telugu_expected():
+    with pytest.raises(UnusableTranscript):
+        safe_transcript("ದೀನಿ ದರ ಎಂಥ?", expected_language="te")
+
+
+def test_valid_telugu_english_mix_is_accepted():
+    transcript = "దీని ధర ఎంత? How much is this?"
+    assert safe_transcript(transcript, expected_language="te") == transcript
+
+
+@pytest.mark.parametrize(("transcript", "detected", "expected_status"), [
+    ("ದೀನಿ ದರ ಎಂಥ?", "kn", 422),
+    ("దీని ధర ఎంత? How much is this?", "te", 200),
+    ("How much is this?", "en", 200),
+])
+def test_transcription_boundary_enforces_script_without_rejecting_valid_mix(
+    client, conversation, transcript, detected, expected_status,
+):
+    class ScriptedSTT:
+        def transcribe(self, request):
+            return SpeechToTextResult(
+                transcript=transcript, detected_language=detected, confidence=0.95,
+                provider_job_id="scripted", duration_seconds=request.duration_seconds,
+                usage_units=request.duration_seconds, processing_status="SUCCEEDED",
+            )
+
+    client.app.state.speech_to_text_provider = ScriptedSTT()
+    before = client.app.state.metrics.snapshot()["counters"].get("voice_transcriptions_completed", 0)
+    response = transcribe(client, conversation["id"])
+    assert response.status_code == expected_status
+    after = client.app.state.metrics.snapshot()["counters"].get("voice_transcriptions_completed", 0)
+    assert after == before + (1 if expected_status == 200 else 0)
+
+
+def test_low_confidence_transcription_is_rejected_before_frontend_submission(client, conversation):
+    class LowConfidenceSTT:
+        def transcribe(self, request):
+            return SpeechToTextResult(
+                transcript="దీని ధర ఎంత?", detected_language="te", confidence=0.1,
+                provider_job_id="low-confidence", duration_seconds=request.duration_seconds,
+                usage_units=request.duration_seconds, processing_status="SUCCEEDED",
+            )
+
+    client.app.state.speech_to_text_provider = LowConfidenceSTT()
+    response = transcribe(client, conversation["id"])
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "no_speech_detected"
+
+
+def test_kannada_mismatch_is_not_persisted_as_voice_ai_turn(client, conversation):
+    assert client.put(
+        "/api/v1/tutors/preference",
+        json={"tutor_id": "ananya", "language_mode": "ENGLISH_TELUGU"},
+    ).status_code == 200
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    response = client.post(
+        route,
+        json={"message": "ದೀನಿ ದರ ಎಂಥ?", "input_source": "VOICE", "detected_language": "kn"},
+        headers={"Idempotency-Key": "kannada-mismatch-turn"},
+    )
+    assert response.status_code == 422
+    with client.app.state.session_factory() as db:
+        from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
+        from sqlalchemy import func, select
+
+        assert db.scalar(select(func.count()).select_from(AITurnAttempt)) == 0
+        assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 0
+        assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 0
+        assert db.scalar(select(func.count()).select_from(AIUsageRecord)) == 0
 
 
 def test_voice_input_rejects_empty_unsupported_and_invalid_duration(client, conversation):

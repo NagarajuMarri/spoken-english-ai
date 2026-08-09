@@ -9,6 +9,8 @@ from backend.app.coaching import (
     LearnerIntent,
     build_coaching_outcome,
     classify_learner_intent,
+    protect_learner_facts,
+    retry_matches,
     smallest_useful_error_span,
 )
 from backend.app.domain.enums import LanguageMode
@@ -76,6 +78,321 @@ def test_new_telugu_help_intent_preserves_pending_correction():
     assert outcome.state == CoachingState.EXPLAINING_CORRECTION
     assert outcome.retry_of_turn_id == "original"
     assert outcome.response.corrected_learner_sentence == "I'm Nagaraj."
+
+
+def test_semantically_equivalent_self_introduction_closes_retry_without_optional_words():
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "Hi, I'm Nagaraj.",
+        "correction_explanation": "Use I am or I'm for an introduction.",
+    }
+    assert retry_matches("I am Nagaraj.", prior["corrected_sentence"])
+    outcome = build_coaching_outcome(
+        _response(corrected_learner_sentence=None, correction_explanation=None),
+        learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH,
+        previous_result=prior, previous_turn_id="original", learner_text="I am Nagaraj.",
+        learner_intent=classify_learner_intent("I am Nagaraj.", prior),
+    )
+    assert outcome.state == CoachingState.RETRY_ACCEPTED
+    assert outcome.retry_of_turn_id == "original"
+    assert "once more" not in outcome.spoken_text
+
+
+@pytest.mark.parametrize("message", [
+    "Na peru Nagaraju.",
+    "Let's talk about my hometown.",
+])
+def test_new_conversation_intent_exits_old_retry_without_repeating_it(message):
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "Hi, I'm Nagaraj.",
+        "correction_explanation": "Use I am or I'm for an introduction.",
+    }
+    intent = classify_learner_intent(message, prior)
+    assert intent == LearnerIntent.NORMAL_CONVERSATION
+    response = _response(corrected_learner_sentence=None, correction_explanation=None)
+    outcome = build_coaching_outcome(
+        response, learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH,
+        previous_result=prior, previous_turn_id="original", learner_text=message,
+        learner_intent=intent,
+    )
+    assert outcome.state == CoachingState.NORMAL_CONVERSATION
+    assert outcome.retry_of_turn_id is None
+    assert prior["correction_explanation"] not in outcome.spoken_text
+    assert prior["corrected_sentence"] not in outcome.spoken_text
+
+
+def test_nonmatching_attempt_does_not_repeat_the_full_old_explanation():
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "I have been working here for five years.",
+        "correction_explanation": "A long explanation that should not repeat.",
+    }
+    message = "I have working here for five years."
+    intent = classify_learner_intent(message, prior)
+    assert intent == LearnerIntent.NORMAL_CONVERSATION
+    outcome = build_coaching_outcome(
+        _response(corrected_learner_sentence=None, correction_explanation=None),
+        learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH,
+        previous_result=prior, previous_turn_id="original", learner_text=message,
+        learner_intent=intent,
+    )
+    assert outcome.state == CoachingState.NORMAL_CONVERSATION
+    assert prior["correction_explanation"] not in outcome.spoken_text
+
+
+def test_unrelated_grammar_question_does_not_inherit_pending_correction():
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "I'm Nagaraj.",
+        "incorrect_span": "myself Nagaraj",
+        "corrected_form": "I'm Nagaraj",
+        "correction_explanation": "Use I am for a self-introduction.",
+    }
+    message = "What is present perfect tense?"
+    intent = classify_learner_intent(message, prior)
+    assert intent == LearnerIntent.GRAMMAR_HELP
+    outcome = build_coaching_outcome(
+        _response(corrected_learner_sentence=None, correction_explanation=None),
+        learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH,
+        previous_result=prior, previous_turn_id="original", learner_text=message,
+        learner_intent=intent,
+    )
+    assert outcome.state == CoachingState.NORMAL_CONVERSATION
+    assert outcome.retry_of_turn_id is None
+    assert prior["correction_explanation"] not in outcome.spoken_text
+
+
+def test_guided_market_lesson_intent_exits_old_retry():
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "Hi, I'm Nagaraj.",
+        "correction_explanation": "Use I am for an introduction.",
+    }
+    message = "మార్కెట్‌లో మాట్లాడటం step by step నేర్పించండి"
+    intent = classify_learner_intent(message, prior)
+    assert intent == LearnerIntent.GUIDED_ROLEPLAY
+    outcome = build_coaching_outcome(
+        _response(corrected_learner_sentence=None, correction_explanation=None),
+        learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH_TELUGU,
+        previous_result=prior, previous_turn_id="original", learner_text=message,
+        learner_intent=intent,
+    )
+    assert outcome.state == CoachingState.NORMAL_CONVERSATION
+    assert outcome.retry_of_turn_id is None
+    assert prior["correction_explanation"] not in outcome.spoken_text
+
+
+@pytest.mark.parametrize(("learner_text", "provider_correction"), [
+    ("My hometown is Kanpur.", "My hometown is Guntur."),
+    ("My name is Nagaraju.", "My name is Nagaraj."),
+    ("The price is 500 rupees.", "The price is 50 rupees."),
+    ("I work as a teacher.", "I work as an engineer."),
+    ("I live in Kanpur.", "I live in Guntur."),
+    ("My name is నాగరాజు.", "My name is రవి."),
+])
+def test_provider_cannot_overwrite_learner_factual_slots(learner_text, provider_correction):
+    unsafe = _response(
+        tutor_message=f"The correct fact is {provider_correction}",
+        corrected_learner_sentence=provider_correction,
+        correction_explanation="Use the earlier value.",
+        grammar_feedback=["fact replacement"],
+    )
+    protected = protect_learner_facts(unsafe, learner_text)
+    assert protected.corrected_learner_sentence is None
+    assert protected.correction_explanation is None
+    assert protected.grammar_feedback == []
+    assert learner_text.rstrip(".") in protected.tutor_message
+    assert "The correct fact" not in protected.tutor_message
+
+
+@pytest.mark.parametrize(("learner", "suggestion"), [
+    ("I am Nagaraj.", "Hi, I'm Nagaraj."),
+    ("How much is this?", "Excuse me, how much is this?"),
+    ("Yes, my hometown is Kanpur.", "My hometown is Kanpur."),
+])
+def test_style_only_suggestion_is_not_a_mandatory_correction(learner, suggestion):
+    response = protect_learner_facts(_response(
+        corrected_learner_sentence=suggestion,
+        correction_explanation="This sounds more natural.",
+        grammar_feedback=["style"],
+    ), learner)
+    outcome = build_coaching_outcome(
+        response, learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH,
+        learner_text=learner,
+    )
+    assert outcome.state == CoachingState.NORMAL_CONVERSATION
+    assert outcome.response.corrected_learner_sentence is None
+
+
+@pytest.mark.parametrize("bad_explanation", [
+    "'అండి' అనేది informal form.",
+    "'అండి' అనేది అనౌపచారికమైనది.",
+    "How much is this? అనేది సబ్జెక్ట్-వర్బ్-ఓబ్జెక్ట్ structure.",
+])
+def test_exact_runtime_pedagogy_misclaims_are_repaired(bad_explanation):
+    from backend.app.coaching import apply_pedagogy_guardrails
+
+    guarded = apply_pedagogy_guardrails(_response(correction_explanation=bad_explanation))
+    explanation = guarded.correction_explanation or ""
+    assert "అనౌపచారిక" not in explanation
+    assert "సబ్జెక్ట్-వర్బ్-ఓబ్జెక్ట్" not in explanation
+    assert "polite and respectful" in explanation or "wh-question" in explanation
+
+
+def test_api_semantic_retry_closes_state_and_next_intent_stays_fresh(client, conversation):
+    assert client.put(
+        "/api/v1/tutors/preference", json={"tutor_id": "ananya", "language_mode": "ENGLISH"},
+    ).status_code == 200
+
+    class RuntimeProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, request):
+            self.calls += 1
+            base = DeterministicAIProvider().generate(request)
+            if self.calls == 1:
+                return base.model_copy(update={
+                    "tutor_message": "Let us make that introduction natural.",
+                    "corrected_learner_sentence": "Hi, I'm Nagaraj.",
+                    "correction_explanation": "Use I am or I'm for a self-introduction.",
+                    "grammar_feedback": ["self-introduction", "subject pronoun"],
+                })
+            return base.model_copy(update={
+                "tutor_message": "Thanks, let us continue with your new answer.",
+                "corrected_learner_sentence": None,
+                "correction_explanation": None,
+                "grammar_feedback": [],
+            })
+
+    client.app.state.llm_provider = RuntimeProvider()
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    first = client.post(route, json={"message": "Hey, myself Nagaraj."}).json()
+    assert first["coaching_state"] == "WAITING_FOR_RETRY"
+
+    accepted = client.post(route, json={"message": "I am Nagaraj."}).json()
+    assert accepted["learner_intent"] == "RETRY"
+    assert accepted["coaching_state"] == "RETRY_ACCEPTED"
+    assert accepted["retry_of_turn_id"] == first["turn_id"]
+    assert first["correction_explanation"] not in accepted["spoken_text"]
+
+    fresh = client.post(route, json={"message": "Na peru Nagaraju."}).json()
+    assert fresh["learner_intent"] == "NORMAL_CONVERSATION"
+    assert fresh["coaching_state"] == "NORMAL_CONVERSATION"
+    assert fresh["retry_of_turn_id"] is None
+    assert first["correction_explanation"] not in fresh["spoken_text"]
+
+
+def test_api_explanation_then_retry_keeps_original_correction_identity(client, conversation):
+    assert client.put(
+        "/api/v1/tutors/preference", json={"tutor_id": "ananya", "language_mode": "ENGLISH"},
+    ).status_code == 200
+
+    class ExplanationProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, request):
+            self.calls += 1
+            base = DeterministicAIProvider().generate(request)
+            if self.calls == 1:
+                return base.model_copy(update={
+                    "corrected_learner_sentence": "I'm Nagaraj.",
+                    "correction_explanation": "Use I am or I'm, not myself, for this introduction.",
+                    "grammar_feedback": ["self-introduction", "pronoun"],
+                })
+            return base.model_copy(update={
+                "tutor_message": "Here is the requested help.",
+                "corrected_learner_sentence": None,
+                "correction_explanation": None,
+                "grammar_feedback": [],
+            })
+
+    client.app.state.llm_provider = ExplanationProvider()
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    correction = client.post(route, json={"message": "Myself Nagaraj."}).json()
+    explanation = client.post(route, json={"message": "Why is myself wrong?"}).json()
+    assert explanation["coaching_state"] == "EXPLAINING_CORRECTION"
+    assert explanation["retry_of_turn_id"] == correction["turn_id"]
+
+    accepted = client.post(route, json={"message": "I am Nagaraj."}).json()
+    assert accepted["coaching_state"] == "RETRY_ACCEPTED"
+    assert accepted["retry_of_turn_id"] == correction["turn_id"]
+    assert accepted["correction_explanation_default"] is None
+
+
+def test_api_new_fact_and_guided_lesson_do_not_replay_old_correction(client, conversation):
+    assert client.put(
+        "/api/v1/tutors/preference", json={"tutor_id": "ananya", "language_mode": "ENGLISH"},
+    ).status_code == 200
+
+    class TopicProvider:
+        def __init__(self):
+            self.requests = []
+
+        def generate(self, request):
+            self.requests.append(request)
+            base = DeterministicAIProvider().generate(request)
+            if len(self.requests) == 1:
+                return base.model_copy(update={
+                    "corrected_learner_sentence": "My hometown is Guntur.",
+                    "correction_explanation": "Add 'is' to complete the sentence.",
+                    "grammar_feedback": ["missing verb", "sentence structure"],
+                })
+            return base.model_copy(update={
+                "tutor_message": "Let us practise the market conversation step by step.",
+                "corrected_learner_sentence": None,
+                "correction_explanation": None,
+                "grammar_feedback": [],
+            })
+
+    provider = TopicProvider()
+    client.app.state.llm_provider = provider
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    first = client.post(route, json={"message": "My hometown Guntur."}).json()
+    assert first["coaching_state"] == "WAITING_FOR_RETRY"
+
+    guided = client.post(
+        route, json={"message": "మార్కెట్‌లో మాట్లాడటం step by step నేర్పించండి"},
+    ).json()
+    assert guided["learner_intent"] == "GUIDED_ROLEPLAY"
+    assert guided["coaching_state"] == "NORMAL_CONVERSATION"
+    assert guided["retry_of_turn_id"] is None
+    assert "Guntur" not in guided["spoken_text"]
+    assert "guided, interactive scenario lesson" in provider.requests[-1].current_learner_message
+
+
+def test_api_provider_cannot_change_kanpur_to_guntur_anywhere(client, conversation):
+    assert client.put(
+        "/api/v1/tutors/preference", json={"tutor_id": "ananya", "language_mode": "ENGLISH"},
+    ).status_code == 200
+
+    class UnsafeFactProvider:
+        def generate(self, request):
+            base = DeterministicAIProvider().generate(request)
+            return base.model_copy(update={
+                "tutor_message": "Your hometown is Guntur.",
+                "corrected_learner_sentence": "My hometown is Guntur.",
+                "correction_explanation": "Change Kanpur to Guntur.",
+                "grammar_feedback": ["Use Guntur"],
+                "vocabulary_suggestions": ["Guntur"],
+                "conversation_question": "What do you like about Guntur?",
+                "encouragement": "Guntur is correct.",
+            })
+
+    client.app.state.llm_provider = UnsafeFactProvider()
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    body = client.post(route, json={"message": "My hometown is Kanpur."}).json()
+    serialized = str(body)
+    assert body["corrected_sentence"] is None
+    assert "Kanpur" in body["tutor_message"]
+    assert "Guntur" not in serialized
+    with client.app.state.session_factory() as db:
+        stored = db.scalar(select(ConversationMessage))
+        assert stored is not None
+        assert stored.learner_text == "My hometown is Kanpur."
+        assert "Guntur" not in stored.tutor_response
 
 
 def _response(**updates) -> AIConversationResponse:

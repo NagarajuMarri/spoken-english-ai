@@ -54,9 +54,11 @@ from backend.app.language_review.models import LanguageReviewResult
 from backend.app.language_review.service import LanguageReviewService, degraded_review_result
 from backend.app.coaching import (
     LearnerIntent,
+    apply_pedagogy_guardrails,
     build_coaching_outcome,
     classify_learner_intent,
     correction_reexplanation_input,
+    protect_learner_facts,
     tutor_input_for_retry,
 )
 from backend.app.transcript_safety import UnusableTranscript, safe_transcript
@@ -112,6 +114,18 @@ _ARABIC_SCRIPT = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
 
 def _unexpected_foreign_script(text: str) -> bool:
     return bool(_ARABIC_SCRIPT.search(text))
+
+
+def _primary_language(value: str | None) -> str:
+    return (value or "").casefold().replace("_", "-").split("-", 1)[0]
+
+
+def _expects_telugu(learner, detected_language: str | None = None) -> bool:
+    return (
+        str(learner.native_language).casefold() == "telugu"
+        or LanguageMode(learner.language_mode or "ENGLISH") != LanguageMode.ENGLISH
+        or _primary_language(detected_language) in {"te", "tel", "telugu"}
+    )
 
 
 def _tutor_input(message: str, *, input_source: str, stt_confidence: float | None) -> str:
@@ -243,6 +257,12 @@ def _api_result(
     learner_intent: LearnerIntent,
 ) -> dict:
     default_correction_explanation = response.correction_explanation
+    if coaching.state in {"WAITING_FOR_RETRY", "EXPLAINING_CORRECTION"}:
+        default_correction_explanation = (
+            default_correction_explanation
+            or (previous_result or {}).get("correction_explanation_default")
+            or (previous_result or {}).get("correction_explanation")
+        )
     if language_decision.state == ExplanationLanguageState.ONE_TURN_OVERRIDE:
         default_correction_explanation = (
             (previous_result or {}).get("correction_explanation_default")
@@ -314,6 +334,7 @@ class VoiceProcessRequest(BaseModel):
 class VoiceTranscriptionRead(BaseModel):
     transcript: str
     detected_language: str
+    confidence: float | None
     duration_ms: int
     size_bytes: int
 
@@ -337,8 +358,14 @@ def ai_turn(
     if conversation is None:
         raise AppError(status.HTTP_404_NOT_FOUND, "conversation_not_found", "Conversation not found.")
     ensure_owner(conversation.learner_id, principal)
+    default_language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
+    expected_language = None
+    if data.input_source == "VOICE" and _expects_telugu(principal.learner, data.detected_language):
+        expected_language = "te"
     try:
-        learner_message = safe_transcript(data.message)
+        learner_message = safe_transcript(data.message, expected_language=expected_language)
+        if data.input_source == "VOICE" and data.stt_confidence is not None and data.stt_confidence < 0.2:
+            raise UnusableTranscript("Speech confidence is too low.")
     except UnusableTranscript as exc:
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -355,7 +382,6 @@ def ai_turn(
         dict(previous_attempt.result_json.get("api_result", {}))
         if previous_attempt is not None else None
     )
-    default_language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
     learner_intent = classify_learner_intent(learner_message, previous_result)
     language_decision = resolve_explanation_language(learner_message, default_language_mode)
     if language_decision.persist_mode is not None:
@@ -457,6 +483,13 @@ def ai_turn(
                 learner_input = reexplanation or learner_message
             elif learner_intent == LearnerIntent.RETRY:
                 learner_input = tutor_input_for_retry(learner_message, previous_result)
+            elif learner_intent == LearnerIntent.GUIDED_ROLEPLAY:
+                learner_input = (
+                    f"The learner requested a guided, interactive scenario lesson: {learner_message}\n\n"
+                    "Leave any older correction loop. Set the requested scene, teach at most two short useful "
+                    "English phrases step by step with natural Telugu support when requested, then ask the learner "
+                    "to say the next phrase so the roleplay continues interactively. Do not invent a grammar error."
+                )
             else:
                 learner_input = learner_message
             if not (
@@ -489,6 +522,9 @@ def ai_turn(
                 ),
                 correlation_id=request.state.correlation_id,
             ))
+            content_response = apply_pedagogy_guardrails(
+                protect_learner_facts(content_response, learner_message)
+            )
         except ProviderError as exc:
             session.rollback()
             attempt = attempts.get(conversation.id, turn_key)
@@ -618,6 +654,7 @@ def ai_turn(
             )
             request.app.state.metrics.increment("language_review_requests")
 
+    response = apply_pedagogy_guardrails(protect_learner_facts(response, learner_message))
     latency_ms = float(
         attempt.result_json.get("provider_latency_ms", (perf_counter() - started_at) * 1000)
     ) + float(attempt.result_json.get("review_latency_ms", 0))
@@ -647,7 +684,10 @@ def ai_turn(
         learner_level=principal.learner.proficiency_level,
         language_mode=language_decision.effective_mode,
         previous_result=previous_result,
-        previous_turn_id=previous_attempt.id if previous_attempt is not None else None,
+        previous_turn_id=(
+            str((previous_result or {}).get("retry_of_turn_id") or previous_attempt.id)
+            if previous_attempt is not None else None
+        ),
         learner_text=learner_message,
         explanation_language_state=language_decision.state,
         learner_intent=learner_intent,
@@ -935,11 +975,13 @@ async def transcribe_voice_input(
         "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a",
         "audio/wav": "wav", "audio/mpeg": "mp3",
     }[content_type]
+    expected_language = "te" if _expects_telugu(principal.learner) else None
     stt_request = SpeechToTextRequest(
         audio_asset_reference=f"ephemeral/{request.state.request_id}.{extension}",
         audio_bytes=audio,
         filename=f"speech.{extension}",
         content_type=content_type,
+        language_hint=expected_language or "en",
         learner_id=principal.learner.id,
         voice_session_id=conversation.id,
         voice_turn_id=request.state.request_id,
@@ -970,7 +1012,10 @@ async def transcribe_voice_input(
         ) from exc
 
     try:
-        transcript = safe_transcript(result.transcript)
+        if result.confidence is not None and result.confidence < 0.2:
+            raise UnusableTranscript("Speech confidence is too low.")
+        expected_language = "te" if _expects_telugu(principal.learner, result.detected_language) else None
+        transcript = safe_transcript(result.transcript, expected_language=expected_language)
     except UnusableTranscript as exc:
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -982,6 +1027,7 @@ async def transcribe_voice_input(
     return {
         "transcript": transcript,
         "detected_language": result.detected_language,
+        "confidence": result.confidence,
         "duration_ms": duration_ms,
         "size_bytes": len(audio),
     }

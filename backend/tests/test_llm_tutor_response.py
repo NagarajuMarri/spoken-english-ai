@@ -19,7 +19,7 @@ from backend.app.ai.exceptions import (
     ProviderTimeout,
     ProviderUnavailable,
 )
-from backend.app.ai.models import AIConversationRequest, ConversationHistoryTurn, UsageInfo
+from backend.app.ai.models import AIConversationRequest, AIConversationResponse, ConversationHistoryTurn, UsageInfo
 from backend.app.core.config import Settings
 from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
 from backend.app.providers.llm import build_llm_provider
@@ -72,6 +72,20 @@ class _HTTPResponse:
 
     def read(self):
         return json.dumps(self.value).encode()
+
+
+def test_tutor_instructions_protect_facts_style_and_telugu_pedagogy():
+    instructions = OpenAIResponsesHTTPClient._instructions({
+        "tutor_id": "ananya", "tutor_prompt_profile": "supportive",
+        "tutor_vocabulary_profile": "daily", "level": "BEGINNER",
+        "scenario": "shopping", "topic": "Market conversation",
+        "response_limit": 300, "safety_policy": "standard",
+    })
+    assert "Never change learner-provided facts" in instructions
+    assert "naturalness or style" in instructions
+    assert "అండి" in instructions and "polite" in instructions
+    assert "subject-verb-object" in instructions
+    assert "guided" in instructions.lower()
 
 
 def test_responses_client_sends_three_complete_turns_and_uses_provider_usage():
@@ -399,7 +413,12 @@ class _RecordingProvider:
 
     def generate(self, request):
         self.requests.append(request)
-        return _content(f"Contextual reply to: {request.current_learner_message}")
+        content = _content(f"Contextual reply to: {request.current_learner_message}")
+        content.update({
+            "corrected_learner_sentence": None, "correction_explanation": None,
+            "grammar_feedback": [],
+        })
+        return AIConversationResponse.model_validate(content)
 
 
 def test_ai_turn_uses_provider_for_greetings_carries_three_turns_and_persists_usage(
