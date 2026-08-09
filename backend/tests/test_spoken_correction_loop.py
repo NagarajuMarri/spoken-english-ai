@@ -6,7 +6,9 @@ from backend.app.ai.models import AIConversationResponse, AIConversationRequest
 from backend.app.coaching import (
     CoachingMode,
     CoachingState,
+    LearnerIntent,
     build_coaching_outcome,
+    classify_learner_intent,
     smallest_useful_error_span,
 )
 from backend.app.domain.enums import LanguageMode
@@ -15,7 +17,65 @@ from backend.app.explanation_language import (
     ExplanationLanguageState,
     resolve_explanation_language,
 )
-from backend.app.models import AICostMetricEvent, AIUsageRecord, ConversationMessage
+from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
+
+
+def test_self_introduction_uses_smallest_useful_span():
+    assert smallest_useful_error_span(
+        "Hi, myself Nagaraj.", "Hi, I'm Nagaraj.",
+    ) == ("myself Nagaraj", "I'm Nagaraj")
+
+
+def test_self_introduction_explanation_is_grammatically_accurate():
+    outcome = build_coaching_outcome(
+        _response(
+            corrected_learner_sentence="Hi, I'm Nagaraj.",
+            correction_explanation="Use a different phrase.", grammar_feedback=["introduction"],
+        ),
+        learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH,
+        learner_text="Hi, myself Nagaraj.",
+    )
+    assert outcome.incorrect_span == "myself Nagaraj"
+    explanation = outcome.response.correction_explanation
+    assert explanation is not None
+    assert "reflexive or intensive pronoun, not a noun" in explanation
+    assert "I'm Nagaraj" in explanation
+    assert "My name is Nagaraj" in explanation
+
+
+def test_unusable_voice_ai_turn_creates_no_attempt_or_message(client, conversation):
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    response = client.post(
+        route, json={"message": "...", "input_source": "VOICE"},
+        headers={"Idempotency-Key": "unsafe-voice-turn"},
+    )
+    assert response.status_code == 422
+    with client.app.state.session_factory() as db:
+        assert db.scalar(select(func.count()).select_from(AITurnAttempt)) == 0
+        assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 0
+        assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 0
+
+
+def test_new_telugu_help_intent_preserves_pending_correction():
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "I'm Nagaraj.",
+        "incorrect_span": "myself Nagaraj",
+        "corrected_form": "I'm Nagaraj",
+        "correction_explanation": "Use I'm for a self-introduction.",
+    }
+    message = "myself అనేది noun ఎందుకు కాదు? grammar చెప్పండి"
+    intent = classify_learner_intent(message, prior)
+    assert intent == LearnerIntent.GRAMMAR_HELP
+    outcome = build_coaching_outcome(
+        _response(corrected_learner_sentence=None, correction_explanation=None),
+        learner_level="BEGINNER", language_mode=LanguageMode.ENGLISH_TELUGU,
+        previous_result=prior, previous_turn_id="original", learner_text=message,
+        learner_intent=intent,
+    )
+    assert outcome.state == CoachingState.EXPLAINING_CORRECTION
+    assert outcome.retry_of_turn_id == "original"
+    assert outcome.response.corrected_learner_sentence == "I'm Nagaraj."
 
 
 def _response(**updates) -> AIConversationResponse:

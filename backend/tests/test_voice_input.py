@@ -63,6 +63,22 @@ def test_real_audio_bytes_reach_stt_and_transcript_returns(client, conversation)
     assert received == {"audio": audio, "type": "audio/wav", "duration": 0.25, "filename": "speech.wav"}
 
 
+@pytest.mark.parametrize("unsafe", ["...", "\u0301\u0301", "   "])
+def test_unusable_voice_transcript_is_rejected(client, conversation, unsafe):
+    class UnsafeSTT:
+        def transcribe(self, request):
+            return SpeechToTextResult(
+                transcript=unsafe, detected_language="te", confidence=0.1,
+                provider_job_id="unsafe", duration_seconds=request.duration_seconds,
+                usage_units=request.duration_seconds, processing_status="SUCCEEDED",
+            )
+
+    client.app.state.speech_to_text_provider = UnsafeSTT()
+    response = transcribe(client, conversation["id"])
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "no_speech_detected"
+
+
 def test_voice_input_rejects_empty_unsupported_and_invalid_duration(client, conversation):
     empty = transcribe(client, conversation["id"], b"")
     unsupported = transcribe(client, conversation["id"], b"audio", **{"Content-Type": "text/plain"})

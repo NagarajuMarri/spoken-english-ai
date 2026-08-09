@@ -22,6 +22,17 @@ class CoachingState(StrEnum):
     WAITING_FOR_RETRY = "WAITING_FOR_RETRY"
     RETRY_ACCEPTED = "RETRY_ACCEPTED"
     CONTINUE_CONVERSATION = "CONTINUE_CONVERSATION"
+    EXPLAINING_CORRECTION = "EXPLAINING_CORRECTION"
+
+
+class LearnerIntent(StrEnum):
+    RETRY = "RETRY"
+    EXPLANATION = "EXPLANATION"
+    GRAMMAR_HELP = "GRAMMAR_HELP"
+    CLARIFICATION = "CLARIFICATION"
+    EXAMPLES = "EXAMPLES"
+    LANGUAGE_CHANGE = "LANGUAGE_CHANGE"
+    NORMAL_CONVERSATION = "NORMAL_CONVERSATION"
 
 
 @dataclass(frozen=True)
@@ -48,7 +59,29 @@ def retry_matches(learner_text: str, corrected_sentence: str) -> bool:
 
 
 def pending_retry(previous_result: dict | None) -> bool:
-    return bool(previous_result and previous_result.get("coaching_state") == CoachingState.WAITING_FOR_RETRY)
+    return bool(previous_result and previous_result.get("coaching_state") in {
+        CoachingState.WAITING_FOR_RETRY, CoachingState.EXPLAINING_CORRECTION,
+    })
+
+
+def classify_learner_intent(message: str, previous_result: dict | None = None) -> LearnerIntent:
+    normalized = _normalized(message)
+    target = str((previous_result or {}).get("corrected_sentence") or "")
+    if pending_retry(previous_result) and retry_matches(message, target):
+        return LearnerIntent.RETRY
+    if re.search(r"\b(from now on|always|language|english|telugu)\b", normalized):
+        return LearnerIntent.LANGUAGE_CHANGE
+    if re.search(r"\b(explain|explanation|why)\b", normalized):
+        return LearnerIntent.EXPLANATION
+    if re.search(r"\b(example|examples)\b", normalized):
+        return LearnerIntent.EXAMPLES
+    if re.search(r"\b(clarify|clarification|what do you mean)\b", normalized):
+        return LearnerIntent.CLARIFICATION
+    if re.search(r"\b(grammar|help|tense|pronoun|noun|verb|correct|meaning)\b", normalized):
+        return LearnerIntent.GRAMMAR_HELP
+    if any(marker in message.casefold() for marker in ("ఎందుకు", "ఎలా", "అర్థం", "చెప్పండి", "enduku", "ela")):
+        return LearnerIntent.GRAMMAR_HELP
+    return LearnerIntent.NORMAL_CONVERSATION
 
 
 def tutor_input_for_retry(message: str, previous_result: dict | None) -> str:
@@ -56,7 +89,7 @@ def tutor_input_for_retry(message: str, previous_result: dict | None) -> str:
         return message
     prior = previous_result or {}
     target = str(prior.get("corrected_sentence") or "")
-    if retry_matches(message, target):
+    if classify_learner_intent(message, previous_result) == LearnerIntent.RETRY:
         return (
             f"The learner successfully retried the requested corrected sentence: {message}. "
             "Acknowledge the successful retry briefly, then continue the existing English-practice topic."
@@ -109,6 +142,20 @@ def _join(*parts: str | None) -> str:
     return " ".join(part.strip() for part in parts if part and part.strip())
 
 
+def _accurate_self_introduction(response: AIConversationResponse, learner_text: str) -> AIConversationResponse:
+    if not re.search(r"\bmyself\s+[A-Za-z][A-Za-z'-]*", learner_text, re.I):
+        return response
+    if not response.corrected_learner_sentence:
+        return response
+    return response.model_copy(update={
+        "correction_explanation": (
+            "'Myself' is a reflexive or intensive pronoun, not a noun. "
+            "'Myself Nagaraj' is not a standard or natural English self-introduction. "
+            "Say 'I'm Nagaraj' or 'My name is Nagaraj.'"
+        ),
+    })
+
+
 def _tokens(value: str) -> list[str]:
     return re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?|[^\w\s]", value)
 
@@ -127,6 +174,11 @@ def smallest_useful_error_span(learner_text: str, corrected_text: str) -> tuple[
     t0, t1 = min(op[3] for op in changes), max(op[4] for op in changes)
     # Include a little shared context. For short utterances, the whole sentence is clearer.
     if len(source) <= 5 and "didn't" not in [token.lower() for token in source]:
+        if source and source[0].lower() in {"hi", "hello"} and s0 > 0:
+            return (
+                " ".join(source[s0:min(len(source), s1 + 1)]).strip(" ,.!?"),
+                " ".join(target[t0:min(len(target), t1 + 1)]).strip(" ,.!?"),
+            )
         return learner_text.strip().rstrip(".?!"), corrected_text.strip().rstrip(".?!")
     source_lower = [token.lower() for token in source]
     target_lower = [token.lower() for token in target]
@@ -163,13 +215,16 @@ def build_coaching_outcome(
     previous_turn_id: str | None = None,
     learner_text: str = "",
     explanation_language_state: ExplanationLanguageState = ExplanationLanguageState.DEFAULT_PREFERENCE,
+    learner_intent: LearnerIntent | None = None,
 ) -> CoachingOutcome:
+    response = _accurate_self_introduction(response, learner_text)
     if pending_retry(previous_result):
         prior = previous_result or {}
         target = str(prior.get("corrected_sentence") or "")
+        intent = learner_intent or classify_learner_intent(learner_text, previous_result)
         if (
             explanation_language_state == ExplanationLanguageState.DEFAULT_PREFERENCE
-            and retry_matches(learner_text, target)
+            and intent == LearnerIntent.RETRY
         ):
             spoken = _join(_retry_accepted(language_mode), response.tutor_message, response.conversation_question)
             return CoachingOutcome(
@@ -177,6 +232,28 @@ def build_coaching_outcome(
                 mode=CoachingMode.NO_CORRECTION,
                 state=CoachingState.RETRY_ACCEPTED,
                 spoken_text=spoken,
+                retry_of_turn_id=previous_turn_id,
+            )
+        if intent in {
+            LearnerIntent.EXPLANATION,
+            LearnerIntent.GRAMMAR_HELP,
+            LearnerIntent.CLARIFICATION,
+            LearnerIntent.EXAMPLES,
+        } and explanation_language_state == ExplanationLanguageState.DEFAULT_PREFERENCE:
+            linked = response.model_copy(update={
+                "corrected_learner_sentence": target,
+                "correction_explanation": str(
+                    prior.get("correction_explanation_default")
+                    or prior.get("correction_explanation") or ""
+                ) or None,
+            })
+            return CoachingOutcome(
+                response=linked,
+                mode=CoachingMode.RETRY_REQUIRED,
+                state=CoachingState.EXPLAINING_CORRECTION,
+                spoken_text=_join(response.tutor_message, response.correction_explanation, response.conversation_question),
+                incorrect_span=str(prior.get("incorrect_span") or "") or None,
+                corrected_form=str(prior.get("corrected_form") or target) or None,
                 retry_of_turn_id=previous_turn_id,
             )
         current_explanation = response.correction_explanation

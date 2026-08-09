@@ -53,10 +53,13 @@ from backend.app.domain.enums import LanguageMode
 from backend.app.language_review.models import LanguageReviewResult
 from backend.app.language_review.service import LanguageReviewService, degraded_review_result
 from backend.app.coaching import (
+    LearnerIntent,
     build_coaching_outcome,
+    classify_learner_intent,
     correction_reexplanation_input,
     tutor_input_for_retry,
 )
+from backend.app.transcript_safety import UnusableTranscript, safe_transcript
 from backend.app.explanation_language import (
     ExplanationLanguage,
     ExplanationLanguageState,
@@ -101,6 +104,7 @@ class AITurnRead(BaseModel):
     retry_of_turn_id: str | None
     explanation_language: ExplanationLanguage
     explanation_language_state: ExplanationLanguageState
+    learner_intent: LearnerIntent
 
 
 _ARABIC_SCRIPT = re.compile(r"[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]")
@@ -236,6 +240,7 @@ def _api_result(
     coaching,
     language_decision,
     previous_result: dict | None,
+    learner_intent: LearnerIntent,
 ) -> dict:
     default_correction_explanation = response.correction_explanation
     if language_decision.state == ExplanationLanguageState.ONE_TURN_OVERRIDE:
@@ -274,6 +279,7 @@ def _api_result(
         "retry_of_turn_id": coaching.retry_of_turn_id,
         "explanation_language": language_decision.language,
         "explanation_language_state": language_decision.state,
+        "learner_intent": learner_intent,
     }
 
 
@@ -331,6 +337,14 @@ def ai_turn(
     if conversation is None:
         raise AppError(status.HTTP_404_NOT_FOUND, "conversation_not_found", "Conversation not found.")
     ensure_owner(conversation.learner_id, principal)
+    try:
+        learner_message = safe_transcript(data.message)
+    except UnusableTranscript as exc:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "unusable_transcript" if data.input_source == "VOICE" else "invalid_learner_message",
+            "No clear learner speech was detected. Please try again.",
+        ) from exc
     usage = UsageService(session)
     tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
     provider = request.app.state.llm_provider
@@ -342,7 +356,8 @@ def ai_turn(
         if previous_attempt is not None else None
     )
     default_language_mode = LanguageMode(principal.learner.language_mode or "ENGLISH")
-    language_decision = resolve_explanation_language(data.message, default_language_mode)
+    learner_intent = classify_learner_intent(learner_message, previous_result)
+    language_decision = resolve_explanation_language(learner_message, default_language_mode)
     if language_decision.persist_mode is not None:
         principal.learner.language_mode = language_decision.persist_mode.value
         principal.learner.telugu_explanations_enabled = False
@@ -352,7 +367,7 @@ def ai_turn(
     review_result = None
     needs_provider = False
     if attempt is not None:
-        if attempt.learner_id != principal.learner.id or attempt.learner_text != data.message:
+        if attempt.learner_id != principal.learner.id or attempt.learner_text != learner_message:
             raise AppError(
                 status.HTTP_409_CONFLICT,
                 "ai_turn_idempotency_conflict",
@@ -412,7 +427,7 @@ def ai_turn(
                     conversation_id=conversation.id,
                     learner_id=principal.learner.id,
                     idempotency_key=turn_key,
-                    learner_text=data.message,
+                    learner_text=learner_message,
                 )
             except IntegrityError as exc:
                 session.rollback()
@@ -438,7 +453,12 @@ def ai_turn(
                 previous_result,
                 in_english=language_decision.language == ExplanationLanguage.ENGLISH,
             ) if language_decision.state != ExplanationLanguageState.DEFAULT_PREFERENCE else None
-            learner_input = reexplanation or tutor_input_for_retry(data.message, previous_result)
+            if learner_intent in {LearnerIntent.EXPLANATION, LearnerIntent.LANGUAGE_CHANGE}:
+                learner_input = reexplanation or learner_message
+            elif learner_intent == LearnerIntent.RETRY:
+                learner_input = tutor_input_for_retry(learner_message, previous_result)
+            else:
+                learner_input = learner_message
             if not (
                 language_decision.state == ExplanationLanguageState.DEFAULT_PREFERENCE
                 and language_decision.effective_mode == LanguageMode.ENGLISH
@@ -628,12 +648,13 @@ def ai_turn(
         language_mode=language_decision.effective_mode,
         previous_result=previous_result,
         previous_turn_id=previous_attempt.id if previous_attempt is not None else None,
-        learner_text=data.message,
+        learner_text=learner_message,
         explanation_language_state=language_decision.state,
+        learner_intent=learner_intent,
     )
     response = coaching.response
     result = _api_result(
-        response, policy, attempt.id, review_result, coaching, language_decision, previous_result,
+        response, policy, attempt.id, review_result, coaching, language_decision, previous_result, learner_intent,
     )
     try:
         session.add(AICostMetricEvent(
@@ -652,7 +673,7 @@ def ai_turn(
         ))
         ConversationRepository(session).add_message(
             conversation.id,
-            data.message,
+            learner_message,
             response.tutor_message,
             response.correction_explanation,
             ai_turn_attempt_id=attempt.id,
@@ -948,13 +969,14 @@ async def transcribe_voice_input(
             "Speech recognition is unavailable.",
         ) from exc
 
-    transcript = result.transcript.strip()
-    if not transcript:
+    try:
+        transcript = safe_transcript(result.transcript)
+    except UnusableTranscript as exc:
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "no_speech_detected",
             "No clear speech was detected.",
-        )
+        ) from exc
     request.app.state.metrics.increment("voice_transcriptions_completed")
     request.app.state.metrics.observe("voice_capture_size_bytes", len(audio))
     return {
