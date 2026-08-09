@@ -66,7 +66,9 @@ describe("Feature 7 audio-linked avatar", () => {
       vocabulary_suggestions: [],
       expression_hint: "CORRECTIVE",
     });
-    vi.spyOn(api, "speech").mockResolvedValue(speech);
+    vi.spyOn(api, "speech")
+      .mockResolvedValueOnce(speech)
+      .mockResolvedValueOnce({ ...speech, blob: new Blob([new Uint8Array(96)], { type: "audio/mpeg" }) });
     render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH" /></RouterProvider>);
     await waitFor(() => expect(api.conversation).toHaveBeenCalled());
     await userEvent.type(screen.getByLabelText("Your message"), "I go yesterday.");
@@ -87,6 +89,21 @@ describe("Feature 7 audio-linked avatar", () => {
     fireEvent.ended(player);
     expect(avatar).toHaveAttribute("data-state", "IDLE");
     expect(avatar).toHaveAttribute("data-mouth", "REST");
+
+    await userEvent.click(screen.getByRole("button", { name: "Replay" }));
+    fireEvent.play(player);
+    expect(avatar).toHaveAttribute("data-state", "SPEAKING");
+    expect(avatar).toHaveAttribute("data-mouth", "SMALL");
+
+    fireEvent.error(player);
+    expect(avatar).toHaveAttribute("data-state", "ERROR");
+    expect(avatar).toHaveAttribute("data-mouth", "REST");
+    expect(screen.getByRole("alert")).toHaveTextContent("Tutor audio could not be played");
+    await userEvent.click(screen.getByRole("button", { name: "Retry OpenAI voice" }));
+    await waitFor(() => expect(api.speech).toHaveBeenCalledTimes(2));
+    fireEvent.play(player);
+    expect(avatar).toHaveAttribute("data-state", "SPEAKING");
+    expect(avatar).toHaveAttribute("data-mouth", "SMALL");
   });
 
   it("interrupts playback and resets the mouth immediately", async () => {

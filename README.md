@@ -5,12 +5,14 @@ Spoken English AI is a voice-first learning product for Indian learners, initial
 ## RC1 feature gates
 
 - Feature 5 — OpenAI TTS / audible tutor speech: **ACCEPTED** by the founder in Windows Chrome.
-- Feature 6 — Native Telugu language-quality review: **ACCEPTED** by the founder for all 12 reviewed examples.
-- Feature 7 — Avatar expressions / audio synchronization: **BLOCKED** pending founder visual acceptance.
+- Feature 6 — Native Telugu review and spoken correction safety: **ENGINEERING_ACCEPTED_WITH_DEFERRED_DEVICE_GATE**.
+- Feature 7 — Avatar expressions / audio synchronization: **ENGINEERING_ACCEPTED_WITH_DEFERRED_DEVICE_GATE**.
 
-SpeakMate remains **RC1_NOT_READY**. Feature 7 uses real HTML audio playback events and
-audio `currentTime` for speaking and mouth motion; a state label alone is not acceptance
-evidence. See `docs/FEATURE_7_AVATAR_AUDIO_SYNC.md`.
+All named RC implementation features are engineering accepted. Final RC regression and one
+consolidated founder device review remain required before release approval. Feature 7 uses real
+HTML audio playback events and audio `currentTime` for speaking and mouth motion; headless
+Chromium verifies stop/reset and replay behavior, but automation does not claim audible output or
+physical-device quality. See `docs/FEATURE_7_AVATAR_AUDIO_SYNC.md`.
 
 Native Telugu quality review is a first-class learner capability. Learners choose English,
 English with Telugu explanation, or Telugu-dominant explanation. Telugu modes pass through a

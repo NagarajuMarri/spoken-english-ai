@@ -96,6 +96,12 @@ export function ConversationScreen({
     });
   }, [presentation.activePlaybackId, presentation.expression, presentation.mouth, presentation.state, reduced]);
 
+  useEffect(() => {
+    if (presentation.state !== "ERROR" || presentation.errorCode !== "browser_audio_error") return;
+    setAudioError("Tutor audio could not be played. Request a fresh copy and try again.");
+    setAudioPathStatus("Browser audio playback failed. Use Retry OpenAI voice to fetch a fresh audio source.");
+  }, [presentation.errorCode, presentation.state]);
+
   const handleAudioLifecycle = useCallback((event: AudioLifecycleEvent) => {
     switch (event.type) {
       case "SOURCE_READY":

@@ -108,7 +108,7 @@ test("lesson, conversation feedback, Telugu, reduced motion, and clean console",
   expect(errors).toEqual([]);
 });
 
-test("Feature 7 uses audible playback for visual speaking and immediate reset", async ({ page }) => {
+test("Feature 7 uses real audio lifecycle for speaking, reset, replay, and recovery", async ({ page }) => {
   await authenticated(page);
   await page.addInitScript(() => {
     const nativePlay = HTMLMediaElement.prototype.play;
@@ -133,9 +133,21 @@ test("Feature 7 uses audible playback for visual speaking and immediate reset", 
   await expect(avatar).toHaveAttribute("data-expression", "CORRECTIVE");
   await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
   await page.screenshot({ path: "test-results/feature7-speaking-runtime.png", fullPage: true });
-  await page.getByRole("button", { name: "Stop" }).click();
+  await page.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(avatar).toHaveAttribute("data-state", "IDLE");
   await expect(avatar).toHaveAttribute("data-mouth", "REST");
+  await page.getByRole("button", { name: "Replay" }).click();
+  await expect(avatar).toHaveAttribute("data-state", "SPEAKING");
+  await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
+  await page.getByLabel(/Tutor audio for/).dispatchEvent("error");
+  await expect(avatar).toHaveAttribute("data-state", "ERROR");
+  await expect(avatar).toHaveAttribute("data-mouth", "REST");
+  await expect(page.getByRole("alert")).toContainText("Tutor audio could not be played");
+  await page.getByRole("button", { name: "Retry OpenAI voice" }).click();
+  await expect(page.locator(".audio-path-status")).toContainText("OpenAI tutor audio received");
+  await page.getByRole("button", { name: "Play tutor voice" }).click();
+  await expect(avatar).toHaveAttribute("data-state", "SPEAKING");
+  await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
 });
 
 test("microphone denial remains recoverable with text", async ({ page }) => {
@@ -169,7 +181,7 @@ test("real MediaRecorder bytes become a transcript and learner message", async (
   await expect(page.locator(".avatar")).toHaveAttribute("data-state", "LISTENING");
   await page.waitForTimeout(750);
   await page.getByRole("button", { name: "Stop and transcribe" }).click();
-  await expect(page.getByText(/We heard:/)).toContainText("I practise English every morning.");
+  await expect(page.getByLabel("Recognized speech")).toContainText("I practise English every morning.");
   await expect(page.getByText("You: I practise English every morning.")).toBeVisible();
   expect(capturedBytes).toBeGreaterThan(0);
   expect(submitted).toBe("I practise English every morning.");

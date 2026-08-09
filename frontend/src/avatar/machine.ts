@@ -39,13 +39,20 @@ export function normalizeExpression(value?: string): TutorExpression {
     : "NEUTRAL";
 }
 
-function idle(presentation: TutorPresentation, completedId?: string): TutorPresentation {
-  return {
+function idle(
+  presentation: TutorPresentation,
+  { completedId, retainSource = false }: { completedId?: string; retainSource?: boolean } = {},
+): TutorPresentation {
+  const next: TutorPresentation = {
     state: "IDLE",
     expression: "NEUTRAL",
     mouth: "REST",
     lastCompletedPlaybackId: completedId ?? presentation.lastCompletedPlaybackId,
   };
+  if (retainSource && presentation.activePlaybackId) {
+    next.activePlaybackId = presentation.activePlaybackId;
+  }
+  return next;
 }
 
 function ownsPlayback(presentation: TutorPresentation, playbackId: string) {
@@ -87,10 +94,12 @@ export function reduceTutorPresentation(
       };
     case "AUDIO_PLAYBACK_PAUSED":
     case "AUDIO_PLAYBACK_STOPPED":
-      return ownsPlayback(presentation, event.playbackId) ? idle(presentation) : presentation;
+      return ownsPlayback(presentation, event.playbackId)
+        ? idle(presentation, { retainSource: true })
+        : presentation;
     case "AUDIO_PLAYBACK_ENDED":
       return ownsPlayback(presentation, event.playbackId)
-        ? idle(presentation, event.playbackId)
+        ? idle(presentation, { completedId: event.playbackId, retainSource: true })
         : presentation;
     case "AUDIO_PLAYBACK_ERROR":
       if (!ownsPlayback(presentation, event.playbackId)) return presentation;
