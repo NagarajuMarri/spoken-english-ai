@@ -7,6 +7,7 @@
 - Docker and Nginx executables are unavailable in this workspace, so rendered-template `nginx -t`, container smoke, actual host-ingress peer observation, spoofed-header verification, streamed-upload behavior, and service-worker cache-migration evidence remain staging gates.
 - Automated database concurrency coverage in this workspace is SQLite/sequential. The implemented PostgreSQL row-lock/CAS paths for quota reservations, refresh rotation, provider retry claims, and subscription expiry still require real-contention staging stress evidence before production; this is an evidence gap, not a claim that those implementations are incorrect.
 - Final legal text, brand, pricing, beta cohort, production domain, and support/incident ownership require founder approval.
+- **Sev-2 UX scope gap:** the founder-acceptance wording calls for a realistic 3D Ananya tutor, while the locked RC renderer still uses the existing animated photorealistic portrait and has no native 3D model/renderer asset. The new live-class layout does not misrepresent that implementation as native 3D; final founder disposition is required.
 - Production deployment, public release, Razorpay live mode, and real charges are not authorized.
 
 ## Non-blocking engineering limitations

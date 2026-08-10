@@ -22,21 +22,21 @@ beforeEach(()=>{
  Object.defineProperty(URL,"revokeObjectURL",{configurable:true,value:vi.fn()});
 });
 it("plays valid OpenAI audio and exposes start end mute stop and replay controls",async()=>{
- render(<TutorAudioPlayer speech={firstSpeech} spokenText="You are improving. What happened next?" playbackId="turn-one"/>);
+ render(<TutorAudioPlayer speech={firstSpeech} spokenText="You are improving. What happened next?" playbackId="turn-one" showDiagnostics/>);
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(1));
  expect(screen.getByText(/Provider: openai · Model: gpt-4o-mini-tts · Voice: marin/)).toBeVisible();
- const player=screen.getByLabelText(/Tutor audio for/);
+ const player=screen.getByLabelText(/^Tutor voice audio/);
  fireEvent.play(player);
  expect(screen.getByRole("status")).toHaveTextContent("Tutor voice is playing");
  fireEvent.ended(player);
  expect(screen.getByRole("status")).toHaveTextContent("Tutor voice finished");
- await userEvent.click(screen.getByRole("button",{name:"Mute"}));
+ await userEvent.click(screen.getByRole("button",{name:"Mute tutor voice"}));
  expect(player).toHaveProperty("muted",true);
- expect(screen.getByRole("button",{name:"Unmute"})).toHaveAttribute("aria-pressed","true");
- await userEvent.click(screen.getByRole("button",{name:"Stop"}));
+ expect(screen.getByRole("button",{name:"Unmute tutor voice"})).toHaveAttribute("aria-pressed","true");
+ await userEvent.click(screen.getByRole("button",{name:"Stop tutor voice"}));
  expect(pause).toHaveBeenCalled();
  expect(screen.getByRole("status")).toHaveTextContent("stopped");
- await userEvent.click(screen.getByRole("button",{name:"Replay"}));
+ await userEvent.click(screen.getByRole("button",{name:"Replay tutor voice"}));
  expect(play).toHaveBeenCalledTimes(2);
  expect(load).toHaveBeenCalled();
 });
@@ -50,9 +50,9 @@ it("handles Chrome autoplay blocking with an explicit user play path",async()=>{
 });
 
 it("cancels the prior source and plays the second consecutive response once",async()=>{
- const{rerender}=render(<TutorAudioPlayer speech={firstSpeech} spokenText="First response" playbackId="turn-one"/>);
+ const{rerender}=render(<TutorAudioPlayer speech={firstSpeech} spokenText="First response" playbackId="turn-one" showDiagnostics/>);
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(1));
- rerender(<TutorAudioPlayer speech={secondSpeech} spokenText="Second response" playbackId="turn-two"/>);
+ rerender(<TutorAudioPlayer speech={secondSpeech} spokenText="Second response" playbackId="turn-two" showDiagnostics/>);
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(2));
  expect(pause).toHaveBeenCalled();
  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:first");
@@ -69,9 +69,9 @@ it("retrieves OpenAI speech for the exact visible tutor turn without browser syn
  await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
  await userEvent.type(screen.getByLabelText("Your message"),"I studied today.");
  await userEvent.click(screen.getByRole("button",{name:"Send"}));
- expect(await screen.findByText("Ananya: You are improving. What happened next?")).toBeVisible();
+ expect(await screen.findByLabelText("Current tutor response")).toHaveTextContent("You are improving. What happened next?");
  expect(api.speech).toHaveBeenCalledWith("conversation-feature-5","ai-turn-feature-5");
- expect(await screen.findByText(/Provider: openai/)).toBeVisible();
+  expect(screen.queryByText(/Provider: openai/)).not.toBeInTheDocument();
  expect(browserSpeak).not.toHaveBeenCalled();
 });
 
@@ -85,8 +85,7 @@ it("does not silently skip TTS when a stale tutor response omits the turn identi
  await userEvent.type(screen.getByLabelText("Your message"),"Hello tutor.");
  await userEvent.click(screen.getByRole("button",{name:"Send"}));
  expect(await screen.findByText(/The text response remains visible/)).toBeVisible();
- expect(await screen.findByRole("alert")).toHaveTextContent("turn identity is missing");
- expect(screen.getByText(/TTS request not made: tutor response omitted its turn identity/)).toBeVisible();
+  expect(await screen.findByRole("alert")).toHaveTextContent("Tutor voice is not ready for this response");
  expect(speechRequest).not.toHaveBeenCalled();
  expect(warning).toHaveBeenCalledWith("speakmate_tts_event",{event:"request_not_made",reason:"missing_turn_id"});
 });
@@ -110,7 +109,8 @@ it("requests and plays audio after each of two consecutive tutor turns",async()=
  await waitFor(()=>expect(speechRequest).toHaveBeenNthCalledWith(2,"conversation-two-turns","turn-two"));
  expect(speechRequest).toHaveBeenCalledTimes(2);
  expect(play).toHaveBeenCalledTimes(2);
- expect(await screen.findByText(/Voice: cedar/)).toBeVisible();
+  expect(screen.queryByText(/Voice: cedar/)).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Current tutor response")).toHaveTextContent("Second tutor answer. Second question?");
 });
 
 it("keeps tutor text usable when TTS fails and offers an explicit audio-only retry",async()=>{
@@ -124,8 +124,9 @@ it("keeps tutor text usable when TTS fails and offers an explicit audio-only ret
  expect(await screen.findByText(/Your text answer is safe/)).toBeVisible();
  expect(await screen.findByRole("alert")).toHaveTextContent("Tutor voice timed out");
  expect(screen.getByLabelText("Your message")).toBeEnabled();
- await userEvent.click(screen.getByRole("button",{name:"Retry OpenAI voice"}));
- expect(await screen.findByText(/Provider: openai/)).toBeVisible();
+  await userEvent.click(screen.getByRole("button",{name:"Retry tutor voice"}));
+  await waitFor(()=>expect(api.speech).toHaveBeenCalledTimes(2));
+  expect(screen.queryByText(/Provider: openai/)).not.toBeInTheDocument();
  expect(api.turn).toHaveBeenCalledTimes(1);
  expect(api.speech).toHaveBeenCalledTimes(2);
 });

@@ -14,6 +14,7 @@ export function Avatar({
   const frame = createRendererFrame(presentation, reducedMotion);
   const stateLabel = frame.state.toLowerCase();
   const expressionLabel = frame.expression.toLowerCase();
+  const learnerState = frame.state === "IDLE" || frame.state === "ERROR" ? "READY" : frame.state;
   return (
     <figure
       className={`avatar ${stateLabel} expression-${expressionLabel} ${reducedMotion ? "reduced-motion" : ""}`}
@@ -21,9 +22,9 @@ export function Avatar({
       data-expression={frame.expression}
       data-mouth={frame.mouth}
       data-tutor={tutor.tutor_id}
-      aria-label={`${tutor.display_name} tutor status: ${stateLabel}; expression: ${expressionLabel}`}
+      aria-label={`${tutor.display_name} tutor status: ${learnerState.toLowerCase()}`}
     >
-      <img src={tutor.avatar_profile} alt={`${tutor.display_name}, animated 2D Indian-English tutor`} />
+      <img src={tutor.avatar_profile} alt={`${tutor.display_name}, your interactive Indian-English tutor`} />
       <span className="state-aura" aria-hidden="true" />
       <span className="listening-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span>
       <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
@@ -33,8 +34,7 @@ export function Avatar({
       <i className="expression-brow right" aria-hidden="true" />
       <span className={`mouth mouth-${frame.mouth.toLowerCase()}`} aria-hidden="true" />
       <figcaption aria-live="polite">
-        <strong>{stateLabel}</strong>
-        {frame.expression !== "NEUTRAL" && <span>{expressionLabel}</span>}
+        <strong>{learnerState}</strong>
       </figcaption>
     </figure>
   );

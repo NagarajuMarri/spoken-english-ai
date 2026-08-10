@@ -62,13 +62,13 @@ describe("native Telugu language review capability",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.type(screen.getByLabelText("Your message"),"I go office yesterday");
     await userEvent.click(screen.getByRole("button",{name:"Send"}));
-    expect(await screen.findByText("Native Telugu quality review")).toBeVisible();
-    expect(screen.getByText(/NATURALIZED_TELUGU/)).toBeVisible();
-    expect(screen.getByText(/sentence, tense/)).toBeVisible();
+    expect(await screen.findByLabelText("Current grammar correction")).toBeVisible();
+    expect(screen.queryByText(/NATURALIZED_TELUGU/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/sentence, tense/)).not.toBeInTheDocument();
     expect(screen.getByText("go office yesterday")).toBeVisible();
     expect(screen.getByText("went to the office yesterday")).toBeVisible();
-    expect(screen.getByText(/Ananya: మీ meaning clear గా ఉంది\. Correct sentence: I went to the office yesterday\./)).toBeVisible();
-    expect(screen.getAllByText("ఈ sentence లో tense మాత్రమే మార్చాలి.")).toHaveLength(2);
+    expect(screen.getByLabelText("Current tutor response")).toHaveTextContent("Correct sentence: I went to the office yesterday.");
+    expect(screen.getAllByText("ఈ sentence లో tense మాత్రమే మార్చాలి.")).toHaveLength(1);
     expect(api.speech).toHaveBeenCalledWith("conversation-language-review","turn-language-review");
   });
 });

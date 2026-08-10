@@ -99,6 +99,8 @@ test("lesson, conversation feedback, Telugu, reduced motion, and clean console",
   await page.goto("/app/daily-lesson");
   await expect(page.getByText("A confident morning routine")).toBeVisible();
   await page.getByRole("button", { name: "Begin lesson" }).click();
+  await expect(page.getByText("A confident morning routine")).toBeVisible();
+  await page.getByText("Type instead").click();
   await page.getByLabel("Your message").fill("I go yesterday");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Use the past tense here.")).toBeVisible();
@@ -122,30 +124,31 @@ test("Feature 7 uses real audio lifecycle for speaking, reset, replay, and recov
     };
   });
   await page.goto("/app/conversation");
+  await page.getByText("Type instead").click();
   await page.getByLabel("Your message").fill("I go yesterday");
   await page.getByRole("button", { name: "Send" }).click();
   const avatar = page.locator(".avatar");
-  await expect(page.getByText(/Provider: openai/)).toBeVisible();
+  await expect(page.getByText(/Provider: openai/)).toHaveCount(0);
   await expect(avatar).toHaveAttribute("data-state", "THINKING");
   await expect(avatar).toHaveAttribute("data-mouth", "REST");
-  await page.getByRole("button", { name: "Play tutor voice" }).click();
+  await page.getByRole("button", { name: "Play tutor voice", exact: true }).click();
   await expect(avatar).toHaveAttribute("data-state", "SPEAKING");
   await expect(avatar).toHaveAttribute("data-expression", "CORRECTIVE");
   await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
   await page.screenshot({ path: "test-results/feature7-speaking-runtime.png", fullPage: true });
-  await page.getByRole("button", { name: "Stop", exact: true }).click();
+  await page.getByRole("button", { name: "Stop tutor voice" }).click();
   await expect(avatar).toHaveAttribute("data-state", "IDLE");
   await expect(avatar).toHaveAttribute("data-mouth", "REST");
-  await page.getByRole("button", { name: "Replay" }).click();
+  await page.getByRole("button", { name: "Replay tutor voice" }).click();
   await expect(avatar).toHaveAttribute("data-state", "SPEAKING");
   await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
-  await page.getByLabel(/Tutor audio for/).dispatchEvent("error");
+  await page.getByLabel("Tutor voice audio").dispatchEvent("error");
   await expect(avatar).toHaveAttribute("data-state", "ERROR");
   await expect(avatar).toHaveAttribute("data-mouth", "REST");
   await expect(page.getByRole("alert")).toContainText("Tutor audio could not be played");
-  await page.getByRole("button", { name: "Retry OpenAI voice" }).click();
-  await expect(page.locator(".audio-path-status")).toContainText("OpenAI tutor audio received");
-  await page.getByRole("button", { name: "Play tutor voice" }).click();
+  await page.getByRole("button", { name: "Retry tutor voice" }).click();
+  await expect(page.getByRole("button", { name: "Replay tutor voice" })).toBeEnabled();
+  await page.getByRole("button", { name: "Play tutor voice", exact: true }).click();
   await expect(avatar).toHaveAttribute("data-state", "SPEAKING");
   await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
 });
@@ -177,12 +180,41 @@ test("real MediaRecorder bytes become a transcript and learner message", async (
   await page.goto("/app/conversation");
   await page.getByLabel(/consent to voice processing/).check();
   await page.getByRole("button", { name: "Start microphone" }).click();
-  await expect(page.getByText(/Microphone: recording/)).toBeVisible();
+  await expect(page.getByText("Listening", { exact: true })).toBeAttached();
   await expect(page.locator(".avatar")).toHaveAttribute("data-state", "LISTENING");
   await page.waitForTimeout(750);
   await page.getByRole("button", { name: "Stop and transcribe" }).click();
-  await expect(page.getByLabel("Recognized speech")).toContainText("I practise English every morning.");
-  await expect(page.getByText("You: I practise English every morning.")).toBeVisible();
+  await expect(page.getByLabel("Latest recognized transcript")).toContainText("I practise English every morning.");
   expect(capturedBytes).toBeGreaterThan(0);
   expect(submitted).toBe("I practise English every morning.");
 });
+
+for (const [name, width, height] of [["mobile", 390, 844], ["desktop", 1440, 900]] as const) {
+  test(`focused voice lesson is responsive on ${name}`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await authenticated(page);
+    await page.goto("/app/conversation");
+
+    const lesson = page.getByRole("region", { name: "Ananya live lesson" });
+    const avatar = page.locator(".avatar");
+    const exchange = page.getByRole("region", { name: "Current conversation" });
+    const microphone = page.getByRole("group", { name: "Speak to Ananya" });
+    await expect(lesson).toBeVisible();
+    await expect(avatar).toBeVisible();
+    await expect(exchange).toBeVisible();
+    await expect(microphone).toBeVisible();
+    await expect(page.getByRole("button", { name: "Start microphone" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Replay tutor voice" })).toBeVisible();
+    await expect(page.getByText(/Provider:|Model:|Audio path:|Browser permission:/)).toHaveCount(0);
+    await expect(page.locator(".conversation-history")).not.toHaveAttribute("open", "");
+
+    const [avatarBox, exchangeBox, microphoneBox] = await Promise.all([avatar.boundingBox(), exchange.boundingBox(), microphone.boundingBox()]);
+    expect(avatarBox).not.toBeNull();
+    expect(exchangeBox).not.toBeNull();
+    expect(microphoneBox).not.toBeNull();
+    expect(avatarBox!.y).toBeLessThan(exchangeBox!.y);
+    expect(exchangeBox!.y).toBeLessThan(microphoneBox!.y);
+    const noHorizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
+    expect(noHorizontalOverflow).toBe(true);
+  });
+}

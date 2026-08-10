@@ -47,15 +47,14 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    expect(screen.getByText(/Microphone: recording/)).toBeVisible();
+    expect(screen.getByText("Listening", { selector: "p" })).toBeInTheDocument();
     await waitFor(()=>expect(screen.getByLabelText(/tutor status: listening/)).toHaveAttribute("data-state", "LISTENING"));
     await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
     await waitFor(()=>expect(api.transcribe).toHaveBeenCalledOnce());
     const capture=vi.mocked(api.transcribe).mock.calls[0][1];
     expect(capture.blob.size).toBeGreaterThan(0);
     expect(capture.blob.type).toContain("audio/webm");
-    expect(await screen.findByLabelText("Recognized speech")).toHaveTextContent("I practise English every morning.");
-    expect(screen.getByText("You: I practise English every morning.")).toBeVisible();
+    expect(await screen.findByLabelText("Latest recognized transcript")).toHaveTextContent("I practise English every morning.");
     expect(api.turn).toHaveBeenCalledWith(
       "conversation-voice",
       "I practise English every morning.",
@@ -102,7 +101,7 @@ describe("voice input customer journey",()=>{
     expect(secondCall[1].blob).toBe(firstCall[1].blob);
     expect(secondCall[1].durationMs).toBe(firstCall[1].durationMs);
     expect(secondCall[2]).toBe(firstCall[2]);
-    expect(await screen.findByLabelText("Recognized speech")).toHaveTextContent(successfulTranscription.transcript);
+    expect(await screen.findByLabelText("Latest recognized transcript")).toHaveTextContent(successfulTranscription.transcript);
     expect(screen.queryByRole("button",{name:"Retry transcription"})).not.toBeInTheDocument();
     expect(screen.queryByRole("button",{name:"Discard recording"})).not.toBeInTheDocument();
     expect(api.turn).toHaveBeenCalledOnce();

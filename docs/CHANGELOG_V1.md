@@ -29,9 +29,17 @@
 - Replaced hard-coded launch progress, registration, pricing, and health claims with evidence-backed values or the authoritative readiness endpoint.
 - Added live-account Playwright configuration that uses isolated, unique test identities and an explicit beta invitation.
 
+### Founder-acceptance learner UX hardening — 2026-08-10
+
+- Split the conversation screen into focused Voice mode and fuller Text mode without remounting or resetting the shared conversation.
+- Made Voice mode show one current learner/tutor exchange, compact prior history, concise tutor state, useful correction/Telugu guidance only when present, and a unified microphone/audio control dock.
+- Removed learner-facing provider, model, voice, audio-path, internal review, avatar lifecycle, and other engineering metadata; explicit diagnostics remain available only at the component diagnostics boundary.
+- Preserved stable message identities and a single mounted tutor-audio player across mode changes to prevent duplicate messages, speech requests, or autoplay.
+- Added responsive mobile/desktop Playwright coverage plus accessibility, replay, lesson-context, and mode-switch regression coverage.
+
 ### Verification
 
-- 183 backend tests, 37 frontend tests and 7 deterministic Playwright scenarios passed.
+- 351 backend tests, 105 frontend tests and 11 deterministic Playwright scenarios passed; 4 live-environment scenarios remain intentionally gated.
 - Ruff, TypeScript, ESLint, production build, migration and npm dependency audit passed.
 
 ### Known limitations

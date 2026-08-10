@@ -15,12 +15,16 @@ export function TutorAudioPlayer({
   spokenText,
   playbackId,
   interruptSequence = 0,
+  compact = false,
+  showDiagnostics = false,
   onLifecycle,
 }: {
   speech: TutorSpeech | null;
   spokenText: string;
   playbackId: string;
   interruptSequence?: number;
+  compact?: boolean;
+  showDiagnostics?: boolean;
   onLifecycle?: (event: AudioLifecycleEvent) => void;
 }) {
   const audio = useRef<HTMLAudioElement>(null);
@@ -29,7 +33,7 @@ export function TutorAudioPlayer({
   const lifecycle = useRef(onLifecycle);
   const sourcePlaybackId = useRef("");
   const ignoreNextPause = useRef(false);
-  const [status, setStatus] = useState("OpenAI audio ready.");
+  const [status, setStatus] = useState("Tutor voice ready.");
   const [muted, setMuted] = useState(false);
 
   useEffect(() => {
@@ -158,12 +162,13 @@ export function TutorAudioPlayer({
   };
 
   return (
-    <section className="tutor-audio" aria-label="OpenAI tutor voice player">
-      <h3>Tutor voice</h3>
-      <p className="ai-disclosure">AI-generated voice · OpenAI</p>
+    <section className={`tutor-audio ${compact ? "compact" : ""}`} aria-label="Tutor voice controls">
+      <h3 className={compact ? "sr-only" : ""}>Tutor voice</h3>
+      {showDiagnostics && <p className="ai-disclosure">AI-generated voice diagnostics</p>}
       <audio
         ref={audio}
-        controls
+        controls={showDiagnostics}
+        className={showDiagnostics ? "" : "sr-only"}
         preload="auto"
         muted={muted}
         onPlay={(event) => {
@@ -198,16 +203,16 @@ export function TutorAudioPlayer({
           if (activeId) lifecycle.current?.({ type: "PLAYBACK_ERROR", playbackId: activeId, errorCode: "browser_audio_error" });
           console.warn("speakmate_tts_event", { event: "browser_audio_error", playback_id: activeId });
         }}
-        aria-label={`Tutor audio for: ${spokenText || "latest response"}`}
+        aria-label={showDiagnostics && spokenText ? `Tutor voice audio: ${spokenText}` : "Tutor voice audio"}
       />
       <div className="audio-actions">
         <button disabled={!speech} onClick={play}>Play tutor voice</button>
-        <button disabled={!speech} onClick={stop}>Stop</button>
-        <button disabled={!speech} onClick={replay}>Replay</button>
-        <button disabled={!speech} aria-pressed={muted} onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</button>
+        <button aria-label="Stop tutor voice" disabled={!speech} onClick={stop}>Stop</button>
+        <button aria-label="Replay tutor voice" disabled={!speech} onClick={replay}>Replay</button>
+        <button aria-label={muted ? "Unmute tutor voice" : "Mute tutor voice"} disabled={!speech} aria-pressed={muted} onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</button>
       </div>
-      <p role="status" aria-live="polite">{speech ? status : "No tutor audio yet."}</p>
-      {speech && <p className="audio-evidence">Provider: {speech.provider} · Model: {speech.model} · Voice: {speech.voice}</p>}
+      <p className={compact ? "sr-only" : undefined} role="status" aria-live="polite">{speech ? status : "No tutor audio yet."}</p>
+      {showDiagnostics && speech && <p className="audio-evidence">Provider: {speech.provider} · Model: {speech.model} · Voice: {speech.voice}</p>}
     </section>
   );
 }

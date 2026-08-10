@@ -18,12 +18,14 @@ it("shows a provider-safe tutor failure and allows the learner to retry",async()
   await userEvent.click(screen.getByRole("button",{name:"Send"}));
   expect(await screen.findByRole("alert")).toHaveTextContent("The tutor could not connect");
   expect(screen.getByLabelText("Your message")).toHaveValue("Please help me practise.");
-  expect(screen.getAllByText("You: Please help me practise.")).toHaveLength(1);
+  expect(screen.getByLabelText("Latest learner message")).toHaveTextContent("Please help me practise.");
+  expect(screen.getAllByText("Please help me practise.")).toHaveLength(1);
   const firstKey=vi.mocked(api.turn).mock.calls[0][3];
   await userEvent.click(screen.getByRole("button",{name:"Retry tutor response"}));
   expect(await screen.findByText(/Recovered response/)).toBeVisible();
   expect(vi.mocked(api.turn).mock.calls[1][3]).toBe(firstKey);
-  expect(screen.getAllByText("You: Please help me practise.")).toHaveLength(1);
+  expect(screen.getByLabelText("Latest learner message")).toHaveTextContent("Please help me practise.");
+  expect(screen.getAllByText("Please help me practise.")).toHaveLength(1);
   expect(vi.mocked(api.turn)).toHaveBeenCalledTimes(2);
   expect(screen.getByLabelText("Your message")).toBeEnabled();
 });
@@ -67,5 +69,6 @@ it("allows a safe same-turn retry after an incomplete OpenAI response",async()=>
   await userEvent.click(screen.getByRole("button",{name:"Retry tutor response"}));
   expect(await screen.findByText(/I can continue now/)).toBeVisible();
   expect(vi.mocked(api.turn).mock.calls[1][3]).toBe(firstKey);
-  expect(screen.getAllByText("You: Please continue.")).toHaveLength(1);
+  expect(screen.getByLabelText("Latest learner message")).toHaveTextContent("Please continue.");
+  expect(screen.getAllByText("Please continue.")).toHaveLength(1);
 });

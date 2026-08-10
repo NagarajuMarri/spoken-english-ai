@@ -36,7 +36,7 @@ describe("Feature 7 audio-linked avatar", () => {
     const events: AudioLifecycleEvent[] = [];
     render(<TutorAudioPlayer speech={speech} spokenText="Good work." playbackId="turn-7" onLifecycle={(event) => events.push(event)} />);
     await waitFor(() => expect(events).toContainEqual({ type: "SOURCE_READY", playbackId: "turn-7" }));
-    const player = screen.getByLabelText(/Tutor audio for/);
+    const player = screen.getByLabelText("Tutor voice audio");
     Object.defineProperty(player, "paused", { configurable: true, value: false });
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0.24 });
     Object.defineProperty(player, "duration", { configurable: true, value: 2 });
@@ -49,8 +49,8 @@ describe("Feature 7 audio-linked avatar", () => {
 
   it.each(["POSITIVE", "ENCOURAGING", "CORRECTIVE"] as const)("renders the %s expression through the neutral renderer contract", (expression) => {
     const presentation = { ...initialTutorPresentation, state: "SPEAKING" as const, expression, mouth: "MEDIUM" as const };
-    const { getByLabelText } = render(<Avatar tutor={ananya} presentation={presentation} />);
-    const avatar = getByLabelText(new RegExp(`expression: ${expression.toLowerCase()}`));
+    const { container } = render(<Avatar tutor={ananya} presentation={presentation} />);
+    const avatar = container.querySelector(".avatar");
     expect(avatar).toHaveAttribute("data-expression", expression);
     expect(avatar).toHaveClass(`expression-${expression.toLowerCase()}`);
     expect(avatar).toHaveAttribute("data-mouth", "MEDIUM");
@@ -73,7 +73,7 @@ describe("Feature 7 audio-linked avatar", () => {
     await waitFor(() => expect(api.conversation).toHaveBeenCalled());
     await userEvent.type(screen.getByLabelText("Your message"), "I go yesterday.");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-    const player = await screen.findByLabelText(/Tutor audio for/);
+    const player = await screen.findByLabelText("Tutor voice audio");
     const avatar = screen.getByLabelText(/Ananya tutor status/);
     expect(avatar).toHaveAttribute("data-state", "THINKING");
     expect(avatar).toHaveAttribute("data-mouth", "REST");
@@ -90,7 +90,7 @@ describe("Feature 7 audio-linked avatar", () => {
     expect(avatar).toHaveAttribute("data-state", "IDLE");
     expect(avatar).toHaveAttribute("data-mouth", "REST");
 
-    await userEvent.click(screen.getByRole("button", { name: "Replay" }));
+    await userEvent.click(screen.getByRole("button", { name: "Replay tutor voice" }));
     fireEvent.play(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
     expect(avatar).toHaveAttribute("data-mouth", "SMALL");
@@ -99,7 +99,7 @@ describe("Feature 7 audio-linked avatar", () => {
     expect(avatar).toHaveAttribute("data-state", "ERROR");
     expect(avatar).toHaveAttribute("data-mouth", "REST");
     expect(screen.getByRole("alert")).toHaveTextContent("Tutor audio could not be played");
-    await userEvent.click(screen.getByRole("button", { name: "Retry OpenAI voice" }));
+    await userEvent.click(screen.getByRole("button", { name: "Retry tutor voice" }));
     await waitFor(() => expect(api.speech).toHaveBeenCalledTimes(2));
     fireEvent.play(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
@@ -110,7 +110,7 @@ describe("Feature 7 audio-linked avatar", () => {
     const events: AudioLifecycleEvent[] = [];
     render(<TutorAudioPlayer speech={speech} spokenText="Keep going." playbackId="turn-stop" onLifecycle={(event) => events.push(event)} />);
     await waitFor(() => expect(events.some((event) => event.type === "SOURCE_READY")).toBe(true));
-    await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await userEvent.click(screen.getByRole("button", { name: "Stop tutor voice" }));
     expect(events).toContainEqual({ type: "PLAYBACK_STOPPED", playbackId: "turn-stop" });
   });
 });
