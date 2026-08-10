@@ -5,6 +5,11 @@ from backend.app.providers.password_reset.delivery import (
     SmtpPasswordResetDelivery,
     build_password_reset_delivery,
 )
+from backend.app.providers.password_reset.dispatch import (
+    DirectPasswordResetDispatch,
+    RedisPasswordResetDispatch,
+    build_password_reset_dispatch,
+)
 
 __all__ = [
     "DevelopmentFilePasswordResetDelivery",
@@ -12,4 +17,7 @@ __all__ = [
     "InMemoryPasswordResetDelivery",
     "SmtpPasswordResetDelivery",
     "build_password_reset_delivery",
+    "DirectPasswordResetDispatch",
+    "RedisPasswordResetDispatch",
+    "build_password_reset_dispatch",
 ]

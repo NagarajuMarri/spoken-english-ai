@@ -1,11 +1,22 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { normalizeExpression, initialTutorPresentation, reduceTutorPresentation } from "../avatar/machine";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { normalizeExpression } from "../avatar/machine";
 import { ApiError, api } from "../api/client";
 import { useAuth as requireAuth } from "../auth/AuthProvider";
 import { Avatar } from "../components/Avatar";
 import type { Account, Dashboard, LanguageMode, Tutor, TutorSpeech, VoiceTranscription } from "../models";
+import { useSpeakMateMultimediaRuntime } from "../multimedia";
 import { useRouter } from "../routes/router";
-import { TutorAudioPlayer, type AudioLifecycleEvent } from "../voice/TutorAudioPlayer";
+import {
+  createConversationLatencyTrace,
+  emitConversationLatency,
+  markConversationLatency,
+  type ConversationLatencyTrace,
+} from "../telemetry/conversation-latency";
+import {
+  engineeringDiagnosticInfo,
+  engineeringDiagnosticWarning,
+} from "../telemetry/engineering-diagnostics";
+import { TutorAudioPlayer, type AudioLifecycleEvent, type TutorAudioPlayerHandle } from "../voice/TutorAudioPlayer";
 import { useMicrophone, type CapturedAudio } from "../voice/useMicrophone";
 
 const ACTIVE_LESSON_TITLE_KEY = "speakmate.active-lesson-title.v1";
@@ -145,6 +156,12 @@ export function ConversationScreen({
   const [practiceMode, setPracticeMode] = useState<PracticeMode>("VOICE");
   const [lessonTitle] = useState(() => sessionStorage.getItem(ACTIVE_LESSON_TITLE_KEY) ?? "");
   const [id, setId] = useState("");
+  const [openingPrompt, setOpeningPrompt] = useState("");
+  const [openingTurnId, setOpeningTurnId] = useState("");
+  const [conversationStarted, setConversationStarted] = useState(false);
+  const [avatarReady, setAvatarReady] = useState(false);
+  const [startBusy, setStartBusy] = useState(false);
+  const [greetingCompleted, setGreetingCompleted] = useState(false);
   const [input, setInput] = useState("");
   const [lastTranscript, setLastTranscript] = useState("");
   const [turnError, setTurnError] = useState("");
@@ -162,22 +179,64 @@ export function ConversationScreen({
   const [turnBusy, setTurnBusy] = useState(false);
   const turnBusyRef = useRef(false);
   const transcriptionBusyRef = useRef(false);
-  const [messages, setMessages] = useState<ConversationMessage[]>([
-    { id: "welcome", role: "tutor", text: `Namaste! I’m ${tutor.display_name}. Tell me about your day.` },
-  ]);
+  const openingSpeechRequested = useRef("");
+  const startBusyRef = useRef(false);
+  const conversationRequest = useRef<{
+    key: string;
+    promise: ReturnType<typeof api.conversation>;
+  } | null>(null);
+  const latencyBySpeechTurn = useRef(new Map<string, ConversationLatencyTrace>());
+  const activeSpeechTurn = useRef("");
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [feedback, setFeedback] = useState({ grammar: "", incorrect: "", corrected: "", words: [] as string[], telugu: "" });
-  const [presentation, dispatch] = useReducer(reduceTutorPresentation, initialTutorPresentation);
   const [consent, setConsent] = useState(false);
   const reduced = usePrefersReducedMotion();
+  const {
+    presentation,
+    playbackSignal,
+    dispatch,
+    dispatchAudioLifecycle,
+    attachAudioTransport,
+    playAudio,
+    replayAudio,
+    pauseAudio,
+    stopAudio,
+    setAudioMuted,
+  } = useSpeakMateMultimediaRuntime(reduced);
+  const handleAudioPlayerRef = useCallback((player: TutorAudioPlayerHandle | null) => {
+    attachAudioTransport(player);
+  }, [attachAudioTransport]);
+  const conversationSessionKey = `${account.learner_id}:${tutor.tutor_id}`;
 
   useEffect(() => {
-    api.conversation(account.learner_id)
-      .then((result) => setId(result.id))
-      .catch(() => dispatch({ type: "FAIL", errorCode: "conversation_start_failed" }));
-  }, [account.learner_id]);
+    const requestKey = conversationSessionKey;
+    const request = conversationRequest.current?.key === requestKey
+      ? conversationRequest.current.promise
+      : api.conversation(account.learner_id);
+    conversationRequest.current = { key: requestKey, promise: request };
+    let active = true;
+    request
+      .then((result) => {
+        if (!active) return;
+        const prompt = result.opening_prompt?.trim()
+          || `Namaste! I’m ${tutor.display_name}. Tell me about your day.`;
+        const openingId = result.opening_turn_id?.trim() || "";
+        setId(result.id);
+        setOpeningPrompt(prompt);
+        setOpeningTurnId(openingId);
+        setMessages([{ id: `opening-${openingId || result.id}`, role: "tutor", text: prompt }]);
+        if (!openingId) setConversationStarted(true);
+      })
+      .catch(() => {
+        if (active) dispatch({ type: "FAIL", errorCode: "conversation_start_failed" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [account.learner_id, conversationSessionKey, dispatch, tutor.display_name, tutor.tutor_id]);
 
   useEffect(() => {
-    console.info("speakmate_avatar_event", {
+    engineeringDiagnosticInfo("speakmate_avatar_event", {
       state: presentation.state,
       expression: presentation.expression,
       mouth: presentation.mouth,
@@ -193,46 +252,66 @@ export function ConversationScreen({
   }, [presentation.errorCode, presentation.state]);
 
   const handleAudioLifecycle = useCallback((event: AudioLifecycleEvent) => {
+    dispatchAudioLifecycle(event);
     switch (event.type) {
       case "SOURCE_READY":
-        dispatch({ type: "AUDIO_SOURCE_READY", playbackId: event.playbackId });
         break;
       case "PLAYBACK_STARTED":
-        dispatch({ type: "AUDIO_PLAYBACK_STARTED", playbackId: event.playbackId });
+        {
+          const trace = latencyBySpeechTurn.current.get(event.playbackId);
+          if (trace) {
+            markConversationLatency(trace, "t8");
+            emitConversationLatency(trace);
+            latencyBySpeechTurn.current.delete(event.playbackId);
+          }
+        }
         break;
-      case "PLAYBACK_FRAME":
-        dispatch({ type: "AUDIO_PLAYBACK_FRAME", playbackId: event.playbackId, currentTimeMs: event.currentTimeMs, durationMs: event.durationMs });
+      case "PLAYBACK_FRAME": {
         break;
+      }
       case "PLAYBACK_PAUSED":
-        dispatch({ type: "AUDIO_PLAYBACK_PAUSED", playbackId: event.playbackId });
         break;
       case "PLAYBACK_STOPPED":
-        dispatch({ type: "AUDIO_PLAYBACK_STOPPED", playbackId: event.playbackId });
         break;
       case "PLAYBACK_ENDED":
-        dispatch({ type: "AUDIO_PLAYBACK_ENDED", playbackId: event.playbackId });
+        if (event.playbackId === openingSpeechRequested.current) setGreetingCompleted(true);
         break;
       case "PLAYBACK_ERROR":
-        dispatch({ type: "AUDIO_PLAYBACK_ERROR", playbackId: event.playbackId, errorCode: event.errorCode });
         break;
     }
-  }, []);
+  }, [dispatchAudioLifecycle]);
 
-  const loadSpeech = useCallback(async (turnId: string, expressionHint = lastExpression) => {
+  const loadSpeech = useCallback(async (
+    turnId: string,
+    expressionHint = lastExpression,
+    latencyTrace?: ConversationLatencyTrace,
+  ) => {
     if (!id || !turnId) {
       setAudioError("Tutor voice is not ready yet. Please retry the tutor response.");
-      console.warn("speakmate_tts_event", { event: "request_not_made", reason: "missing_identity" });
+      engineeringDiagnosticWarning("speakmate_tts_event", { event: "request_not_made", reason: "missing_identity" });
       return;
     }
     const expression = normalizeExpression(expressionHint);
+    const activeLatencyTrace = latencyTrace ?? latencyBySpeechTurn.current.get(turnId);
+    activeSpeechTurn.current = turnId;
     dispatch({ type: "TUTOR_RESPONSE_READY", expression });
     setAudioBusy(true);
     setAudioError("");
-    console.info("speakmate_tts_event", { event: "request_started", playback_id: turnId });
+    engineeringDiagnosticInfo("speakmate_tts_event", { event: "request_started", playback_id: turnId });
+    if (activeLatencyTrace) {
+      latencyBySpeechTurn.current.set(turnId, activeLatencyTrace);
+      markConversationLatency(activeLatencyTrace, "t6");
+    }
     try {
       const nextSpeech = await api.speech(id, turnId);
+      if (activeSpeechTurn.current !== turnId) {
+        latencyBySpeechTurn.current.delete(turnId);
+        engineeringDiagnosticInfo("speakmate_tts_event", { event: "stale_audio_ignored", playback_id: turnId });
+        return;
+      }
+      if (activeLatencyTrace) markConversationLatency(activeLatencyTrace, "t7");
       setSpeech(nextSpeech);
-      console.info("speakmate_tts_event", {
+      engineeringDiagnosticInfo("speakmate_tts_event", {
         event: "audio_fetch_succeeded",
         playback_id: turnId,
         provider: nextSpeech.provider,
@@ -242,28 +321,68 @@ export function ConversationScreen({
         size_bytes: nextSpeech.blob.size,
       });
     } catch (error) {
+      if (activeSpeechTurn.current !== turnId) return;
       const backendFailure = error instanceof ApiError;
       setAudioError(error instanceof Error ? error.message : "Tutor voice is temporarily unavailable.");
       dispatch({ type: "FAIL", errorCode: "tts_request_failed" });
-      console.warn("speakmate_tts_event", backendFailure
+      engineeringDiagnosticWarning("speakmate_tts_event", backendFailure
         ? { event: "backend_tts_failed", status: error.status, code: error.code, retryable: error.retryable, playback_id: turnId }
         : { event: "audio_fetch_failed", reason: "network_or_browser", playback_id: turnId });
     } finally {
-      setAudioBusy(false);
+      if (activeSpeechTurn.current === turnId) setAudioBusy(false);
     }
-  }, [id, lastExpression]);
+  }, [dispatch, id, lastExpression]);
+
+  useEffect(() => {
+    if (!id || !openingTurnId || !openingPrompt || openingSpeechRequested.current === openingTurnId) return;
+    openingSpeechRequested.current = openingTurnId;
+    setLastSpeechTurn(openingTurnId);
+    setSpokenText(openingPrompt);
+    void loadSpeech(openingTurnId, "NEUTRAL");
+  }, [id, loadSpeech, openingPrompt, openingTurnId]);
+
+  const startConversation = async () => {
+    if (conversationStarted || startBusyRef.current) return;
+    if (!openingTurnId) {
+      setConversationStarted(true);
+      return;
+    }
+    startBusyRef.current = true;
+    setStartBusy(true);
+    try {
+      const started = await playAudio();
+      if (started) {
+        setAudioError("");
+        setConversationStarted(true);
+      } else {
+        setAudioError("Your tutor voice is ready. Select Start conversation to try again.");
+      }
+    } finally {
+      startBusyRef.current = false;
+      setStartBusy(false);
+    }
+  };
+
+  const continueWithoutOpeningAudio = () => {
+    setConversationStarted(true);
+    dispatch({ type: "RESET" });
+  };
 
   const submit = useCallback(async (
     text: string,
     retryKey?: string,
     voice?: { detectedLanguage: string; confidence?: number | null },
+    latencyTrace?: ConversationLatencyTrace,
   ) => {
     const learnerText = text.trim();
     if (!learnerText || !id || turnBusyRef.current) return;
     const key = retryKey ?? turnIdentity();
+    const trace = latencyTrace ?? createConversationLatencyTrace(voice ? "VOICE" : "TEXT");
     turnBusyRef.current = true;
     setTurnError("");
     setAudioError("");
+    activeSpeechTurn.current = "";
+    setAudioBusy(false);
     setSpeech(null);
     setInterruptSequence((value) => value + 1);
     setTurnBusy(true);
@@ -272,8 +391,13 @@ export function ConversationScreen({
     }
     setInput("");
     dispatch({ type: "TUTOR_PROCESSING_STARTED" });
+    markConversationLatency(trace, "uiFeedbackAt");
     try {
+      markConversationLatency(trace, "t3");
       const result = await api.turn(id, learnerText, selectedLanguageMode, key, voice);
+      const tutorOutputReady = performance.now();
+      markConversationLatency(trace, "t4", tutorOutputReady);
+      markConversationLatency(trace, "t5", tutorOutputReady);
       const spoken = result.spoken_text || `${result.tutor_message} ${result.next_question}`.trim();
       const expression = normalizeExpression(result.expression_hint);
       setMessages((items) => [...items, { id: `tutor-${result.turn_id || key}`, role: "tutor", text: spoken }]);
@@ -291,10 +415,10 @@ export function ConversationScreen({
       if (!result.turn_id) {
         setAudioError("Tutor voice is not ready for this response. You can continue reading or retry your response.");
         dispatch({ type: "FAIL", errorCode: "missing_turn_id" });
-        console.warn("speakmate_tts_event", { event: "request_not_made", reason: "missing_turn_id" });
+        engineeringDiagnosticWarning("speakmate_tts_event", { event: "request_not_made", reason: "missing_turn_id" });
       } else {
         setLastSpeechTurn(result.turn_id);
-        await loadSpeech(result.turn_id, expression);
+        void loadSpeech(result.turn_id, expression, trace);
       }
     } catch (error) {
       dispatch({ type: "FAIL", errorCode: "tutor_turn_failed" });
@@ -306,18 +430,22 @@ export function ConversationScreen({
       turnBusyRef.current = false;
       setTurnBusy(false);
     }
-  }, [id, loadSpeech, selectedLanguageMode]);
+  }, [dispatch, id, loadSpeech, selectedLanguageMode]);
 
   const transcribeCapture = useCallback(async (capture: CapturedAudio, key: string) => {
     if (!id) throw new Error("The conversation is still loading. Please try again.");
     if (transcriptionBusyRef.current) return;
     transcriptionBusyRef.current = true;
+    const trace = createConversationLatencyTrace("VOICE", capture.finishedAtMonotonicMs ?? performance.now());
     dispatch({ type: "TUTOR_PROCESSING_STARTED" });
+    markConversationLatency(trace, "uiFeedbackAt");
     setTranscriptionBusy(true);
     setTranscriptionError("");
     let result: VoiceTranscription;
     try {
+      markConversationLatency(trace, "t1");
       result = await api.transcribe(id, { blob: capture.blob, durationMs: capture.durationMs }, key);
+      markConversationLatency(trace, "t2");
     } catch (error) {
       setPendingTranscription(canRetryTranscription(error) ? { capture, key } : null);
       setTranscriptionError(error instanceof Error ? error.message : "Speech recognition failed.");
@@ -330,8 +458,13 @@ export function ConversationScreen({
     setPendingTranscription(null);
     setLastTranscript(result.transcript);
     setInput(result.transcript);
-    await submit(result.transcript, undefined, { detectedLanguage: result.detected_language, confidence: result.confidence });
-  }, [id, submit]);
+    await submit(
+      result.transcript,
+      undefined,
+      { detectedLanguage: result.detected_language, confidence: result.confidence },
+      trace,
+    );
+  }, [dispatch, id, submit]);
 
   const handleCapture = useCallback(
     (capture: CapturedAudio) => transcribeCapture(capture, turnIdentity()),
@@ -351,7 +484,7 @@ export function ConversationScreen({
     if (["denied", "no_speech", "too_large", "error"].includes(mic.state)) {
       dispatch({ type: "FAIL", errorCode: `microphone_${mic.state}` });
     }
-  }, [mic.state]);
+  }, [dispatch, mic.state]);
 
   const startMicrophone = async () => {
     setPendingTranscription(null);
@@ -409,16 +542,27 @@ export function ConversationScreen({
   const startMicrophoneLabel = mic.state === "denied" ? "Retry microphone" : "Start microphone";
 
   return (
-    <section className={`conversation-experience mode-${practiceMode.toLowerCase()}${showVoiceCoaching ? " has-coaching" : ""}`} data-practice-mode={practiceMode}>
+    <section
+      className={`conversation-experience mode-${practiceMode.toLowerCase()}${showVoiceCoaching ? " has-coaching" : ""}`}
+      data-practice-mode={practiceMode}
+      data-greeting-completed={greetingCompleted}
+    >
       <div className="practice-mode-switch" role="group" aria-label="Practice mode">
-        <button type="button" disabled={mic.state === "recording" || transcriptionBusy} aria-pressed={practiceMode === "VOICE"} onClick={() => setPracticeMode("VOICE")}>Voice mode</button>
-        <button type="button" disabled={mic.state === "recording" || transcriptionBusy} aria-pressed={practiceMode === "TEXT"} onClick={() => setPracticeMode("TEXT")}>Text mode</button>
+        <button type="button" disabled={!conversationStarted || mic.state === "recording" || transcriptionBusy} aria-pressed={practiceMode === "VOICE"} onClick={() => setPracticeMode("VOICE")}>Voice mode</button>
+        <button type="button" disabled={!conversationStarted || mic.state === "recording" || transcriptionBusy} aria-pressed={practiceMode === "TEXT"} onClick={() => setPracticeMode("TEXT")}>Text mode</button>
       </div>
 
       <div className="conversation-layout">
         <section className="studio voice-classroom" aria-label={`${tutor.display_name} live lesson`}>
           {lessonTitle && <p className="lesson-context"><span>Current lesson</span><strong>{lessonTitle}</strong></p>}
-          <Avatar tutor={tutor} presentation={presentation} reducedMotion={reduced} />
+          <Avatar
+            key={conversationSessionKey}
+            tutor={tutor}
+            presentation={presentation}
+            reducedMotion={reduced}
+            playbackSignal={playbackSignal}
+            onReady={() => setAvatarReady(true)}
+          />
 
           <section className="current-exchange" aria-label="Current conversation" aria-live="polite" hidden={practiceMode !== "VOICE"}>
             {practiceMode === "VOICE" && <>
@@ -449,7 +593,7 @@ export function ConversationScreen({
             <label htmlFor="message">Your message</label>
             <div className="composer">
               <input id="message" value={input} disabled={turnBusy} onChange={(event) => setInput(event.target.value)} />
-              <button disabled={turnBusy} onClick={() => void submit(input, pendingTurn?.retryable && pendingTurn.text === input.trim() ? pendingTurn.key : undefined)}>
+              <button disabled={!conversationStarted || turnBusy} onClick={() => void submit(input, pendingTurn?.retryable && pendingTurn.text === input.trim() ? pendingTurn.key : undefined)}>
                 {turnBusy ? "Waiting for tutor…" : "Send"}
               </button>
             </div>
@@ -457,8 +601,15 @@ export function ConversationScreen({
 
           {turnError && <div className="learner-error"><p role="alert">{turnError}</p>{pendingTurn?.retryable && <button disabled={turnBusy} onClick={() => void submit(pendingTurn.text, pendingTurn.key)}>Retry tutor response</button>}</div>}
 
-          <div className="voice-control-dock">
-            <fieldset className="microphone-controls">
+          <div className={`voice-control-dock${conversationStarted ? "" : " prestart"}`}>
+            {!conversationStarted ? <section className="start-conversation-gate" aria-label="Start live lesson">
+              <strong>{speech ? `${tutor.display_name} is ready.` : `Preparing ${tutor.display_name}…`}</strong>
+              <p>Start once to hear the welcome and begin your live lesson.</p>
+              <button type="button" disabled={!id || !speech || !avatarReady || audioBusy || startBusy} onClick={() => void startConversation()}>
+                {startBusy ? "Starting…" : "Start conversation"}
+              </button>
+              {audioError && !speech && <button type="button" className="secondary" onClick={continueWithoutOpeningAudio}>Continue without audio</button>}
+            </section> : <fieldset className="microphone-controls">
               <legend>Speak to {tutor.display_name}</legend>
               <label className="voice-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /> I consent to voice processing for this turn</label>
               <p className={practiceMode === "VOICE" ? "sr-only" : "microphone-state"} aria-live="polite">{microphoneStatus}</p>
@@ -469,14 +620,26 @@ export function ConversationScreen({
               </div>
               {microphoneError && <p role="alert">{microphoneError} {mic.state === "denied" && "Enable microphone access in your browser settings, then retry."}</p>}
               {pendingTranscription && <div className="voice-recovery"><button disabled={transcriptionBusy || turnBusy} onClick={() => void retryTranscription()}>Retry transcription</button><button disabled={transcriptionBusy} onClick={discardTranscription}>Discard recording</button></div>}
-            </fieldset>
+            </fieldset>}
 
             <TutorAudioPlayer
+              ref={handleAudioPlayerRef}
               speech={speech}
               spokenText={spokenText}
               playbackId={lastSpeechTurn}
               interruptSequence={interruptSequence}
               compact={practiceMode === "VOICE"}
+              autoPlay={Boolean(lastSpeechTurn) && lastSpeechTurn !== openingTurnId}
+              trackAmplitude={!reduced}
+              controlsVisible={conversationStarted}
+              commandPort={{
+                play: playAudio,
+                replay: replayAudio,
+                pause: pauseAudio,
+                stop: stopAudio,
+                setMuted: setAudioMuted,
+              }}
+              onAutoplayBlocked={() => setAudioError("Tutor voice is ready. Select Play tutor voice to continue.")}
               onLifecycle={handleAudioLifecycle}
             />
           </div>

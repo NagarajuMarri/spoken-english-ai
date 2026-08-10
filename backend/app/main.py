@@ -29,8 +29,12 @@ from backend.app.intelligent_learning import IntelligentLearningEngine
 from backend.app.commercial.models import CommercialConfig
 from backend.app.commercial.payments import RazorpayBoundary
 from backend.app.commercial.service import CommercialService
+from backend.app.jobs import RedisJobQueue
 from backend.app.providers.llm import build_llm_provider
-from backend.app.providers.password_reset import build_password_reset_delivery
+from backend.app.providers.password_reset import (
+    build_password_reset_delivery,
+    build_password_reset_dispatch,
+)
 from backend.app.providers.stt import build_speech_to_text_provider
 from backend.app.providers.tts import build_text_to_speech_provider
 from backend.app.language_review import build_language_review_provider
@@ -67,6 +71,16 @@ def create_app(settings=None) -> FastAPI:
     application.state.session_factory = build_session_factory(engine)
     application.state.learning_engine = IntelligentLearningEngine()
     application.state.password_reset_delivery = build_password_reset_delivery(settings)
+    application.state.password_reset_job_queue = (
+        RedisJobQueue(application.state.redis)
+        if settings.environment == "production" and application.state.redis is not None
+        else None
+    )
+    application.state.password_reset_dispatch = build_password_reset_dispatch(
+        settings,
+        application.state.password_reset_delivery,
+        application.state.password_reset_job_queue,
+    )
     application.state.llm_provider = build_llm_provider(settings)
     application.state.speech_to_text_provider = build_speech_to_text_provider(settings)
     application.state.text_to_speech_provider = build_text_to_speech_provider(settings)
@@ -132,7 +146,7 @@ def create_app(settings=None) -> FastAPI:
         expose_headers=[
             "X-TTS-Attempt-ID", "X-TTS-Provider", "X-TTS-Model", "X-TTS-Voice",
             "X-TTS-Cache", "X-TTS-Input-Characters", "X-TTS-Provider-Requests",
-            "X-TTS-Usage-Classification",
+            "X-TTS-Usage-Classification", "Server-Timing", "Timing-Allow-Origin",
         ],
     )
     if settings.force_https:
@@ -153,6 +167,7 @@ def create_app(settings=None) -> FastAPI:
     if frontend.is_dir():
         application.mount("/assets", StaticFiles(directory=frontend / "assets"), name="assets")
         application.mount("/tutors", StaticFiles(directory=frontend / "tutors"), name="tutors")
+        application.mount("/models", StaticFiles(directory=frontend / "models"), name="models")
 
         @application.get("/", include_in_schema=False)
         def learner_experience():

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approximateLipSync, mouthShapeAtPlaybackTime, mouthShapeFromContract } from "../avatar/lip-sync";
+import { approximateLipSync, mouthShapeAtPlaybackTime, mouthShapeFromAmplitude, mouthShapeFromContract } from "../avatar/lip-sync";
 
 describe("lip sync boundary", () => {
   it("creates bounded deterministic provider-neutral visemes", () => {
@@ -13,11 +13,19 @@ describe("lip sync boundary", () => {
     expect(approximateLipSync("audio", 200).status).toBe("APPROXIMATE");
   });
 
-  it("derives mouth shapes from real playback position without timers", () => {
+  it("retains the legacy timed approximation only as a provider-neutral contract", () => {
     expect(mouthShapeAtPlaybackTime(0, 1000)).toBe("SMALL");
     expect(mouthShapeAtPlaybackTime(120, 1000)).toBe("MEDIUM");
     expect(mouthShapeAtPlaybackTime(240, 1000)).toBe("WIDE");
     expect(mouthShapeAtPlaybackTime(1000, 1000)).toBe("REST");
+  });
+
+  it("derives the runtime fallback mouth shape from measured audio amplitude and keeps silence still", () => {
+    expect(mouthShapeFromAmplitude(0)).toBe("REST");
+    expect(mouthShapeFromAmplitude(0.04)).toBe("SMALL");
+    expect(mouthShapeFromAmplitude(0.1)).toBe("MEDIUM");
+    expect(mouthShapeFromAmplitude(0.24)).toBe("WIDE");
+    expect(mouthShapeFromAmplitude(Number.NaN)).toBe("REST");
   });
 
   it("can consume provider visemes later without changing the renderer", () => {

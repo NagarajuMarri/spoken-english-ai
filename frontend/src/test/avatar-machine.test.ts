@@ -24,25 +24,24 @@ describe("renderer-neutral tutor presentation controller", () => {
     );
     expect(ready).toMatchObject({ state: "THINKING", expression: "CORRECTIVE", mouth: "REST" });
     const speaking = reduceTutorPresentation(ready, { type: "AUDIO_PLAYBACK_STARTED", playbackId: "turn-1" });
-    expect(speaking).toMatchObject({ state: "SPEAKING", expression: "CORRECTIVE", mouth: "SMALL" });
+    expect(speaking).toMatchObject({ state: "SPEAKING", expression: "CORRECTIVE", mouth: "REST" });
   });
 
-  it("moves the mouth from actual playback position and resets on end", () => {
+  it("moves the mouth from actual audio amplitude and settles into success on end", () => {
     let presentation = run(
       { type: "TUTOR_RESPONSE_READY", expression: "POSITIVE" },
       { type: "AUDIO_SOURCE_READY", playbackId: "turn-1" },
       { type: "AUDIO_PLAYBACK_STARTED", playbackId: "turn-1" },
     );
-    presentation = reduceTutorPresentation(presentation, { type: "AUDIO_PLAYBACK_FRAME", playbackId: "turn-1", currentTimeMs: 240, durationMs: 1000 });
+    presentation = reduceTutorPresentation(presentation, { type: "AUDIO_PLAYBACK_FRAME", playbackId: "turn-1", currentTimeMs: 240, durationMs: 1000, amplitude: 0.24 });
     expect(presentation.mouth).toBe("WIDE");
     presentation = reduceTutorPresentation(presentation, { type: "AUDIO_PLAYBACK_ENDED", playbackId: "turn-1" });
-    expect(presentation).toMatchObject({ state: "IDLE", expression: "NEUTRAL", mouth: "REST", activePlaybackId: "turn-1", lastCompletedPlaybackId: "turn-1" });
+    expect(presentation).toMatchObject({ state: "SUCCESS", expression: "POSITIVE", mouth: "REST", activePlaybackId: "turn-1", lastCompletedPlaybackId: "turn-1" });
   });
 
   it.each([
     { type: "AUDIO_PLAYBACK_PAUSED" as const, label: "pause" },
     { type: "AUDIO_PLAYBACK_STOPPED" as const, label: "stop" },
-    { type: "AUDIO_PLAYBACK_ENDED" as const, label: "end" },
   ])("keeps source ownership after $label so replay can synchronize", (resetEvent) => {
     const reset = run(
       { type: "AUDIO_SOURCE_READY", playbackId: "turn-1" },
@@ -51,7 +50,23 @@ describe("renderer-neutral tutor presentation controller", () => {
     );
     expect(reset).toMatchObject({ state: "IDLE", mouth: "REST", activePlaybackId: "turn-1" });
     expect(reduceTutorPresentation(reset, { type: "AUDIO_PLAYBACK_STARTED", playbackId: "turn-1" }))
-      .toMatchObject({ state: "SPEAKING", mouth: "SMALL", activePlaybackId: "turn-1" });
+      .toMatchObject({ state: "SPEAKING", mouth: "REST", activePlaybackId: "turn-1" });
+  });
+
+  it("settles a neutral greeting into listening and a correction into retry", () => {
+    const neutral = run(
+      { type: "AUDIO_SOURCE_READY", playbackId: "opening" },
+      { type: "AUDIO_PLAYBACK_STARTED", playbackId: "opening" },
+      { type: "AUDIO_PLAYBACK_ENDED", playbackId: "opening" },
+    );
+    expect(neutral).toMatchObject({ state: "LISTENING", activePlaybackId: "opening" });
+    const corrective = run(
+      { type: "TUTOR_RESPONSE_READY", expression: "CORRECTIVE" },
+      { type: "AUDIO_SOURCE_READY", playbackId: "correction" },
+      { type: "AUDIO_PLAYBACK_STARTED", playbackId: "correction" },
+      { type: "AUDIO_PLAYBACK_ENDED", playbackId: "correction" },
+    );
+    expect(corrective).toMatchObject({ state: "RETRY", expression: "CORRECTIVE" });
   });
 
   it("requires a fresh source before recovering from a browser audio error", () => {
@@ -65,7 +80,7 @@ describe("renderer-neutral tutor presentation controller", () => {
       .toBe(failed);
     const reloaded = reduceTutorPresentation(failed, { type: "AUDIO_SOURCE_READY", playbackId: "turn-1" });
     expect(reduceTutorPresentation(reloaded, { type: "AUDIO_PLAYBACK_STARTED", playbackId: "turn-1" }))
-      .toMatchObject({ state: "SPEAKING", mouth: "SMALL", activePlaybackId: "turn-1" });
+      .toMatchObject({ state: "SPEAKING", mouth: "REST", activePlaybackId: "turn-1" });
   });
 
   it("ignores stale events when a second tutor response owns playback", () => {

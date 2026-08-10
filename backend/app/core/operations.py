@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
+import math
 import re
 import time
 from typing import Protocol
@@ -25,6 +26,8 @@ class Metrics(Protocol):
 
 
 class InMemoryMetrics:
+    _maximum_observations_per_metric = 1_024
+
     def __init__(self) -> None:
         self.counters: dict[str, int] = {}
         self.observations: dict[str, list[float]] = {}
@@ -34,13 +37,32 @@ class InMemoryMetrics:
         self.counters[name] = self.counters.get(name, 0) + value
 
     def observe(self, name: str, value: float) -> None:
-        self.observations.setdefault(name, []).append(value)
+        observations = self.observations.setdefault(name, [])
+        observations.append(value)
+        overflow = len(observations) - self._maximum_observations_per_metric
+        if overflow > 0:
+            del observations[:overflow]
 
     def gauge(self, name: str, value: float) -> None:
         self.gauges[name] = value
 
     def snapshot(self) -> dict:
         return {"counters": self.counters, "observations": self.observations, "gauges": self.gauges}
+
+
+_SERVER_TIMING_STAGES = {"stt", "llm", "review", "tts"}
+
+
+def record_stage_timing(request: Request, stage: str, duration_ms: float) -> None:
+    """Record a bounded, privacy-safe stage without high-cardinality labels."""
+
+    if stage not in _SERVER_TIMING_STAGES or not math.isfinite(duration_ms):
+        return
+    bounded = min(300_000.0, max(0.0, float(duration_ms)))
+    timings = list(getattr(request.state, "server_timings", ()))
+    timings.append((stage, bounded))
+    request.state.server_timings = timings
+    request.app.state.metrics.observe(f"{stage}_stage_duration_ms", bounded)
 
 
 @dataclass(frozen=True)
@@ -109,6 +131,7 @@ RATE_POLICIES = {
     "password_reset_email": RateLimitPolicy("password_reset_email", 3, 900),
     "password_reset_network": RateLimitPolicy("password_reset_network", 10, 900),
     "password_reset_attempt": RateLimitPolicy("password_reset_attempt", 10, 900),
+    "password_reset_attempt_network": RateLimitPolicy("password_reset_attempt_network", 20, 900),
     "refresh": RateLimitPolicy("refresh", 30, 60),
     "voice_turn": RateLimitPolicy("voice_turn", 30, 60),
     "authenticated_burst": RateLimitPolicy("authenticated_burst", 120, 60),
@@ -174,6 +197,20 @@ async def request_context_middleware(request: Request, call_next):
         )
     response = await call_next(request)
     duration_ms = round((time.perf_counter() - started) * 1000, 3)
+    server_timings = getattr(request.state, "server_timings", ())
+    if server_timings:
+        response.headers["Server-Timing"] = ", ".join(
+            f"{stage};dur={stage_duration:.3f}"
+            for stage, stage_duration in server_timings
+        )
+        origin = request.headers.get("origin")
+        allowed_origins = {
+            item.strip()
+            for item in settings.cors_origins.split(",")
+            if item.strip()
+        }
+        if origin in allowed_origins:
+            response.headers["Timing-Allow-Origin"] = origin
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Correlation-ID"] = correlation_id
     request.app.state.metrics.increment("http_requests")
@@ -199,7 +236,7 @@ async def request_context_middleware(request: Request, call_next):
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "no-referrer",
         "Permissions-Policy": "microphone=(self), camera=(), geolocation=()",
-        "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+        "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; script-src 'self' 'wasm-unsafe-eval'",
         "Cache-Control": "no-store" if request.url.path.startswith("/api") else response.headers.get("Cache-Control", "no-cache"),
     })
     return response

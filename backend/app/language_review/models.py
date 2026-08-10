@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.app.ai.models import UsageInfo
 from backend.app.domain.enums import LanguageMode
+from backend.app.unicode_safety import normalize_output_text
 
 
 class ReviewReasonCode(StrEnum):
@@ -76,11 +77,21 @@ class LanguageReviewResult(BaseModel):
     def reject_unsafe_text(cls, value):
         if value is None:
             return value
+        if not isinstance(value, str):
+            return value
         lowered = value.lower()
         if any(marker in lowered for marker in (
             "<script", "javascript:", "system prompt", "api_key", "authorization: bearer",
         )):
             raise ValueError("Unsafe reviewer output.")
-        if any(ord(char) < 32 and char not in "\n\t" for char in value):
-            raise ValueError("Invalid control character.")
-        return value.strip()
+        return normalize_output_text(value)
+
+    @field_validator("preserved_learning_terms", mode="before")
+    @classmethod
+    def normalize_preserved_terms(cls, value):
+        if not isinstance(value, list):
+            return value
+        return [
+            normalize_output_text(item) if isinstance(item, str) else item
+            for item in value
+        ]

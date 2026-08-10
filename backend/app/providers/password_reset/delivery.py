@@ -1,8 +1,28 @@
 import json
+import logging
 import os
+import ssl
 import smtplib
+import time
 from email.message import EmailMessage
 from pathlib import Path
+
+
+logger = logging.getLogger("spoken_english.password_reset_delivery")
+
+
+def _record_smtp_delivery(started_at: float, outcome: str, error_type: str | None = None) -> None:
+    """Emit operational evidence without recipient, reset URL, token, or message content."""
+    record = {
+        "event_name": "password_reset_delivery_completed",
+        "provider": "smtp",
+        "outcome": outcome,
+        "duration_ms": round((time.perf_counter() - started_at) * 1_000, 3),
+    }
+    if error_type:
+        record["error_type"] = error_type
+    log = logger.info if outcome == "SUCCEEDED" else logger.warning
+    log(json.dumps(record, separators=(",", ":")))
 
 
 class DisabledPasswordResetDelivery:
@@ -39,19 +59,31 @@ class SmtpPasswordResetDelivery:
         self.settings = settings
 
     def deliver(self, recipient: str, reset_url: str) -> None:
-        message = EmailMessage()
-        message["Subject"] = "Reset your SpeakMate password"
-        message["From"] = self.settings.password_reset_email_from
-        message["To"] = recipient
-        message.set_content(
-            "Use this single-use link to choose a new password. "
-            f"It expires soon:\n\n{reset_url}\n\nIf you did not request this, ignore this email."
-        )
-        with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=10) as client:
-            client.starttls()
-            if self.settings.smtp_username:
+        started_at = time.perf_counter()
+        try:
+            message = EmailMessage()
+            message["Subject"] = "Reset your SpeakMate password"
+            message["From"] = self.settings.password_reset_email_from
+            message["To"] = recipient
+            message.set_content(
+                "Use this single-use link to choose a new password. "
+                f"It expires soon:\n\n{reset_url}\n\nIf you did not request this, ignore this email."
+            )
+            tls_context = ssl.create_default_context()
+            with smtplib.SMTP(
+                self.settings.smtp_host,
+                self.settings.smtp_port,
+                timeout=self.settings.smtp_timeout_seconds,
+            ) as client:
+                client.ehlo()
+                client.starttls(context=tls_context)
+                client.ehlo()
                 client.login(self.settings.smtp_username, self.settings.smtp_password)
-            client.send_message(message)
+                client.send_message(message)
+        except Exception as error:
+            _record_smtp_delivery(started_at, "FAILED", type(error).__name__)
+            raise
+        _record_smtp_delivery(started_at, "SUCCEEDED")
 
 
 def build_password_reset_delivery(settings):

@@ -53,7 +53,9 @@ def test_unusable_voice_ai_turn_creates_no_attempt_or_message(client, conversati
     )
     assert response.status_code == 422
     with client.app.state.session_factory() as db:
-        assert db.scalar(select(func.count()).select_from(AITurnAttempt)) == 0
+        assert db.scalar(select(func.count()).select_from(AITurnAttempt).where(
+            AITurnAttempt.turn_kind == "LEARNER"
+        )) == 0
         assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 0
         assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 0
 

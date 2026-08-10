@@ -17,7 +17,7 @@ transcript, audio, credential, or response body.
 
 Current official-documentation evidence is tracked in `PROVIDER_SANDBOX_EVIDENCE.json`. It is a
 shortlist, not a benchmark. The human-approved launch policy uses OpenAI for LLM, STT, and TTS,
-with the existing animated 2D tutor and approximate or provider-timed lip sync. Groq, Deepgram,
+with the current web-native 3D Ananya boundary and actual-playback/analyser-amplitude synchronization. Groq, Deepgram,
 Azure, and Google remain disabled `FUTURE_OPTIONAL_COMPARATOR` evidence only; no subscription is
 required. This policy is configuration, not hard-coded domain routing, and live invocation remains
 disabled.

@@ -113,8 +113,12 @@ def test_production_requires_openai_tts_and_factory_wires_the_locked_provider():
         environment="production", database_url="postgresql://db/app", auto_create_tables=False,
         jwt_secret="x" * 48, force_https=True, secure_cookies=True,
         cors_origins="https://app.example.com", trusted_hosts="app.example.com",
+        public_frontend_url="https://app.example.com",
         object_storage_backend="s3", object_storage_bucket="private",
-        password_reset_delivery_provider="smtp", smtp_host="smtp.example.com",
+        redis_required=True, redis_url="rediss://redis:6379/0", worker_enabled=True,
+        password_reset_delivery_provider="smtp", smtp_host="smtp.test.speakmate.in",
+        password_reset_email_from="no-reply@test.speakmate.in",
+        smtp_username="smtp-user", smtp_password="smtp-password-for-config-test",
         llm_provider="openai", language_review_provider="openai",
         speech_to_text_provider="openai", openai_api_key="test-key", _env_file=None,
     )

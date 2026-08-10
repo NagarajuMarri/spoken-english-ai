@@ -1,104 +1,50 @@
-# Feature 7 — Avatar expressions and audio synchronization
+# Feature 7 — Real 3D tutor and audio synchronization
 
-Status: **ENGINEERING_ACCEPTED_WITH_DEFERRED_DEVICE_GATE**
+Status: **ENGINEERING_REMEDIATED_WITH_DEFERRED_DEVICE_GATE**
 
-Release status: **RC1 engineering validation in progress; founder release approval not granted**
+Release status: **FOUNDER_FINAL_ACCEPTANCE_REQUIRED; PRODUCTION_NOT_AUTHORIZED**
 
 ## Release boundary
 
-Feature 7 engineering acceptance is isolated on
-`agent/rc1-feature-7-engineering-acceptance`, based directly on the accepted Feature 6
-commit `8d50cea2f08ca52ffca8e0ed8e705d47e903f43a`. The original implementation commit
-`a49f6035abc474909300aa4f15a8ac8b24f6ba16` is already an ancestor of that baseline.
-Nothing in this feature authorizes merge, deployment, public release, production payments,
-or a claim that a founder's physical browser, microphone, speaker, or hearing test passed.
+The RC remediation is developed on `agent/rc1-final-engineering-acceptance`. It does not authorize merge, deployment, public release, production payments, or a claim that a founder's physical browser, microphone, speaker, hearing, or subjective visual-quality review passed.
 
 ## Architecture
 
-The presentation pipeline is renderer-neutral:
+The presentation pipeline remains renderer-neutral:
 
-`MICROPHONE / TUTOR TURN / HTML AUDIO EVENTS → TUTOR PRESENTATION CONTROLLER → RENDERER FRAME → 2D RENDERER`
+`MICROPHONE / TUTOR TURN / HTML AUDIO EVENTS / AUDIO AMPLITUDE → PRESENTATION CONTROLLER → RENDERER FRAME → THREE.JS MODEL`
 
-The controller owns state, expression, mouth shape, playback ownership, interruption and
-recovery. The 2D component owns only visual rendering. A future 3D renderer can consume the
-same `TutorRendererFrame` without importing microphone, API, TTS or conversation code.
+The controller owns learner-visible state, expression, playback ownership, interruption, and recovery. A Three.js adapter renders Ananya's rigged GLB model. Save-data/low-power devices use a lightweight volumetric 3D rig; WebGL or renderer failures fall back to the configured portrait. Microphone, API, TTS, and conversation state do not live in the renderer.
 
 ## Implemented behavior
 
-- `LISTENING` begins when the browser microphone is actually recording.
-- `THINKING` covers STT, tutor generation and TTS preparation.
-- `SPEAKING` begins only from the active HTML audio element's real `play` event.
-- Mouth shapes follow the active audio element's `currentTime` animation frames.
-- Pause, stop, end, source replacement, user interruption and error stop mouth movement.
-- End and stop return the tutor to `IDLE` immediately.
-- Pause, stop and end retain ownership of the currently loaded source so resume or replay can
-  re-enter synchronized speaking.
-- A browser-audio error clears ownership of the failed source, resets the mouth, and exposes a
-  retry that refetches TTS; only the resulting fresh `SOURCE_READY` event can speak again.
-- Source replacement and new tutor processing clear old ownership; stale playback IDs remain
-  unable to control a later response.
-- Natural blink, listening waveform and thinking indicators are visual, not state evidence.
-- The 2D renderer keeps portrait-specific facial anchors for Ananya and Arjun; those coordinates
-  do not leak into the neutral controller contract.
-- `POSITIVE`, `ENCOURAGING` and `CORRECTIVE` metadata are orthogonal to playback state.
-- Error states expose retry paths; successful retry may re-enter thinking and speaking.
-- Reduced-motion mode preserves state/expression information while suppressing blink, mouth,
-  waveform and thinking-dot animation.
-- There is no fixed fake speaking timer and no phoneme-accuracy claim.
+- Ananya supports `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, `SUCCESS`, `RETRY`, and error recovery.
+- The model includes blink, eye/head motion, subtle breathing, listening/thinking posture, encouragement, and clarification behavior.
+- `SPEAKING` begins only when the active HTML audio element emits `playing`.
+- A Web Audio analyser measures real playback amplitude and drives jaw/viseme movement.
+- Pause, stop, end, source replacement, interruption, and error stop speaking motion immediately.
+- Replay restarts motion only when the same source actually resumes playback.
+- The opening server-owned tutor turn is synthesized once and played after the single browser gesture gate where required.
+- A source-generation or playback failure cannot falsely report completion and cannot trap the learner.
+- Reduced-motion mode preserves state information without continuous motion.
+- Initialization telemetry is bounded and contains no learner text, audio, token, or account identifier.
+- There is no fixed fake-speaking timer and no phoneme-accuracy claim.
 
 ## Automated acceptance contract
 
-Tests prove:
+Tests cover real-event playback start, amplitude-driven mouth motion, pause/end/stop/error reset, replay, stale-source isolation, all learner states, reduced motion, model rig and morph control, WebGL/lite/portrait fallback, opening greeting exactly once, autoplay rejection, rapid-start idempotency, StrictMode request idempotency, no duplicate TTS across mode changes, and learner-safe accessibility labels.
 
-1. audio ready alone does not claim speaking;
-2. real playback start produces speaking;
-3. real playback position changes mouth shape;
-4. pause, end, stop and interruption reset the mouth;
-5. pause, stop and end can resume or replay the current source;
-6. two consecutive responses cannot cross-control one another;
-7. all three non-neutral expressions reach the renderer;
-8. microphone recording produces listening;
-9. browser-audio errors require a fresh TTS source and then recover safely;
-10. reduced-motion renders a static mouth;
-11. existing TTS and native Telugu review behavior remains green.
+Responsive browser acceptance covers desktop and mobile containment, essential controls, hidden engineering metadata, stable conversation state, and the bundled WebGL model path. Exact final suite totals belong in the RC acceptance report and release notes after all gates complete.
 
-## Current acceptance evidence
+## Deferred founder device review
 
-- `CODE_EVIDENCE`: complete on top of the accepted Feature 6 baseline.
-- `TARGETED_TEST_EVIDENCE`: 22 Feature 7 state, renderer, audio-lifecycle and accessibility
-  tests pass; the focused backend tutor-experience suite passes 7 tests.
-- `FULL_REGRESSION_EVIDENCE`: 313 backend tests and 72 frontend tests pass.
-- `BROWSER_AUTOMATION_EVIDENCE`: all 9 enabled Playwright Chromium journeys pass, including
-  real WAV playback lifecycle/current-time mouth motion, immediate stop/reset, replay
-  re-synchronization, microphone denial recovery and MediaRecorder byte submission. Four
-  separate live-account tests remain environment-gated and belong to the final RC gate.
-- `RUNTIME_EVIDENCE`: backend and frontend both return HTTP 200. Headless Chromium executes
-  the Feature 7 journey against the running frontend.
-- `DEVICE_EVIDENCE`: not available. The in-app browser could not attach to the founder's
-  physical Chrome session, and automation cannot hear speaker output or judge physical-device
-  quality.
+The founder must still review the final pushed SHA on physical Windows Chrome or Edge:
 
-Feature 7 therefore meets its automatable engineering gate and is
-**ENGINEERING_ACCEPTED_WITH_DEFERRED_DEVICE_GATE**. It must not be described as founder-device
-accepted or acoustically/phoneme synchronized.
+1. Ananya's model, framing, appearance, blink, breathing, and head/eye motion look natural and professionally appropriate.
+2. Listening, thinking, speaking, success, and retry behavior are distinct without exaggeration.
+3. The opening greeting and later replies are audible without repetitive manual play actions.
+4. Mouth movement begins with audible speech, follows it plausibly, and stops immediately on stop/end/error.
+5. Replay, mute, stop, microphone permission recovery, weak-device fallback, and reduced-motion behavior are acceptable.
+6. Live-provider latency and Telugu/English voice quality feel conversational.
 
-## Deferred final RC device review
-
-The founder should review these once, against the final RC in Windows Chrome or Edge:
-
-1. Ananya naturally blinks while idle.
-2. Starting the microphone visibly changes Ananya to listening.
-3. Stopping the microphone and waiting for the tutor visibly shows thinking.
-4. Speaking does not start before tutor audio is audible.
-5. Mouth movement starts with audible tutor audio and continues for the audio duration.
-6. Mouth movement stops when audio ends.
-7. Stop resets the mouth and tutor immediately.
-8. Replay starts synchronized motion again.
-9. A second tutor response synchronizes independently.
-10. Positive, encouraging and corrective responses look visually distinct and appropriate.
-11. An audio failure shows error/recovery and a successful retry synchronizes correctly.
-12. With reduced motion enabled, no blink/mouth/wave/dot animation is required to understand
-    tutor state.
-
-Every item above is currently `DEFERRED_DEVICE_GATE`, not `PASS`. These checks do not block
-engineering progression, but founder release approval still requires their final disposition.
+Every item above is `DEFERRED_DEVICE_GATE`, not founder `PASS`.

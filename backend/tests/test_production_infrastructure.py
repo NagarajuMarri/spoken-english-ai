@@ -20,17 +20,33 @@ from backend.app.storage import S3ObjectStorageBoundary
 
 
 class FakePipeline:
-    def __init__(self, client): self.client = client
+    def __init__(self, client, transaction=True):
+        self.client = client
+        self.operations = []
     def incr(self, key): self.key = key; return self
     def ttl(self, key): return self
+    def lrem(self, key, count, value):
+        self.operations.append(("lrem", key, count, value))
+        return self
+    def lpush(self, key, value):
+        self.operations.append(("lpush", key, value))
+        return self
     def execute(self):
+        if self.operations:
+            results = []
+            for operation in self.operations:
+                if operation[0] == "lrem":
+                    results.append(self.client.lrem(*operation[1:]))
+                else:
+                    results.append(self.client.lpush(*operation[1:]))
+            return results
         self.client.values[self.key] = int(self.client.values.get(self.key, 0)) + 1
         return [self.client.values[self.key], self.client.ttls.get(self.key, -1)]
 
 
 class FakeRedis:
     def __init__(self): self.values = {}; self.ttls = {}; self.lists = {}
-    def pipeline(self): return FakePipeline(self)
+    def pipeline(self, transaction=True): return FakePipeline(self, transaction)
     def expire(self, key, ttl): self.ttls[key] = ttl
     def delete(self, key): self.values.pop(key, None)
     def set(self, key, value, nx=False, ex=None):
@@ -38,9 +54,35 @@ class FakeRedis:
         self.values[key] = value
         if ex: self.ttls[key] = ex
         return True
+    def eval(self, script, key_count, idempotency_key, queue_key, job_id, payload, ttl):
+        _ = script, key_count
+        if idempotency_key in self.values: return 0
+        self.values[idempotency_key] = job_id
+        self.ttls[idempotency_key] = int(ttl)
+        self.lpush(queue_key, payload)
+        return 1
     def lpush(self, key, value): self.lists.setdefault(key, []).insert(0, value)
-    def brpop(self, key, timeout=0):
-        return (key, self.lists[key].pop()) if self.lists.get(key) else None
+    def brpoplpush(self, source, destination, timeout=0):
+        if not self.lists.get(source): return None
+        value = self.lists[source].pop()
+        self.lists.setdefault(destination, []).insert(0, value)
+        return value
+    def rpoplpush(self, source, destination):
+        if not self.lists.get(source): return None
+        value = self.lists[source].pop()
+        self.lists.setdefault(destination, []).insert(0, value)
+        return value
+    def lrem(self, key, count, value):
+        values = self.lists.get(key, [])
+        removed = 0
+        retained = []
+        for item in values:
+            if item == value and (count == 0 or removed < count):
+                removed += 1
+            else:
+                retained.append(item)
+        self.lists[key] = retained
+        return removed
     def ping(self): return True
     def get(self, key): return self.values.get(key)
 
@@ -66,9 +108,10 @@ def test_redis_rate_limiter_and_job_retry_are_deterministic():
     assert not limiter.decide(policy, "network").allowed
     queue = RedisJobQueue(redis)
     job = queue.submit(Job("healthcheck", {}, "one", max_attempts=1))
-    assert queue.take().job_id == job.job_id
-    queue.fail(job)
-    assert job.status == JobStatus.DEAD_LETTER
+    taken = queue.take()
+    assert taken.job_id == job.job_id
+    queue.fail(taken)
+    assert taken.status == JobStatus.DEAD_LETTER
 
 
 def test_s3_boundary_returns_metadata_only_reference():

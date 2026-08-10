@@ -30,12 +30,17 @@ from backend.app.ai.exceptions import (
     ProviderUnavailable,
 )
 from backend.app.ai.models import AIConversationRequest, AIConversationResponse, ConversationHistoryTurn
+from backend.app.ai.output_safety import (
+    enforce_api_result_output_safety,
+    enforce_response_output_safety,
+    normalize_spoken_output,
+)
 from backend.app.ai.service import AIConversationService, AdaptivePolicy
 from backend.app.commercial.runtime import RuntimeEntitlementService
 from backend.app.conversation_memory.models import MemorySignalInput
 from backend.app.conversation_memory.service import ConversationMemoryService
 from backend.app.core.errors import AppError
-from backend.app.core.operations import enforce_rate_limit
+from backend.app.core.operations import enforce_rate_limit, record_stage_timing
 from backend.app.core.security import Principal, current_principal, ensure_owner
 from backend.app.db.session import get_db
 from backend.app.domain.scenarios import SCENARIOS_BY_ID
@@ -241,6 +246,41 @@ def _provider_app_error(exc: ProviderError) -> AppError:
     )
 
 
+def _validated_api_result(
+    result: dict,
+    language_mode: LanguageMode,
+) -> dict:
+    try:
+        return enforce_api_result_output_safety(result, language_mode)
+    except ProviderOutputInvalid as exc:
+        raise _provider_app_error(exc) from exc
+
+
+def _completed_api_result(
+    attempt: AITurnAttempt,
+    fallback_language_mode: LanguageMode,
+) -> dict:
+    raw_result = attempt.result_json.get("api_result")
+    if not isinstance(raw_result, dict):
+        raise _provider_app_error(ProviderOutputInvalid(
+            "Stored tutor output is invalid.",
+            schema_path="api_result",
+        ))
+    result = dict(raw_result)
+    raw_language_mode = result.get("language_mode", fallback_language_mode.value)
+    try:
+        language_mode = LanguageMode(raw_language_mode)
+    except (TypeError, ValueError) as exc:
+        invalid = ProviderOutputInvalid(
+            "Stored tutor output is invalid.",
+            schema_path="language_mode",
+        )
+        raise _provider_app_error(invalid) from exc
+    result.setdefault("language_mode", language_mode.value)
+    result.setdefault("turn_id", attempt.id)
+    return _validated_api_result(result, language_mode)
+
+
 def _failure_from_attempt(attempt: AITurnAttempt, *, language_review: bool = False) -> AppError:
     if attempt.failure_code == "provider_retry_limit_reached":
         return AppError(
@@ -289,7 +329,7 @@ def _api_result(
             or (previous_result or {}).get("correction_explanation")
             or response.correction_explanation
         )
-    return {
+    result = {
         "turn_id": turn_id,
         "tutor_message": response.tutor_message,
         "corrected_sentence": response.corrected_learner_sentence,
@@ -321,6 +361,7 @@ def _api_result(
         "explanation_language_state": language_decision.state,
         "learner_intent": learner_intent,
     }
+    return _validated_api_result(result, review.language_mode)
 
 
 def _language_review_app_error(exc: ProviderError) -> AppError:
@@ -525,10 +566,15 @@ def ai_turn(
         if data.input_source == "VOICE" and data.stt_confidence is not None and data.stt_confidence < 0.2:
             raise UnusableTranscript("Speech confidence is too low.")
     except UnusableTranscript as exc:
+        learner_message_error = (
+            "No clear learner speech was detected. Please try again."
+            if data.input_source == "VOICE"
+            else "This message contains unsupported or malformed text. Please edit it and try again."
+        )
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "unusable_transcript" if data.input_source == "VOICE" else "invalid_learner_message",
-            "No clear learner speech was detected. Please try again.",
+            learner_message_error,
         ) from exc
     usage = UsageService(session)
     tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
@@ -537,7 +583,7 @@ def ai_turn(
     attempts = AITurnAttemptRepository(session)
     previous_attempt = attempts.latest_completed(conversation.id)
     previous_result = (
-        dict(previous_attempt.result_json.get("api_result", {}))
+        _completed_api_result(previous_attempt, default_language_mode)
         if previous_attempt is not None else None
     )
     learner_intent = classify_learner_intent(learner_message, previous_result)
@@ -567,23 +613,30 @@ def ai_turn(
             },
         )
         if attempt.status == "COMPLETED":
-            completed_result = dict(attempt.result_json["api_result"])
-            completed_result.setdefault("turn_id", attempt.id)
-            return completed_result
-        if attempt.status in {"PROVIDER_SUCCEEDED", "REVIEW_FAILED_RETRYABLE"}:
-            content_response = AIConversationResponse.model_validate(
-                attempt.result_json["provider_response"]
+            return _completed_api_result(attempt, default_language_mode)
+        try:
+            if attempt.status in {"PROVIDER_SUCCEEDED", "REVIEW_FAILED_RETRYABLE"}:
+                content_response = AIConversationResponse.model_validate(
+                    attempt.result_json["provider_response"]
+                )
+            elif attempt.status == "REVIEW_SUCCEEDED":
+                content_response = AIConversationResponse.model_validate(
+                    attempt.result_json["provider_response"]
+                )
+                response = AIConversationResponse.model_validate(
+                    attempt.result_json["reviewed_response"]
+                )
+                review_result = LanguageReviewResult.model_validate(
+                    attempt.result_json["language_review"]
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            invalid = ProviderOutputInvalid(
+                "Stored tutor checkpoint is invalid.",
+                schema_path="stored_checkpoint",
             )
-        elif attempt.status == "REVIEW_SUCCEEDED":
-            content_response = AIConversationResponse.model_validate(
-                attempt.result_json["provider_response"]
-            )
-            response = AIConversationResponse.model_validate(
-                attempt.result_json["reviewed_response"]
-            )
-            review_result = LanguageReviewResult.model_validate(
-                attempt.result_json["language_review"]
-            )
+            raise _provider_app_error(invalid) from exc
+        if attempt.status in {"PROVIDER_SUCCEEDED", "REVIEW_FAILED_RETRYABLE", "REVIEW_SUCCEEDED"}:
+            pass
         elif attempt.status == "FAILED_FINAL":
             raise _failure_from_attempt(attempt)
         elif attempt.status == "REVIEW_FAILED_FINAL":
@@ -727,7 +780,16 @@ def ai_turn(
             content_response = apply_pedagogy_guardrails(
                 protect_learner_facts(content_response, learner_message)
             )
+            content_response = enforce_response_output_safety(
+                content_response,
+                language_decision.effective_mode,
+            )
         except ProviderError as exc:
+            record_stage_timing(
+                request,
+                "llm",
+                (perf_counter() - started_at) * 1000,
+            )
             session.rollback()
             attempt = attempts.get(conversation.id, turn_key)
             if attempt is None:
@@ -788,10 +850,12 @@ def ai_turn(
                 input_units=content_response.usage.input_units,
                 output_units=content_response.usage.output_units,
             )
+        provider_latency_ms = (perf_counter() - started_at) * 1000
+        record_stage_timing(request, "llm", provider_latency_ms)
         attempts.checkpoint_provider_success(
             attempt,
             content_response,
-            provider_latency_ms=(perf_counter() - started_at) * 1000,
+            provider_latency_ms=provider_latency_ms,
         )
 
     if response is None or review_result is None:
@@ -836,6 +900,8 @@ def ai_turn(
                 correlation_id=request.state.correlation_id,
             )
         except ProviderError as exc:
+            review_latency_ms = (perf_counter() - review_started_at) * 1000
+            record_stage_timing(request, "review", review_latency_ms)
             session.rollback()
             attempt = attempts.get(conversation.id, turn_key)
             if attempt is None:
@@ -870,7 +936,7 @@ def ai_turn(
                 response,
                 review_result,
                 exc,
-                review_latency_ms=(perf_counter() - review_started_at) * 1000,
+                review_latency_ms=review_latency_ms,
             )
             usage.record(
                 ai_turn_attempt_id=attempt.id,
@@ -899,6 +965,8 @@ def ai_turn(
             )
             request.app.state.metrics.increment("language_review_failures")
         else:
+            review_latency_ms = (perf_counter() - review_started_at) * 1000
+            record_stage_timing(request, "review", review_latency_ms)
             if review_call_id is not None:
                 _reconcile_provider_call(
                     usage,
@@ -911,7 +979,7 @@ def ai_turn(
                 attempt,
                 response,
                 review_result,
-                review_latency_ms=(perf_counter() - review_started_at) * 1000,
+                review_latency_ms=review_latency_ms,
             )
             logger.info(
                 "language_review_completed request_id=%s attempt_id=%s mode=%s changed=%s "
@@ -927,6 +995,13 @@ def ai_turn(
             request.app.state.metrics.increment("language_review_requests")
 
     response = apply_pedagogy_guardrails(protect_learner_facts(response, learner_message))
+    try:
+        response = enforce_response_output_safety(
+            response,
+            language_decision.effective_mode,
+        )
+    except ProviderOutputInvalid as exc:
+        raise _provider_app_error(exc) from exc
     latency_ms = float(
         attempt.result_json.get("provider_latency_ms", (perf_counter() - started_at) * 1000)
     ) + float(attempt.result_json.get("review_latency_ms", 0))
@@ -965,6 +1040,13 @@ def ai_turn(
         learner_intent=learner_intent,
     )
     response = coaching.response
+    try:
+        response = enforce_response_output_safety(
+            response,
+            language_decision.effective_mode,
+        )
+    except ProviderOutputInvalid as exc:
+        raise _provider_app_error(exc) from exc
     result = _api_result(
         response, policy, attempt.id, review_result, coaching, language_decision, previous_result, learner_intent,
     )
@@ -1020,9 +1102,7 @@ def ai_turn(
         session.rollback()
         recovered = attempts.get(conversation.id, turn_key)
         if recovered is not None and recovered.status == "COMPLETED":
-            recovered_result = dict(recovered.result_json["api_result"])
-            recovered_result.setdefault("turn_id", recovered.id)
-            return recovered_result
+            return _completed_api_result(recovered, default_language_mode)
         logger.error(
             "llm_persistence_failure request_id=%s attempt_id=%s",
             request.state.request_id,
@@ -1087,11 +1167,20 @@ def synthesize_tutor_speech(
     spoken_text = str(api_result.get("spoken_text") or "").strip()
     if not spoken_text:
         raise AppError(status.HTTP_422_UNPROCESSABLE_CONTENT, "tts_empty_text", "This tutor turn has no speech text.")
+    language_mode = LanguageMode(str(api_result.get("language_mode") or "ENGLISH"))
+    try:
+        spoken_text = normalize_spoken_output(spoken_text, language_mode)
+    except ProviderOutputInvalid as exc:
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "tts_invalid_text",
+            "This tutor turn contains invalid speech text.",
+            retryable=False,
+        ) from exc
 
     tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
     settings = request.app.state.settings
     voice = settings.openai_tts_ananya_voice if tutor.tutor_id == "ananya" else settings.openai_tts_arjun_voice
-    language_mode = LanguageMode(str(api_result.get("language_mode") or "ENGLISH"))
     tone = "warm, patient, and professional" if tutor.tutor_id == "ananya" else "friendly and confident"
     if language_mode == LanguageMode.TELUGU_DOMINANT:
         instructions = (
@@ -1207,6 +1296,7 @@ def synthesize_tutor_speech(
             session.rollback()
             raise AppError(status.HTTP_409_CONFLICT, "tts_in_progress", "Tutor voice is already being generated.", retryable=True) from exc
 
+    tts_started_at = perf_counter()
     try:
         result = provider.synthesize(TextToSpeechRequest(
             text=spoken_text,
@@ -1218,6 +1308,7 @@ def synthesize_tutor_speech(
             correlation_id=request.state.correlation_id,
         ))
     except ProviderError as exc:
+        record_stage_timing(request, "tts", (perf_counter() - tts_started_at) * 1000)
         session.rollback()
         attempt = repository.get(ai_attempt_id)
         if attempt is None:
@@ -1268,6 +1359,7 @@ def synthesize_tutor_speech(
             ) from exc
         raise _tts_app_error(exc) from exc
 
+    record_stage_timing(request, "tts", (perf_counter() - tts_started_at) * 1000)
     if provider_call_id is not None:
         _reconcile_provider_call(
             usage,
@@ -1528,6 +1620,7 @@ async def transcribe_voice_input(
         duration_seconds=duration_ms / 1000,
         size_bytes=len(audio),
     )
+    stt_started_at = perf_counter()
     try:
         result = await run_in_threadpool(provider.transcribe, stt_request)
     except ValueError as exc:
@@ -1624,6 +1717,8 @@ async def transcribe_voice_input(
             "Speech recognition is unavailable.",
             retryable=True,
         ) from exc
+    finally:
+        record_stage_timing(request, "stt", (perf_counter() - stt_started_at) * 1000)
 
     actual_duration_ms = _authoritative_duration_ms(result.duration_seconds)
     attempt.charge_duration_ms = max(

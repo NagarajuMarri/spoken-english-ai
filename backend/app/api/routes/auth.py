@@ -50,12 +50,16 @@ def request_password_reset(data: PasswordResetRequest, request: Request, session
 def validate_password_reset_token(
     data: PasswordResetTokenRequest, request: Request, session: Session = Depends(get_db)
 ):
+    from backend.app.core.security import privacy_minimised_network_key
+    enforce_rate_limit(request, "password_reset_attempt_network", privacy_minimised_network_key(request))
     enforce_rate_limit(request, "password_reset_attempt", privacy_key(data.token))
     return AuthService(session, request).validate_password_reset_token(data.token)
 
 
 @router.post("/password-reset/confirm", response_model=PasswordResetConfirmResponse)
 def confirm_password_reset(data: PasswordResetConfirm, request: Request, session: Session = Depends(get_db)):
+    from backend.app.core.security import privacy_minimised_network_key
+    enforce_rate_limit(request, "password_reset_attempt_network", privacy_minimised_network_key(request))
     enforce_rate_limit(request, "password_reset_attempt", privacy_key(data.token))
     return AuthService(session, request).reset_password(data)
 

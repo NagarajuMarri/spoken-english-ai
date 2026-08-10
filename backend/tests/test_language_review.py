@@ -241,6 +241,29 @@ def test_live_provider_shape_rejects_invalid_contract(mutation, path):
     assert path in (captured.value.schema_path or "")
 
 
+@pytest.mark.parametrize(
+    "unsafe_text",
+    [
+        "తెలుగు ఉంది, ಆದರೆ ಇದು ಕನ್ನಡ.",
+        "తెలుగు ఉంది, но это русский текст.",
+        "తెలుగు ఉంది\u202e hidden direction.",
+        "తెలుగు క్ి malformed.",
+    ],
+)
+def test_live_reviewer_rejects_unsupported_script_and_malformed_unicode(unsafe_text):
+    source = _source_response()
+    request = build_review_request(
+        source,
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation",
+        learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+    content = _review_content(request, final_text=unsafe_text)
+    with pytest.raises(ProviderOutputInvalid):
+        _call_provider(request, _provider_response(content))
+
+
 def test_live_provider_shape_rejects_missing_field_refusal_and_incomplete():
     source = _source_response()
     request = build_review_request(
@@ -463,6 +486,9 @@ def test_api_checkpoints_review_before_tts_and_exposes_customer_capability(clien
     )
     assert turn.status_code == 200
     body = turn.json()
+    assert "llm;dur=" in turn.headers["server-timing"]
+    assert "review;dur=" in turn.headers["server-timing"]
+    assert "I go office" not in turn.headers["server-timing"]
     assert body["language_mode"] == "TELUGU_DOMINANT"
     assert body["review_changed"] is True
     assert body["review_reason_code"] == "NATURALIZED_TELUGU"
@@ -478,6 +504,38 @@ def test_api_checkpoints_review_before_tts_and_exposes_customer_capability(clien
             ConversationMessage.ai_turn_attempt_id == attempt.id
         ))
         assert message.tutor_response == body["tutor_message"]
+
+    speech = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns/{body['turn_id']}/speech"
+    )
+    assert speech.status_code == 200
+    assert speech.headers["server-timing"].startswith("tts;dur=")
+
+
+def test_tts_revalidates_stored_spoken_text_before_provider_dispatch(client, conversation):
+    turn = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        headers={"Idempotency-Key": "unsafe-stored-speech"},
+        json={"message": "I practise every morning."},
+    )
+    assert turn.status_code == 200
+    with client.app.state.session_factory() as session:
+        attempt = session.get(AITurnAttempt, turn.json()["turn_id"])
+        checkpoint = dict(attempt.result_json)
+        api_result = dict(checkpoint["api_result"])
+        api_result["spoken_text"] = "Это русский текст"
+        checkpoint["api_result"] = api_result
+        attempt.result_json = checkpoint
+        session.commit()
+
+    provider = client.app.state.text_to_speech_provider
+    calls_before = provider.calls
+    speech = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns/{turn.json()['turn_id']}/speech"
+    )
+    assert speech.status_code == 422
+    assert speech.json()["error"]["code"] == "tts_invalid_text"
+    assert provider.calls == calls_before
 
 
 def test_review_failure_degrades_without_regenerating_or_duplicate_persistence(client, conversation):
@@ -580,7 +638,7 @@ def test_five_turn_pipeline_keeps_tts_available_when_one_review_is_malformed(cli
         assert session.scalar(select(func.count()).select_from(ConversationMessage)) == 5
 
 
-def test_foreign_script_voice_misrecognition_is_clarified_and_not_kept_in_history(client, conversation):
+def test_foreign_script_voice_misrecognition_is_rejected_before_provider_or_history(client, conversation):
     class CapturingProvider(DeterministicAIProvider):
         def __init__(self):
             self.requests = []
@@ -597,9 +655,9 @@ def test_foreign_script_voice_misrecognition_is_clarified_and_not_kept_in_histor
         headers={"Idempotency-Key": "foreign-script-stt-1"},
         json={"message": "آری", "input_source": "VOICE", "detected_language": "fa"},
     )
-    assert anomalous.status_code == 200
-    assert "recognition error" in provider.requests[0].current_learner_message
-    assert "Do not switch language or topic" in provider.requests[0].current_learner_message
+    assert anomalous.status_code == 422
+    assert anomalous.json()["error"]["code"] == "unusable_transcript"
+    assert provider.requests == []
 
     clear = client.post(
         route,
@@ -607,5 +665,5 @@ def test_foreign_script_voice_misrecognition_is_clarified_and_not_kept_in_histor
         json={"message": "Can we start English practice?"},
     )
     assert clear.status_code == 200
-    assert provider.requests[1].current_learner_message == "Can we start English practice?"
-    assert all("آری" not in turn.learner_message for turn in provider.requests[1].conversation_history)
+    assert provider.requests[0].current_learner_message == "Can we start English practice?"
+    assert provider.requests[0].conversation_history == []

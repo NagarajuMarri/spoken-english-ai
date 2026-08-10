@@ -40,9 +40,9 @@ describe("Feature 7 audio-linked avatar", () => {
     Object.defineProperty(player, "paused", { configurable: true, value: false });
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0.24 });
     Object.defineProperty(player, "duration", { configurable: true, value: 2 });
-    fireEvent.play(player);
+    fireEvent.playing(player);
     expect(events).toContainEqual({ type: "PLAYBACK_STARTED", playbackId: "turn-7" });
-    expect(events).toContainEqual({ type: "PLAYBACK_FRAME", playbackId: "turn-7", currentTimeMs: 240, durationMs: 2000 });
+    expect(events).toContainEqual({ type: "PLAYBACK_FRAME", playbackId: "turn-7", currentTimeMs: 240, durationMs: 2000, amplitude: 0 });
     fireEvent.pause(player);
     expect(events).toContainEqual({ type: "PLAYBACK_PAUSED", playbackId: "turn-7" });
   });
@@ -81,19 +81,19 @@ describe("Feature 7 audio-linked avatar", () => {
     Object.defineProperty(player, "paused", { configurable: true, value: false });
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0.24 });
     Object.defineProperty(player, "duration", { configurable: true, value: 1.5 });
-    fireEvent.play(player);
+    fireEvent.playing(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
     expect(avatar).toHaveAttribute("data-expression", "CORRECTIVE");
-    expect(avatar).toHaveAttribute("data-mouth", "WIDE");
+    expect(avatar).toHaveAttribute("data-mouth", "REST");
 
     fireEvent.ended(player);
-    expect(avatar).toHaveAttribute("data-state", "IDLE");
+    expect(avatar).toHaveAttribute("data-state", "RETRY");
     expect(avatar).toHaveAttribute("data-mouth", "REST");
 
     await userEvent.click(screen.getByRole("button", { name: "Replay tutor voice" }));
-    fireEvent.play(player);
+    fireEvent.playing(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
-    expect(avatar).toHaveAttribute("data-mouth", "SMALL");
+    expect(avatar).toHaveAttribute("data-mouth", "REST");
 
     fireEvent.error(player);
     expect(avatar).toHaveAttribute("data-state", "ERROR");
@@ -101,9 +101,9 @@ describe("Feature 7 audio-linked avatar", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Tutor audio could not be played");
     await userEvent.click(screen.getByRole("button", { name: "Retry tutor voice" }));
     await waitFor(() => expect(api.speech).toHaveBeenCalledTimes(2));
-    fireEvent.play(player);
+    fireEvent.playing(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
-    expect(avatar).toHaveAttribute("data-mouth", "SMALL");
+    expect(avatar).toHaveAttribute("data-mouth", "REST");
   });
 
   it("interrupts playback and resets the mouth immediately", async () => {

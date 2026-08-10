@@ -8,8 +8,10 @@ from sqlalchemy import func, select
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
 from backend.app.ai.exceptions import ProviderOutputInvalid, ProviderTimeout, ProviderUnavailable
 from backend.app.ai.models import AIConversationRequest, AIConversationResponse
+from backend.app.ai.output_safety import enforce_response_output_safety
 from backend.app.ai.service import AIConversationService, AdaptivePolicy
 from backend.app.ai.validation import validate_provider_output
+from backend.app.domain.enums import LanguageMode
 from backend.app.models import (
     AIUsageRecord,
     AITurnAttempt,
@@ -69,6 +71,61 @@ def test_ai_output_validation_rejects_unsafe_content(unsafe):
     valid["tutor_message"] = unsafe
     with pytest.raises(ProviderOutputInvalid):
         validate_provider_output(valid)
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "ದೀನಿ ದರ ಎಂಥ?",
+        "هذا نص عربي",
+        "Это русский текст",
+        "यह हिन्दी पाठ है",
+        "Hello\u202eworld",
+        "Hello\ufdd0world",
+        "క్ి",
+    ],
+)
+def test_ai_output_validation_rejects_unsupported_or_malformed_unicode(unsafe):
+    valid = DeterministicAIProvider().generate(ai_request()).model_dump()
+    valid["tutor_message"] = unsafe
+    with pytest.raises(ProviderOutputInvalid):
+        validate_provider_output(valid)
+
+
+@pytest.mark.parametrize("field", ["grammar_feedback", "vocabulary_suggestions"])
+def test_ai_output_validation_covers_every_learner_facing_list(field):
+    valid = DeterministicAIProvider().generate(ai_request()).model_dump()
+    valid[field] = ["Это русский текст"]
+    with pytest.raises(ProviderOutputInvalid):
+        validate_provider_output(valid)
+
+
+@pytest.mark.parametrize("field", ["grammar_focus", "vocabulary"])
+def test_ai_output_validation_covers_learning_signal_lists(field):
+    valid = DeterministicAIProvider().generate(ai_request()).model_dump()
+    valid["learning_signals"][field] = ["यह हिन्दी पाठ है"]
+    with pytest.raises(ProviderOutputInvalid):
+        validate_provider_output(valid)
+
+
+def test_ai_output_is_nfc_normalized_and_language_mode_is_enforced():
+    valid = DeterministicAIProvider().generate(ai_request()).model_dump()
+    valid["tutor_message"] = "Cafe\u0301 practice is useful."
+    valid["grammar_feedback"] = ["role\u0301 practice"]
+    normalized = validate_provider_output(valid)
+    assert normalized.tutor_message == "Café practice is useful."
+    assert normalized.grammar_feedback == ["rolé practice"]
+
+    telugu = normalized.model_copy(update={
+        "tutor_message": "చాలా బాగా చెప్పారు. Keep practising."
+    })
+    with pytest.raises(ProviderOutputInvalid) as rejected:
+        enforce_response_output_safety(telugu, LanguageMode.ENGLISH)
+    assert rejected.value.schema_path == "tutor_message"
+    assert enforce_response_output_safety(
+        telugu,
+        LanguageMode.ENGLISH_TELUGU,
+    ).tutor_message.startswith("చాలా")
 
 
 @pytest.mark.parametrize(

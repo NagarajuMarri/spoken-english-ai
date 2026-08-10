@@ -149,7 +149,7 @@ export const api={
   tutors:()=>raw<Tutor[]>("/api/v1/tutors"), preference:()=>raw<TutorPreference>("/api/v1/tutors/preference"),
   savePreference:(tutor_id:string,language_mode:LanguageMode)=>raw<TutorPreference>("/api/v1/tutors/preference",{method:"PUT",body:JSON.stringify({tutor_id,language_mode})}),
   dashboard:()=>raw<Dashboard>("/api/v1/tutors/dashboard"),
-  conversation:(learner_id:string)=>raw<{id:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:"daily-conversation"})}),
+  conversation:(learner_id:string)=>raw<{id:string;opening_prompt?:string;opening_turn_id?:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:"daily-conversation"})}),
   transcribe:(id:string,capture:{blob:Blob;durationMs:number},idempotencyKey:string=globalThis.crypto?.randomUUID?.()??`voice-${Date.now()}-${Math.random().toString(16).slice(2)}`)=>raw<VoiceTranscription>(`/api/v1/conversations/${id}/transcriptions`,{method:"POST",headers:{"Content-Type":capture.blob.type,"X-Audio-Duration-Ms":String(capture.durationMs),"X-Voice-Processing-Consent":"accepted","Idempotency-Key":idempotencyKey},body:capture.blob}),
   turn:(id:string,message:string,_languageMode:LanguageMode,idempotencyKey:string,voice?:{detectedLanguage:string;confidence?:number|null})=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({message,input_source:voice?"VOICE":"TEXT",detected_language:voice?.detectedLanguage,stt_confidence:voice?.confidence})}),
   speech:(id:string,turnId:string)=>speechRaw(`/api/v1/conversations/${id}/ai-turns/${turnId}/speech`),

@@ -9,9 +9,36 @@ export interface TutorRendererFrame {
   motionEnabled: boolean;
 }
 
+export interface TutorPlaybackSignal {
+  playbackId: string;
+  amplitude: number;
+  currentTimeMs: number;
+  durationMs: number;
+}
+
+export interface TutorMouthPose {
+  openness: number;
+  width: number;
+  funnel: number;
+}
+
+/** Renderer-neutral rig values selected by the active LipSyncProvider upstream. */
+export function mouthPoseFromShape(mouth: MouthShape): TutorMouthPose {
+  switch (mouth) {
+    case "SMALL":
+      return { openness: 0.3, width: 0.2, funnel: 0.45 };
+    case "MEDIUM":
+      return { openness: 0.62, width: 0.6, funnel: 0.16 };
+    case "WIDE":
+      return { openness: 1, width: 1, funnel: 0.05 };
+    case "REST":
+      return { openness: 0, width: 0, funnel: 0 };
+  }
+}
+
 /**
- * Renderer-neutral presentation contract. The current 2D renderer and a future
- * 3D renderer consume the same frame without owning microphone, LLM, or audio logic.
+ * Renderer-neutral presentation contract. The model, lightweight 3D, and portrait
+ * renderers consume the same frame without owning microphone, LLM, or audio logic.
  */
 export function createRendererFrame(
   presentation: TutorPresentation,

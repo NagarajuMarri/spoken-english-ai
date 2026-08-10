@@ -518,6 +518,61 @@ def test_ai_turn_maps_provider_failures_without_persisting_a_message(
         )) == 0
 
 
+def test_completed_ai_turn_replay_never_exposes_unsafe_stored_output(
+    client, conversation,
+):
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    headers = {"Idempotency-Key": "unsafe-completed-replay"}
+    payload = {"message": "Please help me practise English."}
+    created = client.post(route, json=payload, headers=headers)
+    assert created.status_code == 200
+
+    with client.app.state.session_factory() as session:
+        attempt = session.scalar(select(AITurnAttempt).where(
+            AITurnAttempt.idempotency_key == "unsafe-completed-replay"
+        ))
+        checkpoint = dict(attempt.result_json)
+        api_result = dict(checkpoint["api_result"])
+        api_result["tutor_message"] = "a\u1037"
+        checkpoint["api_result"] = api_result
+        attempt.result_json = checkpoint
+        session.commit()
+
+    replay = client.post(route, json=payload, headers=headers)
+
+    assert replay.status_code == 502
+    assert replay.json()["error"]["code"] == "llm_schema_validation_failed"
+    assert "a\u1037" not in replay.text
+
+
+def test_derived_api_result_maps_unsafe_spoken_output_to_controlled_error(
+    client, conversation, monkeypatch,
+):
+    from backend.app.api.routes import ai as ai_routes
+    from backend.app.coaching import CoachingMode, CoachingOutcome, CoachingState
+
+    def unsafe_coaching(response, **_kwargs):
+        return CoachingOutcome(
+            response=response,
+            mode=CoachingMode.NO_CORRECTION,
+            state=CoachingState.NORMAL_CONVERSATION,
+            spoken_text="a\u1037",
+        )
+
+    monkeypatch.setattr(ai_routes, "build_coaching_outcome", unsafe_coaching)
+    response = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json={"message": "Please help me practise English."},
+        headers={"Idempotency-Key": "unsafe-derived-result"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "llm_schema_validation_failed"
+    assert "a\u1037" not in response.text
+    with client.app.state.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(ConversationMessage)) == 0
+
+
 def test_transient_failure_retries_with_same_identity_and_persists_exactly_once(
     client, learner, conversation,
 ):
@@ -565,7 +620,9 @@ def test_transient_failure_retries_with_same_identity_and_persists_exactly_once(
         )) == 1
         failure = db.scalar(select(AIUsageRecord).where(AIUsageRecord.outcome == "FAILURE"))
         assert failure.request_count == 2
-        attempt = db.scalar(select(AITurnAttempt))
+        attempt = db.scalar(select(AITurnAttempt).where(
+            AITurnAttempt.turn_kind == "LEARNER"
+        ))
         assert attempt.status == "COMPLETED"
         assert attempt.provider_attempts == 3
         message = db.scalar(select(ConversationMessage))
@@ -606,7 +663,9 @@ def test_ai_provider_retries_stop_after_three_actual_dispatches(client, conversa
     ]
     assert provider.calls == 3
     with client.app.state.session_factory() as db:
-        attempt = db.scalar(select(AITurnAttempt))
+        attempt = db.scalar(select(AITurnAttempt).where(
+            AITurnAttempt.turn_kind == "LEARNER"
+        ))
         events = list(db.scalars(select(ProviderCallEvent).where(
             ProviderCallEvent.operation_kind == "llm"
         )))

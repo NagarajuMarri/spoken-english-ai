@@ -12,6 +12,7 @@ from backend.app.language_review.models import (
     LanguageReviewResult,
     ReviewReasonCode,
 )
+from backend.app.unicode_safety import UnicodeSafetyError, normalize_output_text
 
 
 LEARNING_TERM_ALLOWLIST = {
@@ -133,6 +134,37 @@ def _validate_result(request: LanguageReviewRequest, result: LanguageReviewResul
             raise ProviderOutputInvalid("English mode must remain an exact presentation pass-through.", schema_path="final_text")
 
 
+def _normalize_result_output(result: LanguageReviewResult) -> LanguageReviewResult:
+    allow_telugu = result.language_mode != LanguageMode.ENGLISH
+    updates: dict[str, object] = {}
+    path = "root"
+    try:
+        for field in (
+            "final_text",
+            "final_correction_explanation",
+            "final_conversation_question",
+            "final_encouragement",
+        ):
+            path = field
+            value = getattr(result, field)
+            if value is not None:
+                updates[field] = normalize_output_text(
+                    value,
+                    allow_telugu=allow_telugu,
+                )
+        normalized_terms = []
+        for index, item in enumerate(result.preserved_learning_terms):
+            path = f"preserved_learning_terms.{index}"
+            normalized_terms.append(normalize_output_text(item, allow_telugu=allow_telugu))
+        updates["preserved_learning_terms"] = normalized_terms
+    except UnicodeSafetyError as exc:
+        raise ProviderOutputInvalid(
+            "Language review output failed Unicode or script validation.",
+            schema_path=path,
+        ) from exc
+    return result.model_copy(update=updates)
+
+
 class LanguageReviewService:
     def __init__(self, provider):
         self.provider = provider
@@ -176,6 +208,7 @@ class LanguageReviewService:
                     schema_path="provider",
                 )
             result = self.provider.review(request)
+        result = _normalize_result_output(result)
         _validate_result(request, result)
         if language_mode == LanguageMode.ENGLISH:
             return response, result

@@ -20,5 +20,8 @@ export default defineConfig({
     url: "http://127.0.0.1:4173",
     reuseExistingServer: false,
     timeout: 120_000,
+    env: {
+      VITE_ENABLE_ENGINEERING_DIAGNOSTICS: "true",
+    },
   },
 });

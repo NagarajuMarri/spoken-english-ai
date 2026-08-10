@@ -97,6 +97,17 @@ def test_metrics_and_rate_limit_decisions():
     assert limiter.decide(policy, "privacy-key").allowed
 
 
+def test_metric_observations_are_bounded_to_recent_values():
+    metrics = InMemoryMetrics()
+    for value in range(1_100):
+        metrics.observe("duration", float(value))
+
+    observations = metrics.snapshot()["observations"]["duration"]
+    assert len(observations) == 1_024
+    assert observations[0] == 76.0
+    assert observations[-1] == 1_099.0
+
+
 def test_retry_after_response(client):
     policy = RateLimitPolicy("registration", 0, 17)
     from backend.app.core import operations

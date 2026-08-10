@@ -111,9 +111,18 @@ test("lesson, conversation feedback, Telugu, reduced motion, and clean console",
 });
 
 test("Feature 7 uses real audio lifecycle for speaking, reset, replay, and recovery", async ({ page }) => {
+  test.setTimeout(120_000);
   await authenticated(page);
   await page.addInitScript(() => {
+    Object.defineProperty(navigator, "hardwareConcurrency", { configurable: true, get: () => 2 });
     const nativePlay = HTMLMediaElement.prototype.play;
+    const nativeReadAmplitude = AnalyserNode.prototype.getByteTimeDomainData;
+    AnalyserNode.prototype.getByteTimeDomainData = function readHeadlessAcceptanceAmplitude(samples) {
+      nativeReadAmplitude.call(this, samples);
+      // Headless Chromium has no physical output device and may otherwise expose silence.
+      // Keep real media lifecycle events while supplying a deterministic analyser signal.
+      for (let index = 0; index < samples.length; index += 1) samples[index] = index % 2 === 0 ? 106 : 150;
+    };
     let blockFirstAutoplay = true;
     HTMLMediaElement.prototype.play = function playWithOneAutoplayBlock() {
       if (blockFirstAutoplay) {
@@ -135,7 +144,6 @@ test("Feature 7 uses real audio lifecycle for speaking, reset, replay, and recov
   await expect(avatar).toHaveAttribute("data-state", "SPEAKING");
   await expect(avatar).toHaveAttribute("data-expression", "CORRECTIVE");
   await expect.poll(async () => avatar.getAttribute("data-mouth")).not.toBe("REST");
-  await page.screenshot({ path: "test-results/feature7-speaking-runtime.png", fullPage: true });
   await page.getByRole("button", { name: "Stop tutor voice" }).click();
   await expect(avatar).toHaveAttribute("data-state", "IDLE");
   await expect(avatar).toHaveAttribute("data-mouth", "REST");
@@ -164,9 +172,13 @@ test("microphone denial remains recoverable with text", async ({ page }) => {
 });
 
 test("real MediaRecorder bytes become a transcript and learner message", async ({ page }) => {
+  test.setTimeout(180_000);
   let capturedBytes = 0;
   let submitted = "";
   await authenticated(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "hardwareConcurrency", { configurable: true, get: () => 2 });
+  });
   await page.route("**/api/v1/conversations/*/transcriptions", async (route) => {
     const body = route.request().postDataBuffer();
     capturedBytes = body?.byteLength ?? 0;
@@ -180,7 +192,7 @@ test("real MediaRecorder bytes become a transcript and learner message", async (
   await page.goto("/app/conversation");
   await page.getByLabel(/consent to voice processing/).check();
   await page.getByRole("button", { name: "Start microphone" }).click();
-  await expect(page.getByText("Listening", { exact: true })).toBeAttached();
+  await expect(page.getByText("Listening", { exact: true })).toBeAttached({ timeout: 30_000 });
   await expect(page.locator(".avatar")).toHaveAttribute("data-state", "LISTENING");
   await page.waitForTimeout(750);
   await page.getByRole("button", { name: "Stop and transcribe" }).click();

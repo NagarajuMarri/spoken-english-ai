@@ -13,7 +13,7 @@
 - Closed-beta invitation, allowlist, founder override and waiting-list controls.
 - Durable feedback and a founder-authorized read-only launch dashboard.
 - PostgreSQL, Redis, private object storage, worker, readiness, telemetry, backup, restore and rollback foundations.
-- Alembic revisions through `0017_provider_call_events`.
+- Alembic revisions through `0018_opening_turns`.
 
 ### Security and privacy
 
@@ -36,6 +36,15 @@
 - Removed learner-facing provider, model, voice, audio-path, internal review, avatar lifecycle, and other engineering metadata; explicit diagnostics remain available only at the component diagnostics boundary.
 - Preserved stable message identities and a single mounted tutor-audio player across mode changes to prevent duplicate messages, speech requests, or autoplay.
 - Added responsive mobile/desktop Playwright coverage plus accessibility, replay, lesson-context, and mode-switch regression coverage.
+
+### Founder-acceptance runtime remediation — 2026-08-10
+
+- Added a bundled, provenance-recorded rigged 3D Ananya model, Three.js renderer, lightweight 3D and portrait fallbacks, reduced-motion support, initialization telemetry, and real playback-amplitude jaw/viseme movement.
+- Made the server own one idempotent opening tutor turn and made the browser speak it exactly once after the honest autoplay gesture gate; later replies auto-play without remounting the audio player.
+- Added generalized Unicode/grapheme and writing-system validation before learner persistence and before tutor output persistence, API presentation, or TTS.
+- Added privacy-safe T0–T8 conversational-latency instrumentation, bounded server stage metrics, and browser-readable `Server-Timing`; non-streaming first output is labeled as complete-response delivery rather than claimed as token streaming.
+- Added production SMTP configuration, Redis-worker delivery with bounded retries, neutral request timing, and secure failure handling for password recovery; real mailbox delivery remains an external acceptance gate.
+- Added revision `0018_opening_turns` so opening attempts are distinguished from learner turns and excluded from daily learner AI quotas.
 
 ### Verification
 

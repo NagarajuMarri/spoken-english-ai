@@ -23,9 +23,61 @@ class AITurnAttemptRepository:
         return self.session.scalar(
             select(AITurnAttempt).where(
                 AITurnAttempt.conversation_id == conversation_id,
+                AITurnAttempt.turn_kind == "LEARNER",
                 AITurnAttempt.status == "COMPLETED",
             ).order_by(AITurnAttempt.completed_at.desc(), AITurnAttempt.created_at.desc()).limit(1)
         )
+
+    def opening(self, conversation_id: str) -> AITurnAttempt | None:
+        return self.session.scalar(
+            select(AITurnAttempt).where(
+                AITurnAttempt.conversation_id == conversation_id,
+                AITurnAttempt.turn_kind == "OPENING",
+                AITurnAttempt.status == "COMPLETED",
+            ).limit(1)
+        )
+
+    def create_opening(
+        self,
+        *,
+        conversation_id: str,
+        learner_id: str,
+        spoken_text: str,
+        language_mode: str,
+        commit: bool = True,
+    ) -> AITurnAttempt:
+        completed_at = utc_now()
+        attempt = AITurnAttempt(
+            conversation_id=conversation_id,
+            learner_id=learner_id,
+            idempotency_key="system-opening-v1",
+            turn_kind="OPENING",
+            learner_text="",
+            status="COMPLETED",
+            provider_attempts=0,
+            result_json={},
+            updated_at=completed_at,
+            completed_at=completed_at,
+        )
+        self.session.add(attempt)
+        self.session.flush()
+        attempt.result_json = {
+            "api_result": {
+                "turn_id": attempt.id,
+                "tutor_message": spoken_text,
+                "next_question": "",
+                "spoken_text": spoken_text,
+                "language_mode": language_mode,
+                "vocabulary_suggestions": [],
+                "expression_hint": "ENCOURAGING",
+            }
+        }
+        if commit:
+            self.session.commit()
+            self.session.refresh(attempt)
+        else:
+            self.session.flush()
+        return attempt
 
     def create(
         self,
@@ -40,6 +92,7 @@ class AITurnAttemptRepository:
             conversation_id=conversation_id,
             learner_id=learner_id,
             idempotency_key=idempotency_key,
+            turn_kind="LEARNER",
             learner_text=learner_text,
             status="IN_PROGRESS",
             provider_attempts=1,

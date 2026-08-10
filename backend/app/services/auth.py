@@ -1,5 +1,7 @@
+from collections.abc import Callable
 from datetime import timedelta
 import secrets
+import time
 
 from fastapi import Request, status
 from sqlalchemy import select
@@ -26,6 +28,19 @@ from backend.app.models import (
     UserAccount,
 )
 from backend.app.models.entities import new_id
+
+
+def enforce_password_reset_response_floor(
+    started_at: float,
+    minimum_milliseconds: int,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    """Reduce account-lookup timing leakage without exposing recovery state."""
+    remaining = minimum_milliseconds / 1_000 - (clock() - started_at)
+    if remaining > 0:
+        sleeper(remaining)
 
 
 class AuthService:
@@ -236,6 +251,7 @@ class AuthService:
         self._audit("LOGOUT_ALL_COMPLETED", self.session.get(UserAccount, user_id))
 
     def request_password_reset(self, data):
+        started_at = time.monotonic()
         email = normalize_email(str(data.email))
         neutral = {
             "message": "If an account matches that email, password reset instructions have been sent."
@@ -245,6 +261,10 @@ class AuthService:
         )
         if user is None:
             self._audit("PASSWORD_RESET_REQUESTED", outcome="SUCCEEDED", reason="neutral_unknown_account")
+            enforce_password_reset_response_floor(
+                started_at,
+                self.settings.password_reset_minimum_response_milliseconds,
+            )
             return neutral
 
         now = utc_now()
@@ -267,11 +287,19 @@ class AuthService:
         self.session.commit()
         reset_url = f"{self.settings.public_frontend_url.rstrip('/')}/reset-password#token={raw}"
         try:
-            self.request.app.state.password_reset_delivery.deliver(user.email, reset_url)
+            self.request.app.state.password_reset_dispatch.dispatch(
+                reset.id,
+                user.email,
+                reset_url,
+            )
         except Exception:
             reset.used_at = utc_now()
             self._audit_event("PASSWORD_RESET_DELIVERY_FAILED", user, "FAILED", "delivery_unavailable")
             self.session.commit()
+        enforce_password_reset_response_floor(
+            started_at,
+            self.settings.password_reset_minimum_response_milliseconds,
+        )
         return neutral
 
     def validate_password_reset_token(self, raw: str):

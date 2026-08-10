@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
+import pytest
 from sqlalchemy import select
 
 from backend.app.core.errors import AppError
@@ -109,13 +110,22 @@ def _request_reset(client, email="user@example.com"):
     return response, token
 
 
-def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplog):
+def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplog, monkeypatch):
+    from backend.app.services import auth as auth_service
+
+    response_floors = []
+    monkeypatch.setattr(
+        auth_service,
+        "enforce_password_reset_response_floor",
+        lambda _started_at, minimum_milliseconds: response_floors.append(minimum_milliseconds),
+    )
     registered = register(client).json()
     original_refresh = registered["tokens"]["refresh_token"]
     neutral, raw_token = _request_reset(client)
     unknown, _ = _request_reset(client, "unknown@example.com")
     assert neutral.status_code == unknown.status_code == 200
     assert neutral.json() == unknown.json()
+    assert response_floors == [0, 0]
     assert raw_token and len(raw_token) >= 32
     reset_url = client.app.state.password_reset_delivery.deliveries[0]["reset_url"]
     assert "/reset-password#token=" in reset_url
@@ -194,11 +204,40 @@ def test_password_reset_requests_are_rate_limited_per_email(client):
     assert limited.json()["error"]["code"] == "rate_limited"
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/auth/password-reset/validate",
+        "/api/v1/auth/password-reset/confirm",
+    ],
+)
+def test_password_reset_token_attempts_are_rate_limited_by_network(client, path):
+    for index in range(20):
+        body = {"token": f"invalid-token-{index:02d}-with-safe-minimum-length-value"}
+        if path.endswith("/confirm"):
+            body["new_password"] = "NewStrongPassword456!"
+        assert client.post(path, json=body).status_code == 400
+
+    limited_body = {"token": "another-distinct-invalid-token-with-safe-minimum-length"}
+    if path.endswith("/confirm"):
+        limited_body["new_password"] = "NewStrongPassword456!"
+    limited = client.post(path, json=limited_body)
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "rate_limited"
+    assert int(limited.headers["Retry-After"]) > 0
+
+
 def test_password_reset_delivery_failure_remains_neutral_and_disables_token(client):
-    from backend.app.providers.password_reset import DisabledPasswordResetDelivery
+    from backend.app.providers.password_reset import (
+        DirectPasswordResetDispatch,
+        DisabledPasswordResetDelivery,
+    )
 
     register(client)
     client.app.state.password_reset_delivery = DisabledPasswordResetDelivery()
+    client.app.state.password_reset_dispatch = DirectPasswordResetDispatch(
+        client.app.state.password_reset_delivery
+    )
     known = client.post("/api/v1/auth/password-reset/request", json={"email": "user@example.com"})
     unknown = client.post("/api/v1/auth/password-reset/request", json={"email": "unknown@example.com"})
     assert known.status_code == unknown.status_code == 200

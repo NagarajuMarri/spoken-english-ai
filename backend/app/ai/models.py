@@ -1,5 +1,16 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.app.unicode_safety import normalize_output_text
+
+
+def _normalize_output_list(value):
+    if not isinstance(value, list):
+        return value
+    return [
+        normalize_output_text(item) if isinstance(item, str) else item
+        for item in value
+    ]
+
 
 class UsageInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -17,6 +28,11 @@ class LearningSignals(BaseModel):
     vocabulary: list[str] = Field(max_length=8)
     confidence: int = Field(ge=0, le=100)
     fluency: int = Field(ge=0, le=100)
+
+    @field_validator("grammar_focus", "vocabulary", mode="before")
+    @classmethod
+    def normalize_learner_facing_lists(cls, value):
+        return _normalize_output_list(value)
 
 
 class ConversationHistoryTurn(BaseModel):
@@ -70,9 +86,14 @@ class AIConversationResponse(BaseModel):
     def reject_unsafe_text(cls, value):
         if value is None:
             return value
+        if not isinstance(value, str):
+            return value
         lowered = value.lower()
         if any(marker in lowered for marker in ("<script", "javascript:", "system prompt", "api_key", "authorization: bearer")):
             raise ValueError("Unsafe provider output.")
-        if any(ord(char) < 32 and char not in "\n\t" for char in value):
-            raise ValueError("Invalid control character.")
-        return value.strip()
+        return normalize_output_text(value)
+
+    @field_validator("grammar_feedback", "vocabulary_suggestions", mode="before")
+    @classmethod
+    def normalize_learner_facing_lists(cls, value):
+        return _normalize_output_list(value)

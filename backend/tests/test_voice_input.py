@@ -72,6 +72,10 @@ def test_real_audio_bytes_reach_stt_and_transcript_returns(client, conversation)
         "duration_ms": 250,
         "size_bytes": len(audio),
     }
+    assert response.headers["server-timing"].startswith("stt;dur=")
+    assert "I practise" not in response.headers["server-timing"]
+    stage_timings = client.app.state.metrics.snapshot()["observations"]["stt_stage_duration_ms"]
+    assert stage_timings[-1] >= 0
     assert received == {
         "audio": audio, "type": "audio/wav", "duration": 0.25,
         "filename": "speech.wav", "language": "te",
@@ -211,7 +215,7 @@ def test_malformed_telugu_graphemes_are_rejected():
         safe_transcript("ో ం ి ీ ి ం ి ్ ై ్ ం")
 
 
-@pytest.mark.parametrize("malformed", ["కిీ", "క్ి"])
+@pytest.mark.parametrize("malformed", ["కిీ", "క్ి", "కౢౣ", "క్ౣ"])
 def test_invalid_telugu_vowel_and_virama_sequences_are_rejected(malformed):
     with pytest.raises(UnusableTranscript):
         safe_transcript(malformed, expected_language="te")
@@ -225,6 +229,45 @@ def test_valid_complex_telugu_graphemes_are_accepted():
 def test_kannada_dominant_transcript_is_rejected_when_telugu_expected():
     with pytest.raises(UnusableTranscript):
         safe_transcript("ದೀನಿ ದರ ಎಂಥ?", expected_language="te")
+
+
+@pytest.mark.parametrize(
+    "unsupported",
+    [
+        "ದೀನಿ ದರ ಎಂಥ?",
+        "هذا نص عربي",
+        "Это русский текст",
+        "यह हिन्दी पाठ है",
+    ],
+)
+def test_substantive_unsupported_scripts_are_rejected_in_every_input_mode(unsupported):
+    for expected_language in (None, "en", "te"):
+        with pytest.raises(UnusableTranscript):
+            safe_transcript(unsupported, expected_language=expected_language)
+
+
+def test_supported_latin_telugu_common_and_inherited_input_is_nfc_normalized():
+    transcript = "Cafe\u0301 లో price ₹50 — okay?"
+    assert safe_transcript(transcript, expected_language="en") == "Café లో price ₹50 — okay?"
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        "a\u1037",  # Myanmar sign misclassified as Inherited by a name-only policy
+        "a\u0f71",  # Tibetan vowel sign
+        "a\u17b6",  # Khmer vowel sign
+        "Wait.\u0301",  # inherited mark after punctuation, not a lexical base
+    ],
+)
+def test_unsupported_or_detached_combining_marks_are_rejected(malformed):
+    with pytest.raises(UnusableTranscript):
+        safe_transcript(malformed)
+
+
+def test_supported_inherited_mark_must_attach_to_a_latin_or_telugu_base():
+    valid = "q\u0301 తెలుగు"
+    assert safe_transcript(valid) == valid
 
 
 def test_valid_telugu_english_mix_is_accepted():
@@ -276,26 +319,52 @@ def test_low_confidence_transcription_is_rejected_before_frontend_submission(cli
     assert response.json()["error"]["code"] == "no_speech_detected"
 
 
-def test_kannada_mismatch_is_not_persisted_as_voice_ai_turn(client, conversation):
-    assert client.put(
-        "/api/v1/tutors/preference",
-        json={"tutor_id": "ananya", "language_mode": "ENGLISH_TELUGU"},
-    ).status_code == 200
+@pytest.mark.parametrize(
+    ("message", "detected_language"),
+    [
+        ("ದೀನಿ ದರ ಎಂಥ?", "kn"),
+        ("هذا نص عربي", "ar"),
+        ("Это русский текст", "ru"),
+    ],
+)
+def test_unsupported_script_is_not_persisted_as_voice_ai_turn(
+    client, conversation, message, detected_language,
+):
     route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
     response = client.post(
         route,
-        json={"message": "ದೀನಿ ದರ ಎಂಥ?", "input_source": "VOICE", "detected_language": "kn"},
-        headers={"Idempotency-Key": "kannada-mismatch-turn"},
+        json={
+            "message": message,
+            "input_source": "VOICE",
+            "detected_language": detected_language,
+        },
+        headers={"Idempotency-Key": f"unsupported-{detected_language}-turn"},
     )
     assert response.status_code == 422
     with client.app.state.session_factory() as db:
         from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
         from sqlalchemy import func, select
 
-        assert db.scalar(select(func.count()).select_from(AITurnAttempt)) == 0
+        assert db.scalar(select(func.count()).select_from(AITurnAttempt).where(
+            AITurnAttempt.turn_kind == "LEARNER"
+        )) == 0
         assert db.scalar(select(func.count()).select_from(ConversationMessage)) == 0
         assert db.scalar(select(func.count()).select_from(AICostMetricEvent)) == 0
         assert db.scalar(select(func.count()).select_from(AIUsageRecord)) == 0
+
+
+def test_unsupported_typed_ai_turn_uses_message_specific_copy(client, conversation):
+    response = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json={"message": "Это русский текст", "input_source": "TEXT"},
+        headers={"Idempotency-Key": "unsupported-typed-turn"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_learner_message"
+    assert response.json()["error"]["message"] == (
+        "This message contains unsupported or malformed text. Please edit it and try again."
+    )
 
 
 def test_voice_input_rejects_empty_unsupported_and_invalid_duration(client, conversation):
@@ -571,8 +640,12 @@ def test_production_requires_openai_stt_policy():
         environment="production", database_url="postgresql://db/app", auto_create_tables=False,
         jwt_secret="x" * 48, force_https=True, secure_cookies=True,
         cors_origins="https://app.example.com", trusted_hosts="app.example.com",
+        public_frontend_url="https://app.example.com",
         object_storage_backend="s3", object_storage_bucket="private",
-        password_reset_delivery_provider="smtp", smtp_host="smtp.example.com", _env_file=None,
+        redis_required=True, redis_url="rediss://redis:6379/0", worker_enabled=True,
+        password_reset_delivery_provider="smtp", smtp_host="smtp.test.speakmate.in",
+        password_reset_email_from="no-reply@test.speakmate.in",
+        smtp_username="smtp-user", smtp_password="smtp-password-for-config-test", _env_file=None,
     )
     with pytest.raises(ValueError, match="speech_to_text_provider"):
         Settings(**base, speech_to_text_provider="disabled")

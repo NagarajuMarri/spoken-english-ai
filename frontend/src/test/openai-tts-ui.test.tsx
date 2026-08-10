@@ -26,7 +26,7 @@ it("plays valid OpenAI audio and exposes start end mute stop and replay controls
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(1));
  expect(screen.getByText(/Provider: openai · Model: gpt-4o-mini-tts · Voice: marin/)).toBeVisible();
  const player=screen.getByLabelText(/^Tutor voice audio/);
- fireEvent.play(player);
+ fireEvent.playing(player);
  expect(screen.getByRole("status")).toHaveTextContent("Tutor voice is playing");
  fireEvent.ended(player);
  expect(screen.getByRole("status")).toHaveTextContent("Tutor voice finished");
@@ -44,7 +44,10 @@ it("plays valid OpenAI audio and exposes start end mute stop and replay controls
 it("handles Chrome autoplay blocking with an explicit user play path",async()=>{
  play.mockRejectedValueOnce(new DOMException("blocked","NotAllowedError")).mockResolvedValueOnce(undefined);
  render(<TutorAudioPlayer speech={firstSpeech} spokenText="Tutor response" playbackId="turn-one"/>);
- expect(await screen.findByRole("status")).toHaveTextContent("Chrome blocked autoplay");
+ await waitFor(
+  ()=>expect(screen.getByRole("status")).toHaveTextContent("Audio is ready. Select Play tutor voice to continue."),
+  {timeout:5_000},
+ );
  await userEvent.click(screen.getByRole("button",{name:"Play tutor voice"}));
  await waitFor(()=>expect(play).toHaveBeenCalledTimes(2));
 });
@@ -87,7 +90,7 @@ it("does not silently skip TTS when a stale tutor response omits the turn identi
  expect(await screen.findByText(/The text response remains visible/)).toBeVisible();
   expect(await screen.findByRole("alert")).toHaveTextContent("Tutor voice is not ready for this response");
  expect(speechRequest).not.toHaveBeenCalled();
- expect(warning).toHaveBeenCalledWith("speakmate_tts_event",{event:"request_not_made",reason:"missing_turn_id"});
+ expect(warning).not.toHaveBeenCalled();
 });
 
 it("requests and plays audio after each of two consecutive tutor turns",async()=>{
@@ -110,7 +113,32 @@ it("requests and plays audio after each of two consecutive tutor turns",async()=
  expect(speechRequest).toHaveBeenCalledTimes(2);
  expect(play).toHaveBeenCalledTimes(2);
   expect(screen.queryByText(/Voice: cedar/)).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Current tutor response")).toHaveTextContent("Second tutor answer. Second question?");
+ expect(screen.getByLabelText("Current tutor response")).toHaveTextContent("Second tutor answer. Second question?");
+});
+
+it("ignores a stale earlier TTS fetch when the learner continues before audio is ready",async()=>{
+ let resolveFirstSpeech:((speech:TutorSpeech)=>void)|undefined;
+ vi.spyOn(api,"conversation").mockResolvedValue({id:"conversation-stale-audio"});
+ vi.spyOn(api,"turn")
+  .mockResolvedValueOnce({turn_id:"slow-turn",tutor_message:"First answer.",next_question:"First question?",vocabulary_suggestions:[]})
+  .mockResolvedValueOnce({turn_id:"current-turn",tutor_message:"Current answer.",next_question:"Current question?",vocabulary_suggestions:[]});
+ const speechRequest=vi.spyOn(api,"speech")
+  .mockImplementationOnce(()=>new Promise<TutorSpeech>((resolve)=>{resolveFirstSpeech=resolve;}))
+  .mockResolvedValueOnce(secondSpeech);
+ render(<RouterProvider><ConversationScreen account={account} tutor={ananya} languageMode="ENGLISH"/></RouterProvider>);
+ await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
+ const input=screen.getByLabelText("Your message");
+ await userEvent.type(input,"First learner turn.");
+ await userEvent.click(screen.getByRole("button",{name:"Send"}));
+ await waitFor(()=>expect(speechRequest).toHaveBeenCalledTimes(1));
+ await userEvent.type(input,"Second learner turn.");
+ await userEvent.click(screen.getByRole("button",{name:"Send"}));
+ await waitFor(()=>expect(speechRequest).toHaveBeenCalledTimes(2));
+ await waitFor(()=>expect(play).toHaveBeenCalledTimes(1));
+ resolveFirstSpeech?.(firstSpeech);
+ await waitFor(()=>expect(screen.getByLabelText("Current tutor response")).toHaveTextContent("Current answer. Current question?"));
+ expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+ expect(play).toHaveBeenCalledTimes(1);
 });
 
 it("keeps tutor text usable when TTS fails and offers an explicit audio-only retry",async()=>{

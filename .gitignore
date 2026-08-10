@@ -7,6 +7,7 @@ frontend/dist/
 frontend/coverage/
 frontend/playwright-report/
 frontend/test-results/
+frontend/debug.log
 frontend/*.tsbuildinfo
 .coverage
 htmlcov/

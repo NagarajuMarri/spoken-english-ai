@@ -57,7 +57,8 @@ describe("production Nginx security boundary", () => {
     expect(source).toContain("connect-src 'self'");
     expect(source).toContain("media-src 'self' blob:");
     expect(source).toContain("object-src 'none'");
-    expect(source).toContain("script-src 'self'");
+    expect(source).toContain("script-src 'self' 'wasm-unsafe-eval'");
+    expect(source).not.toContain("'unsafe-eval'");
     expect(source).toContain("style-src 'self'");
     expect(source).toContain("microphone=(self)");
     expect(source).toContain("camera=()");

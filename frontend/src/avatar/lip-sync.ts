@@ -50,6 +50,18 @@ export function mouthShapeAtPlaybackTime(currentTimeMs: number, durationMs: numb
   return APPROXIMATE_CYCLE[Math.floor(currentTimeMs / 120) % APPROXIMATE_CYCLE.length];
 }
 
+/**
+ * Maps a normalized Web Audio RMS amplitude to the small set of renderer-neutral
+ * mouth poses. Runtime playback uses this signal when provider visemes are not
+ * available, so silence stays still instead of advancing an arbitrary timer.
+ */
+export function mouthShapeFromAmplitude(amplitude: number): MouthShape {
+  if (!Number.isFinite(amplitude) || amplitude < 0.025) return "REST";
+  if (amplitude < 0.075) return "SMALL";
+  if (amplitude < 0.16) return "MEDIUM";
+  return "WIDE";
+}
+
 export function mouthShapeFromContract(contract: LipSyncContract, currentTimeMs: number): MouthShape {
   const event = contract.visemes.find(
     (candidate) => currentTimeMs >= candidate.start_ms && currentTimeMs < candidate.end_ms,

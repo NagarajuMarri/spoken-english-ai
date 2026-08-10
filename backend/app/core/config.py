@@ -1,4 +1,6 @@
+from email.utils import parseaddr
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +29,10 @@ class Settings(BaseSettings):
     password_minimum_length: int = 12
     password_maximum_bytes: int = 72
     password_reset_token_lifetime_minutes: int = 30
+    password_reset_minimum_response_milliseconds: int = 250
+    password_reset_job_max_attempts: int = 3
+    password_reset_job_idempotency_ttl_seconds: int = 3_600
+    password_reset_job_retry_delay_seconds: int = 5
     password_reset_delivery_provider: str = "development_file"
     password_reset_development_outbox_path: str = ".local-password-reset-outbox.jsonl"
     password_reset_email_from: str = "no-reply@example.com"
@@ -34,6 +40,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_username: str = ""
     smtp_password: str = ""
+    smtp_timeout_seconds: int = 10
     login_attempt_limit: int = 5
     build_identifier: str = "development"
     expose_development_metrics: bool = False
@@ -170,6 +177,29 @@ class Settings(BaseSettings):
             raise ValueError("openai_tts_arjun_voice is unsupported")
         if not 0.5 <= self.openai_tts_speed <= 2:
             raise ValueError("openai_tts_speed must be between 0.5 and 2")
+        if not 0 <= self.password_reset_minimum_response_milliseconds <= 2_000:
+            raise ValueError(
+                "password_reset_minimum_response_milliseconds must be between 0 and 2000"
+            )
+        if not 1 <= self.password_reset_job_max_attempts <= 5:
+            raise ValueError("password_reset_job_max_attempts must be between 1 and 5")
+        if not 1 <= self.password_reset_job_retry_delay_seconds <= 60:
+            raise ValueError("password_reset_job_retry_delay_seconds must be between 1 and 60")
+        if (
+            self.password_reset_job_idempotency_ttl_seconds
+            < self.password_reset_token_lifetime_minutes * 60
+        ):
+            raise ValueError(
+                "password_reset_job_idempotency_ttl_seconds must cover the reset token lifetime"
+            )
+        if not 10 <= self.worker_heartbeat_ttl_seconds <= 300:
+            raise ValueError("worker_heartbeat_ttl_seconds must be between 10 and 300")
+        if not 1 <= self.smtp_port <= 65_535:
+            raise ValueError("smtp_port must be between 1 and 65535")
+        if not 1 <= self.smtp_timeout_seconds <= 60:
+            raise ValueError("smtp_timeout_seconds must be between 1 and 60")
+        if bool(self.smtp_username) != bool(self.smtp_password):
+            raise ValueError("smtp_username and smtp_password must be configured together")
         if self.environment != "production":
             return self
         missing = []
@@ -211,16 +241,49 @@ class Settings(BaseSettings):
             missing.append("razorpay_webhook_secret")
         if self.razorpay_enabled and self.razorpay_mode != "test":
             missing.append("razorpay_test_mode")
-        if self.redis_required and not self.redis_url:
+        redis_url = urlsplit(self.redis_url)
+        if not self.redis_required:
+            missing.append("redis_required")
+        if redis_url.scheme != "rediss" or not redis_url.hostname:
             missing.append("redis_url")
+        if not self.worker_enabled:
+            missing.append("worker_enabled")
         if self.object_storage_backend not in {"local", "s3"}:
             missing.append("object_storage_backend")
         if self.object_storage_backend == "s3" and not self.object_storage_bucket:
             missing.append("object_storage_bucket")
         if self.object_storage_backend == "local":
             missing.append("object_storage_backend")
-        if self.password_reset_delivery_provider != "smtp" or not self.smtp_host:
+        frontend_url = urlsplit(self.public_frontend_url)
+        if (
+            frontend_url.scheme != "https"
+            or not frontend_url.hostname
+            or frontend_url.username is not None
+            or frontend_url.password is not None
+            or frontend_url.query
+            or frontend_url.fragment
+        ):
+            missing.append("public_frontend_url")
+        _, sender_address = parseaddr(self.password_reset_email_from)
+        sender_domain = sender_address.rpartition("@")[2].casefold()
+        if (
+            not sender_address
+            or not sender_domain
+            or sender_domain in {"example.com", "example.org", "example.net", "example.invalid", "localhost"}
+            or sender_domain.endswith(".invalid")
+        ):
+            missing.append("password_reset_email_from")
+        smtp_host = self.smtp_host.strip().casefold()
+        if self.password_reset_delivery_provider != "smtp":
             missing.append("password_reset_delivery_provider")
+        if not smtp_host or smtp_host in {"smtp_host", "smtp.example.com"} or smtp_host.endswith(".invalid"):
+            missing.append("smtp_host")
+        if not self.smtp_username or self.smtp_username == "FROM_SECRET_STORE":
+            missing.append("smtp_username")
+        if not self.smtp_password or self.smtp_password == "FROM_SECRET_STORE":
+            missing.append("smtp_password")
+        if self.password_reset_minimum_response_milliseconds < 200:
+            missing.append("password_reset_minimum_response_milliseconds")
         if missing:
             raise ValueError("Unsafe production configuration; missing: " + ", ".join(dict.fromkeys(missing)))
         if self.debug or self.auto_create_tables:
@@ -265,7 +328,12 @@ class Settings(BaseSettings):
 
     def providers_ready(self) -> bool:
         reset_delivery_ready = (
-            (self.password_reset_delivery_provider == "smtp" and bool(self.smtp_host))
+            (
+                self.password_reset_delivery_provider == "smtp"
+                and bool(self.smtp_host)
+                and bool(self.smtp_username)
+                and bool(self.smtp_password)
+            )
             or (self.environment != "production" and self.password_reset_delivery_provider == "development_file")
             or (self.environment == "test" and self.password_reset_delivery_provider == "memory")
         )
@@ -281,6 +349,10 @@ class Settings(BaseSettings):
                 self.language_review_provider,
             } or bool(self.openai_api_key))
             and reset_delivery_ready
+            and (
+                self.environment != "production"
+                or (self.redis_required and bool(self.redis_url) and self.worker_enabled)
+            )
         )
 
     model_config = SettingsConfigDict(

@@ -18,8 +18,37 @@ from backend.app.services.learning import LearningService
 from backend.app.services.voice import VoiceService
 from backend.app.core.security import Principal, current_principal, ensure_owner, require_learner_owner
 from backend.app.core.operations import audit_event, enforce_rate_limit
+from backend.app.core.errors import AppError
+from backend.app.transcript_safety import UnusableTranscript, safe_transcript
+from backend.app.unicode_safety import UnicodeSafetyError, normalize_output_text
 
 router = APIRouter(prefix="/api/v1", tags=["voice"])
+
+
+def _safe_voice_turn_payload(turn) -> dict:
+    try:
+        transcript = safe_transcript(turn.transcript)
+        tutor_text = normalize_output_text(turn.tutor_text, allow_telugu=True)
+        correction_summary = (
+            normalize_output_text(turn.correction_summary, allow_telugu=True)
+            if turn.correction_summary is not None
+            else None
+        )
+    except (UnusableTranscript, UnicodeSafetyError) as exc:
+        raise AppError(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "voice_output_invalid",
+            "This voice turn contains text that cannot be displayed safely.",
+            retryable=False,
+        ) from exc
+    return {
+        "id": turn.id,
+        "turn_number": turn.turn_number,
+        "transcript": transcript,
+        "tutor_text": tutor_text,
+        "correction_summary": correction_summary,
+        "synthetic_audio_reference": turn.synthetic_audio_reference,
+    }
 
 
 def service(request: Request, session: Session) -> VoiceService:
@@ -34,7 +63,8 @@ def session_payload(item):
     return {
         "id": item.id, "learner_id": item.learner_id, "scenario_id": item.scenario_id,
         "status": item.status, "created_at": item.created_at, "completed_at": item.completed_at,
-        "turns": item.turns, "audio_assets": item.assets,
+        "turns": [_safe_voice_turn_payload(turn) for turn in item.turns],
+        "audio_assets": item.assets,
     }
 
 
@@ -84,7 +114,10 @@ def add_voice_turn(session_id: str, data: VoiceTurnCreate, request: Request, pri
     voice = service(request, session)
     ensure_owner(voice.get_session(session_id).learner_id, principal)
     turn, assessment = voice.add_turn(session_id, data)
-    return {**turn.__dict__, "pronunciation_assessment": asdict(assessment)}
+    return {
+        **_safe_voice_turn_payload(turn),
+        "pronunciation_assessment": asdict(assessment),
+    }
 
 
 @router.post("/voice-sessions/{session_id}/complete", response_model=VoiceSessionRead)

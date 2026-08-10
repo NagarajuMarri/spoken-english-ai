@@ -1,6 +1,6 @@
-import { mouthShapeAtPlaybackTime, type MouthShape } from "./lip-sync";
+import { mouthShapeFromAmplitude, type MouthShape } from "./lip-sync";
 
-export type TutorState = "IDLE" | "LISTENING" | "THINKING" | "SPEAKING" | "ERROR";
+export type TutorState = "IDLE" | "LISTENING" | "THINKING" | "SPEAKING" | "SUCCESS" | "RETRY" | "ERROR";
 export type TutorExpression = "NEUTRAL" | "POSITIVE" | "ENCOURAGING" | "CORRECTIVE";
 
 export interface TutorPresentation {
@@ -19,7 +19,7 @@ export type TutorEvent =
   | { type: "TUTOR_RESPONSE_READY"; expression: TutorExpression }
   | { type: "AUDIO_SOURCE_READY"; playbackId: string }
   | { type: "AUDIO_PLAYBACK_STARTED"; playbackId: string }
-  | { type: "AUDIO_PLAYBACK_FRAME"; playbackId: string; currentTimeMs: number; durationMs: number }
+  | { type: "AUDIO_PLAYBACK_FRAME"; playbackId: string; currentTimeMs: number; durationMs: number; amplitude: number }
   | { type: "AUDIO_PLAYBACK_PAUSED"; playbackId: string }
   | { type: "AUDIO_PLAYBACK_STOPPED"; playbackId: string }
   | { type: "AUDIO_PLAYBACK_ENDED"; playbackId: string }
@@ -41,11 +41,15 @@ export function normalizeExpression(value?: string): TutorExpression {
 
 function idle(
   presentation: TutorPresentation,
-  { completedId, retainSource = false }: { completedId?: string; retainSource?: boolean } = {},
+  {
+    completedId,
+    retainSource = false,
+    retainExpression = false,
+  }: { completedId?: string; retainSource?: boolean; retainExpression?: boolean } = {},
 ): TutorPresentation {
   const next: TutorPresentation = {
     state: "IDLE",
-    expression: "NEUTRAL",
+    expression: retainExpression ? presentation.expression : "NEUTRAL",
     mouth: "REST",
     lastCompletedPlaybackId: completedId ?? presentation.lastCompletedPlaybackId,
   };
@@ -57,6 +61,22 @@ function idle(
 
 function ownsPlayback(presentation: TutorPresentation, playbackId: string) {
   return presentation.activePlaybackId === playbackId;
+}
+
+function settledAfterSpeech(presentation: TutorPresentation, playbackId: string): TutorPresentation {
+  const state: TutorState = presentation.expression === "CORRECTIVE"
+    ? "RETRY"
+    : presentation.expression === "POSITIVE" || presentation.expression === "ENCOURAGING"
+      ? "SUCCESS"
+      : "LISTENING";
+  return {
+    ...presentation,
+    state,
+    mouth: "REST",
+    activePlaybackId: playbackId,
+    lastCompletedPlaybackId: playbackId,
+    errorCode: undefined,
+  };
 }
 
 export function reduceTutorPresentation(
@@ -83,23 +103,23 @@ export function reduceTutorPresentation(
       };
     case "AUDIO_PLAYBACK_STARTED":
       if (!ownsPlayback(presentation, event.playbackId)) return presentation;
-      return { ...presentation, state: "SPEAKING", mouth: "SMALL", errorCode: undefined };
+      return { ...presentation, state: "SPEAKING", mouth: "REST", errorCode: undefined };
     case "AUDIO_PLAYBACK_FRAME":
       if (!ownsPlayback(presentation, event.playbackId) || presentation.state !== "SPEAKING") {
         return presentation;
       }
       return {
         ...presentation,
-        mouth: mouthShapeAtPlaybackTime(event.currentTimeMs, event.durationMs),
+        mouth: mouthShapeFromAmplitude(event.amplitude),
       };
     case "AUDIO_PLAYBACK_PAUSED":
     case "AUDIO_PLAYBACK_STOPPED":
       return ownsPlayback(presentation, event.playbackId)
-        ? idle(presentation, { retainSource: true })
+        ? idle(presentation, { retainSource: true, retainExpression: true })
         : presentation;
     case "AUDIO_PLAYBACK_ENDED":
       return ownsPlayback(presentation, event.playbackId)
-        ? idle(presentation, { completedId: event.playbackId, retainSource: true })
+        ? settledAfterSpeech(presentation, event.playbackId)
         : presentation;
     case "AUDIO_PLAYBACK_ERROR":
       if (!ownsPlayback(presentation, event.playbackId)) return presentation;

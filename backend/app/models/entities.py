@@ -148,6 +148,9 @@ class AITurnAttempt(Base):
         ForeignKey("learners.id", ondelete="CASCADE"), index=True
     )
     idempotency_key: Mapped[str] = mapped_column(String(100))
+    turn_kind: Mapped[str] = mapped_column(
+        String(20), default="LEARNER", server_default="LEARNER", index=True
+    )
     learner_text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(30), index=True)
     failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)

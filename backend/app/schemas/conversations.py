@@ -42,5 +42,6 @@ class ConversationRead(BaseModel):
     learner_id: str
     scenario_id: str
     opening_prompt: str
+    opening_turn_id: str | None = None
     created_at: datetime
     messages: list[MessageRead]

@@ -10,9 +10,12 @@ from backend.app.integrations.llm import RuleBasedLLMProvider
 from backend.app.integrations.pronunciation import FakePronunciationAssessmentProvider
 from backend.app.integrations.speech_to_text import FakeSpeechToTextProvider
 from backend.app.integrations.text_to_speech import FakeTextToSpeechProvider
+from backend.app.domain.tutor import TutorTurn
 from backend.app.models import AudioAsset, SecurityAuditEvent
 from backend.app.repositories.learners import LearnerRepository
 from backend.app.repositories.voice import VoiceRepository
+from backend.app.transcript_safety import UnusableTranscript, safe_transcript
+from backend.app.unicode_safety import UnicodeSafetyError, normalize_output_text
 
 ALLOWED_MEDIA_TYPES = {"audio/wav", "audio/mpeg", "audio/webm"}
 SAFE_STORAGE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
@@ -102,8 +105,41 @@ class VoiceService:
             or "//" in key
         ):
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "unsafe_storage_key", "Unsafe simulated audio reference.")
-        transcript = FakeSpeechToTextProvider(data.fake_transcript or "Local test transcript.").transcribe(b"")
+        raw_transcript = FakeSpeechToTextProvider(
+            data.fake_transcript or "Local test transcript."
+        ).transcribe(b"")
+        try:
+            transcript = safe_transcript(raw_transcript)
+        except UnusableTranscript as exc:
+            raise AppError(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "unusable_transcript",
+                "The transcript contains unsupported or malformed text.",
+                retryable=False,
+            ) from exc
         tutor_turn = self.llm.generate_tutor_response(transcript, data.include_telugu_explanation)
+        try:
+            tutor_turn = TutorTurn(
+                response=normalize_output_text(
+                    tutor_turn.response,
+                    allow_telugu=data.include_telugu_explanation,
+                ),
+                correction=(
+                    normalize_output_text(
+                        tutor_turn.correction,
+                        allow_telugu=data.include_telugu_explanation,
+                    )
+                    if tutor_turn.correction is not None
+                    else None
+                ),
+            )
+        except UnicodeSafetyError as exc:
+            raise AppError(
+                status.HTTP_502_BAD_GATEWAY,
+                "invalid_tutor_output",
+                "The tutor response could not be validated.",
+                retryable=False,
+            ) from exc
         self.tts.synthesize(tutor_turn.response)
         now = datetime.now(timezone.utc)
         retained = consent["audio_storage_consent"]

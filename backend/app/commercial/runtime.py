@@ -5,7 +5,7 @@ from math import ceil
 from typing import Any, cast
 
 from fastapi import status
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
@@ -92,6 +92,10 @@ class RuntimeEntitlementService:
             ai_turns = self.session.scalar(
                 select(func.count()).select_from(AITurnAttempt).where(
                     AITurnAttempt.learner_id == learner_id,
+                    or_(
+                        AITurnAttempt.turn_kind.is_(None),
+                        AITurnAttempt.turn_kind != "OPENING",
+                    ),
                     AITurnAttempt.created_at >= self._day_start(),
                 )
             ) or 0

@@ -8,6 +8,16 @@ from typing import Callable
 from uuid import uuid4
 
 
+_IDEMPOTENT_SUBMIT_SCRIPT = """
+local claimed = redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[3])
+if claimed then
+  redis.call('LPUSH', KEYS[2], ARGV[2])
+  return 1
+end
+return 0
+"""
+
+
 class JobStatus(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
@@ -26,6 +36,7 @@ class Job:
     status: JobStatus = JobStatus.QUEUED
     attempts: int = 0
     audit: list[dict[str, str]] = field(default_factory=list)
+    receipt: bytes | str | None = field(default=None, repr=False, compare=False)
 
 
 class InMemoryJobQueue:
@@ -74,35 +85,81 @@ class RedisJobQueue:
     def __init__(self, client, namespace: str = "spoken-english") -> None:
         self.client = client
         self.queue_key = f"{namespace}:jobs"
+        self.processing_key = f"{namespace}:jobs:processing"
         self.dead_letter_key = f"{namespace}:jobs:dead-letter"
         self.idempotency_prefix = f"{namespace}:job:idempotency:"
 
     def submit(self, job: Job, idempotency_ttl_seconds: int = 86_400) -> Job:
-        claimed = self.client.set(
-            self.idempotency_prefix + job.idempotency_key,
+        idempotency_key = self.idempotency_prefix + job.idempotency_key
+        self.client.eval(
+            _IDEMPOTENT_SUBMIT_SCRIPT,
+            2,
+            idempotency_key,
+            self.queue_key,
             job.job_id,
-            nx=True,
-            ex=idempotency_ttl_seconds,
+            self._encode(job),
+            idempotency_ttl_seconds,
         )
-        if claimed:
-            self.client.lpush(self.queue_key, self._encode(job))
         return job
 
     def take(self, timeout_seconds: int = 5) -> Job | None:
-        item = self.client.brpop(self.queue_key, timeout=timeout_seconds)
-        return self._decode(item[1]) if item else None
+        payload = self.client.brpoplpush(
+            self.queue_key,
+            self.processing_key,
+            timeout=timeout_seconds,
+        )
+        if payload is None:
+            return None
+        job = self._decode(payload)
+        job.receipt = payload
+        job.status = JobStatus.RUNNING
+        return job
 
     def complete(self, job: Job) -> None:
         job.status = JobStatus.SUCCEEDED
+        self._acknowledge(job)
 
-    def fail(self, job: Job) -> None:
+    def fail(
+        self,
+        job: Job,
+        *,
+        dead_letter_payload: dict[str, str] | None = None,
+    ) -> None:
         job.attempts += 1
         if job.attempts < job.max_attempts:
             job.status = JobStatus.RETRYING
-            self.client.lpush(self.queue_key, self._encode(job))
+            self._transfer(job, self.queue_key)
         else:
             job.status = JobStatus.DEAD_LETTER
-            self.client.lpush(self.dead_letter_key, self._encode(job))
+            if dead_letter_payload is not None:
+                job.payload = dict(dead_letter_payload)
+                job.idempotency_key = "redacted"
+            self._transfer(job, self.dead_letter_key)
+
+    def recover_inflight(self) -> int:
+        """Return work left in-flight by a stopped single-replica worker."""
+
+        recovered = 0
+        while self.client.rpoplpush(self.processing_key, self.queue_key) is not None:
+            recovered += 1
+        return recovered
+
+    def _acknowledge(self, job: Job) -> None:
+        if job.receipt is None:
+            return
+        self.client.lrem(self.processing_key, 1, job.receipt)
+        job.receipt = None
+
+    def _transfer(self, job: Job, destination: str) -> None:
+        encoded = self._encode(job)
+        if job.receipt is None:
+            self.client.lpush(destination, encoded)
+            return
+        pipeline = self.client.pipeline(transaction=True)
+        pipeline.lrem(self.processing_key, 1, job.receipt)
+        pipeline.lpush(destination, encoded)
+        pipeline.execute()
+        job.receipt = None
 
     @staticmethod
     def _encode(job: Job) -> str:

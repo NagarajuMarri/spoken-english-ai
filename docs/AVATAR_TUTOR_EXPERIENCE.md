@@ -1,17 +1,33 @@
 # Avatar tutor learner experience
 
-Milestone 8 adds a learner-facing web experience at `/` and two configuration-driven Indian-English tutors: Ananya and Arjun. Learners choose a tutor during onboarding and may change that preference later in Settings. Tutor configuration includes identity, gender, avatar, voice, accent, teaching, animation, prompt, vocabulary, and enabled status.
+SpeakMate presents Ananya as a real-time, rigged 3D tutor in the focused Voice-mode lesson surface. The renderer uses Three.js and a bundled, Meshopt-compressed GLB model in chest-up live-class framing. The model has natural blink and eye motion, subtle breathing and head motion, and distinct `IDLE`, `LISTENING`, `THINKING`, `SPEAKING`, `SUCCESS`, and `RETRY` behavior. Arjun retains his configured portrait; the Ananya model is never reused as Arjun.
 
-The browser is the microphone and playback boundary. Captured microphone bytes are sent through the consent-gated server STT boundary, while accepted tutor text is rendered through the server OpenAI TTS boundary and an HTML audio element. Typed practice remains available when browser recording is unavailable.
+The browser is the microphone and playback boundary. Captured microphone bytes are sent through the consent-gated server STT boundary, while accepted tutor text is rendered through the server TTS boundary and an HTML audio element. Typed practice remains available when browser recording is unavailable.
 
-The current avatar maturity is **ANIMATED_2D_TUTOR**: distinct photographic tutor portraits receive accessible 2D state animation. A human-like photorealistic video avatar is not implemented. A headless presentation controller owns idle, listening, thinking, speaking, positive, encouraging, corrective, interruption, error and recovery behavior. The 2D renderer consumes a neutral frame contract and can later be replaced by a 3D renderer without moving microphone, tutor-turn or audio-lifecycle logic.
+## Multimedia runtime layer
 
-Voice maturity is **OPENAI_TTS_PLAYBACK_BOUNDARY**. Browser capture is consent-gated, bounded to accepted audio types, five MiB, and 60 seconds, and raw audio is not stored in browser storage. Tutor audio is requested for the exact completed tutor turn.
+Conversation and AI code emit semantic events into `SpeakMateMultimediaRuntime`; they do not manipulate Three.js objects, animation loops, or mouth geometry. The runtime coordinates the authoritative tutor presentation, real audio lifecycle, expression, replaceable lip-sync strategy, reduced-motion behavior, animation clock, and renderer fallback contract:
 
-Lip-sync maturity is **AUDIO_LIFECYCLE_APPROXIMATE**. Speaking begins only from the real audio element's `play` event. Mouth shapes are sampled from the element's real `currentTime` while playback is active and stop on pause, stop, end, interruption or error. There is no fixed fake speaking timer and no phoneme-accuracy claim. The provider-neutral contract can accept timed visemes later without changing the controller or renderer interface.
+`Conversation Engine -> Tutor Response -> TTS -> Multimedia Runtime -> renderer / animation / audio / lip-sync / expression / device fallback`
 
-The frontend stores the rotating access/refresh pair only in origin-scoped `sessionStorage` to support restoration within a browser tab. It never stores passwords or audio. Logout, logout-all, refresh rejection, and authentication failure clear the session. Production deployment must add a restrictive Content Security Policy and should prefer a hardened same-site cookie/BFF design where available.
+The React bridge adapts runtime snapshots to the learner screen, while the renderer-neutral frame can be consumed by the bundled-model, lightweight-3D, portrait, or future tutor implementations. `MultimediaAudioPort` keeps play, replay, stop, mute, and lifecycle publication provider-neutral. The default `AmplitudeLipSyncProvider` consumes measured Web Audio frames; a future timestamped `LipSyncProvider` can supply phoneme/viseme poses without changing the conversation engine or renderer contract.
 
-Only individual learners are in scope. Parent and teacher portals are excluded. The MVP tutor catalogue is Indian English only. New personas, accents, exam modes, and coaching products are data configuration rather than conditional UI implementations.
+## Rendering and fallback boundary
 
-Subscription fields are exposed as an integration-ready boundary; payment processing and deployment are not part of this milestone. The typed avatar and lip-sync adapters remain ready for later 3D or video-avatar integration without changing learner routes.
+The presentation controller remains renderer-neutral. On a capable device, Ananya first renders a lightweight volumetric 3D tutor and upgrades to the bundled rigged model when it is ready. Save-data and devices reporting no more than two logical cores retain the lightweight 3D renderer. A missing WebGL context, initialization/render exception, or lost context falls back to Ananya's portrait without trapping the lesson. Reduced-motion mode preserves visible and announced state while suppressing continuous character motion.
+
+The model asset provenance, upstream revision, source and optimized SHA-256 hashes, CC0 declaration, and transformation steps are recorded in `frontend/public/models/README.md`. The optimized GLB is 13,918,296 bytes and is fetched only by the capable-device upgrade path. Renderer initialization and model-load duration are measured separately; after a five-second active window the renderer also reports capped average FPS and, only where the browser exposes it, aggregate JavaScript heap usage. These metrics contain no learner text, audio, account, request, or playback identifiers.
+
+Both supported static-serving paths expose the bundled `/models` directory. Their Content Security Policy permits the narrowly scoped `wasm-unsafe-eval` source required by Three.js Meshopt decoding while continuing to forbid general `unsafe-eval`.
+
+## Playback synchronization
+
+Speaking begins only when the active audio element emits a real `playing` event. A browser `AnalyserNode` measures the currently playing tutor audio and drives jaw/viseme amplitude. Pause, stop, end, interruption, source replacement, and error immediately stop mouth movement. Replay reuses the same loaded source and restarts synchronized movement only when playback actually resumes. No fixed speaking timer or phoneme-accuracy claim is made.
+
+The opening tutor turn is a server-owned conversation turn. The learner sees one `Start conversation` action when a browser gesture is needed; that action unlocks and plays the opening greeting exactly once. Later tutor replies auto-play where browser policy permits. A persistent opening-audio failure has an explicit continue-without-audio path, so the learner is never locked out of the lesson.
+
+## Security and product boundary
+
+Raw audio is not stored in browser storage. The rotating access/refresh pair remains in origin-scoped `sessionStorage`; logout, logout-all, refresh rejection, and authentication failure clear it. Production deployment must add the approved Content Security Policy and should prefer a hardened same-site cookie/BFF design where available.
+
+Only individual learners are in scope. Subscription fields are an integration boundary; real payment, deployment, public release, and production authorization are outside this engineering candidate. Subjective naturalness, audible synchronization, and physical microphone/speaker behavior remain founder device gates.

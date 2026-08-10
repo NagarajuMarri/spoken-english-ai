@@ -1,52 +1,121 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { TutorSpeech } from "../models";
+import type { MultimediaAudioTransport } from "../multimedia/contracts";
+import {
+  engineeringDiagnosticInfo,
+  engineeringDiagnosticWarning,
+} from "../telemetry/engineering-diagnostics";
 
 export type AudioLifecycleEvent =
   | { type: "SOURCE_READY"; playbackId: string }
   | { type: "PLAYBACK_STARTED"; playbackId: string }
-  | { type: "PLAYBACK_FRAME"; playbackId: string; currentTimeMs: number; durationMs: number }
+  | { type: "PLAYBACK_FRAME"; playbackId: string; currentTimeMs: number; durationMs: number; amplitude: number }
   | { type: "PLAYBACK_PAUSED"; playbackId: string }
   | { type: "PLAYBACK_STOPPED"; playbackId: string }
   | { type: "PLAYBACK_ENDED"; playbackId: string }
   | { type: "PLAYBACK_ERROR"; playbackId: string; errorCode: string };
 
-export function TutorAudioPlayer({
-  speech,
-  spokenText,
-  playbackId,
-  interruptSequence = 0,
-  compact = false,
-  showDiagnostics = false,
-  onLifecycle,
-}: {
+export type TutorAudioPlayerHandle = MultimediaAudioTransport;
+
+interface TutorAudioPlayerProps {
   speech: TutorSpeech | null;
   spokenText: string;
   playbackId: string;
   interruptSequence?: number;
   compact?: boolean;
   showDiagnostics?: boolean;
+  autoPlay?: boolean;
+  trackAmplitude?: boolean;
+  controlsVisible?: boolean;
+  commandPort?: MultimediaAudioTransport;
+  onAutoplayBlocked?: () => void;
   onLifecycle?: (event: AudioLifecycleEvent) => void;
-}) {
+}
+
+export const TutorAudioPlayer = forwardRef<TutorAudioPlayerHandle, TutorAudioPlayerProps>(function TutorAudioPlayer({
+  speech,
+  spokenText,
+  playbackId,
+  interruptSequence = 0,
+  compact = false,
+  showDiagnostics = false,
+  autoPlay = true,
+  trackAmplitude = true,
+  controlsVisible = true,
+  commandPort,
+  onAutoplayBlocked,
+  onLifecycle,
+}: TutorAudioPlayerProps, ref) {
   const audio = useRef<HTMLAudioElement>(null);
   const objectUrl = useRef("");
   const animationFrame = useRef<number | undefined>(undefined);
   const lifecycle = useRef(onLifecycle);
+  const autoplayBlocked = useRef(onAutoplayBlocked);
   const sourcePlaybackId = useRef("");
   const ignoreNextPause = useRef(false);
+  const audioContext = useRef<AudioContext | null>(null);
+  const analyser = useRef<AnalyserNode | null>(null);
+  const mediaSource = useRef<MediaElementAudioSourceNode | null>(null);
+  const timeDomainData = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const smoothedAmplitude = useRef(0);
   const [status, setStatus] = useState("Tutor voice ready.");
   const [muted, setMuted] = useState(false);
+  const playbackRequest = useRef<((kind: "autoplay" | "manual" | "replay") => Promise<boolean>) | undefined>(undefined);
 
   useEffect(() => {
     lifecycle.current = onLifecycle;
   }, [onLifecycle]);
+
+  useEffect(() => {
+    autoplayBlocked.current = onAutoplayBlocked;
+  }, [onAutoplayBlocked]);
 
   const stopFrameLoop = useCallback(() => {
     if (animationFrame.current !== undefined) window.cancelAnimationFrame(animationFrame.current);
     animationFrame.current = undefined;
   }, []);
 
+  const activateAnalyser = useCallback((player: HTMLAudioElement) => {
+    if (!trackAmplitude || analyser.current) return;
+    const AudioContextConstructor = window.AudioContext
+      ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const context = audioContext.current ?? new AudioContextConstructor();
+    audioContext.current = context;
+    void context.resume().then(() => {
+      if (context.state !== "running" || analyser.current) return;
+      const nextAnalyser = context.createAnalyser();
+      nextAnalyser.fftSize = 512;
+      nextAnalyser.smoothingTimeConstant = 0.45;
+      const source = mediaSource.current ?? context.createMediaElementSource(player);
+      mediaSource.current = source;
+      source.connect(nextAnalyser);
+      nextAnalyser.connect(context.destination);
+      analyser.current = nextAnalyser;
+      timeDomainData.current = new Uint8Array(new ArrayBuffer(nextAnalyser.fftSize));
+    }).catch(() => {
+      // Audio remains usable without visual analysis on restricted/older devices.
+    });
+  }, [trackAmplitude]);
+
+  const readAmplitude = useCallback(() => {
+    const meter = analyser.current;
+    const samples = timeDomainData.current;
+    if (!meter || !samples) return 0;
+    meter.getByteTimeDomainData(samples);
+    let energy = 0;
+    for (const sample of samples) {
+      const normalized = (sample - 128) / 128;
+      energy += normalized * normalized;
+    }
+    const rms = Math.sqrt(energy / samples.length);
+    smoothedAmplitude.current = smoothedAmplitude.current * 0.58 + rms * 0.42;
+    return Math.min(1, smoothedAmplitude.current);
+  }, []);
+
   const startFrameLoop = useCallback((player: HTMLAudioElement, id: string) => {
     stopFrameLoop();
+    if (!trackAmplitude) return;
     const emitFrame = () => {
       if (player.paused || player.ended || sourcePlaybackId.current !== id) {
         animationFrame.current = undefined;
@@ -57,11 +126,41 @@ export function TutorAudioPlayer({
         playbackId: id,
         currentTimeMs: Math.max(0, player.currentTime * 1000),
         durationMs: Number.isFinite(player.duration) ? Math.max(0, player.duration * 1000) : 0,
+        amplitude: readAmplitude(),
       });
       animationFrame.current = window.requestAnimationFrame(emitFrame);
     };
     emitFrame();
-  }, [stopFrameLoop]);
+  }, [readAmplitude, stopFrameLoop, trackAmplitude]);
+
+  const requestPlayback = useCallback(async (kind: "autoplay" | "manual" | "replay") => {
+    const player = audio.current;
+    if (!player || !speech || !sourcePlaybackId.current) return false;
+    if (kind !== "autoplay") activateAnalyser(player);
+    try {
+      await player.play();
+      engineeringDiagnosticInfo("speakmate_tts_event", { event: `${kind}_requested`, playback_id: sourcePlaybackId.current });
+      return true;
+    } catch (error: unknown) {
+      const blocked = error instanceof DOMException && error.name === "NotAllowedError";
+      setStatus(blocked
+        ? controlsVisible
+          ? "Audio is ready. Select Play tutor voice to continue."
+          : "Audio is ready. Start the conversation to hear your tutor."
+        : "Audio is ready. Try again.");
+      if (kind === "autoplay") autoplayBlocked.current?.();
+      engineeringDiagnosticWarning("speakmate_tts_event", {
+        event: blocked ? "browser_playback_blocked" : "browser_playback_failed",
+        reason: blocked ? "autoplay_policy" : "media_error",
+        playback_id: sourcePlaybackId.current,
+      });
+      return false;
+    }
+  }, [activateAnalyser, controlsVisible, speech]);
+
+  useEffect(() => {
+    playbackRequest.current = requestPlayback;
+  }, [requestPlayback]);
 
   useEffect(() => {
     const player = audio.current;
@@ -69,21 +168,12 @@ export function TutorAudioPlayer({
     if (!speech || !player || !playbackId) return;
 
     sourcePlaybackId.current = playbackId;
+    smoothedAmplitude.current = 0;
     objectUrl.current = URL.createObjectURL(speech.blob);
     player.src = objectUrl.current;
     player.load();
     lifecycle.current?.({ type: "SOURCE_READY", playbackId });
-    void player.play().then(() => {
-      console.info("speakmate_tts_event", { event: "autoplay_requested", playback_id: playbackId });
-    }).catch((error: unknown) => {
-      const blocked = error instanceof DOMException && error.name === "NotAllowedError";
-      setStatus(blocked ? "Chrome blocked autoplay. Click Play tutor voice." : "Audio is ready. Click Play tutor voice.");
-      console.warn("speakmate_tts_event", {
-        event: blocked ? "browser_playback_blocked" : "browser_playback_failed",
-        reason: blocked ? "autoplay_policy" : "media_error",
-        playback_id: playbackId,
-      });
-    });
+    if (autoPlay) void playbackRequest.current?.("autoplay");
 
     return () => {
       stopFrameLoop();
@@ -102,7 +192,15 @@ export function TutorAudioPlayer({
       }
       if (sourcePlaybackId.current === releasedPlaybackId) sourcePlaybackId.current = "";
     };
-  }, [playbackId, speech, stopFrameLoop]);
+  }, [autoPlay, playbackId, speech, stopFrameLoop]);
+
+  useEffect(() => () => {
+    void audioContext.current?.close();
+    audioContext.current = null;
+    analyser.current = null;
+    mediaSource.current = null;
+    timeDomainData.current = null;
+  }, []);
 
   useEffect(() => {
     if (interruptSequence === 0) return;
@@ -110,56 +208,77 @@ export function TutorAudioPlayer({
     const player = audio.current;
     stopFrameLoop();
     if (player) {
+      if (!player.paused) ignoreNextPause.current = true;
       player.pause();
       player.currentTime = 0;
     }
+    smoothedAmplitude.current = 0;
     if (interruptedPlaybackId) lifecycle.current?.({ type: "PLAYBACK_STOPPED", playbackId: interruptedPlaybackId });
   }, [interruptSequence, stopFrameLoop]);
 
-  const play = () => {
-    const player = audio.current;
-    if (!player) return;
-    const activeId = sourcePlaybackId.current;
-    console.info("speakmate_tts_event", { event: "manual_play_requested", playback_id: activeId });
-    void player.play().catch(() => {
-      setStatus("Chrome blocked playback. Click the player control to begin.");
-      console.warn("speakmate_tts_event", { event: "browser_playback_blocked", reason: "manual_play_rejected", playback_id: activeId });
-    });
-  };
-
-  const stop = () => {
+  const stop = useCallback(() => {
     const player = audio.current;
     if (!player) return;
     const activeId = sourcePlaybackId.current;
     stopFrameLoop();
+    if (!player.paused) ignoreNextPause.current = true;
     player.pause();
     player.currentTime = 0;
+    smoothedAmplitude.current = 0;
     setStatus("Tutor voice stopped.");
     if (activeId) lifecycle.current?.({ type: "PLAYBACK_STOPPED", playbackId: activeId });
-    console.info("speakmate_tts_event", { event: "playback_stopped", playback_id: activeId });
-  };
+    engineeringDiagnosticInfo("speakmate_tts_event", { event: "playback_stopped", playback_id: activeId });
+  }, [stopFrameLoop]);
 
-  const replay = () => {
+  const pause = useCallback(() => {
     const player = audio.current;
     if (!player) return;
-    const activeId = sourcePlaybackId.current;
+    stopFrameLoop();
+    player.pause();
+  }, [stopFrameLoop]);
+
+  const replay = useCallback(() => {
+    const player = audio.current;
+    if (!player) return Promise.resolve(false);
     player.currentTime = 0;
-    console.info("speakmate_tts_event", { event: "replay_requested", playback_id: activeId });
-    void player.play().catch(() => {
-      setStatus("Click the player control to replay.");
-      console.warn("speakmate_tts_event", { event: "browser_playback_blocked", reason: "replay_rejected", playback_id: activeId });
-    });
-  };
+    smoothedAmplitude.current = 0;
+    return requestPlayback("replay");
+  }, [requestPlayback]);
 
-  const toggleMute = () => {
+  const setMutedValue = useCallback((nextMuted: boolean) => {
     const player = audio.current;
     if (!player) return;
     const activeId = sourcePlaybackId.current;
-    player.muted = !muted;
-    setMuted(!muted);
-    setStatus(!muted ? "Tutor voice muted." : "Tutor voice unmuted.");
-    console.info("speakmate_tts_event", { event: !muted ? "playback_muted" : "playback_unmuted", playback_id: activeId });
-  };
+    player.muted = nextMuted;
+    setMuted(nextMuted);
+    setStatus(nextMuted ? "Tutor voice muted." : "Tutor voice unmuted.");
+    engineeringDiagnosticInfo("speakmate_tts_event", { event: nextMuted ? "playback_muted" : "playback_unmuted", playback_id: activeId });
+  }, []);
+
+  const toggleMute = useCallback(() => setMutedValue(!muted), [muted, setMutedValue]);
+
+  const requestManualPlay = useCallback(() => {
+    void (commandPort?.play() ?? requestPlayback("manual"));
+  }, [commandPort, requestPlayback]);
+  const requestReplay = useCallback(() => {
+    void (commandPort?.replay() ?? replay());
+  }, [commandPort, replay]);
+  const requestStop = useCallback(() => {
+    if (commandPort) commandPort.stop();
+    else stop();
+  }, [commandPort, stop]);
+  const requestMuteToggle = useCallback(() => {
+    if (commandPort) commandPort.setMuted(!muted);
+    else toggleMute();
+  }, [commandPort, muted, toggleMute]);
+
+  useImperativeHandle(ref, () => ({
+    play: () => requestPlayback("manual"),
+    replay,
+    pause,
+    stop,
+    setMuted: setMutedValue,
+  }), [pause, replay, requestPlayback, setMutedValue, stop]);
 
   return (
     <section className={`tutor-audio ${compact ? "compact" : ""}`} aria-label="Tutor voice controls">
@@ -171,13 +290,17 @@ export function TutorAudioPlayer({
         className={showDiagnostics ? "" : "sr-only"}
         preload="auto"
         muted={muted}
-        onPlay={(event) => {
+        onPlay={() => {
+          engineeringDiagnosticInfo("speakmate_tts_event", { event: "media_play", playback_id: sourcePlaybackId.current });
+        }}
+        onPlaying={(event) => {
           const activeId = sourcePlaybackId.current;
           if (!activeId) return;
+          activateAnalyser(event.currentTarget);
           setStatus("Tutor voice is playing.");
           lifecycle.current?.({ type: "PLAYBACK_STARTED", playbackId: activeId });
           startFrameLoop(event.currentTarget, activeId);
-          console.info("speakmate_tts_event", { event: "playback_started", playback_id: activeId, current_time_ms: event.currentTarget.currentTime * 1000 });
+          engineeringDiagnosticInfo("speakmate_tts_event", { event: "playback_started", playback_id: activeId, current_time_ms: event.currentTarget.currentTime * 1000 });
         }}
         onPause={() => {
           stopFrameLoop();
@@ -187,32 +310,34 @@ export function TutorAudioPlayer({
           }
           const activeId = sourcePlaybackId.current;
           if (activeId) lifecycle.current?.({ type: "PLAYBACK_PAUSED", playbackId: activeId });
-          console.info("speakmate_tts_event", { event: "playback_paused", playback_id: activeId });
+          engineeringDiagnosticInfo("speakmate_tts_event", { event: "playback_paused", playback_id: activeId });
         }}
         onEnded={() => {
           stopFrameLoop();
+          smoothedAmplitude.current = 0;
           const activeId = sourcePlaybackId.current;
           setStatus("Tutor voice finished.");
           if (activeId) lifecycle.current?.({ type: "PLAYBACK_ENDED", playbackId: activeId });
-          console.info("speakmate_tts_event", { event: "playback_ended", playback_id: activeId });
+          engineeringDiagnosticInfo("speakmate_tts_event", { event: "playback_ended", playback_id: activeId });
         }}
         onError={() => {
           stopFrameLoop();
+          smoothedAmplitude.current = 0;
           const activeId = sourcePlaybackId.current;
           setStatus("Tutor audio could not be played.");
           if (activeId) lifecycle.current?.({ type: "PLAYBACK_ERROR", playbackId: activeId, errorCode: "browser_audio_error" });
-          console.warn("speakmate_tts_event", { event: "browser_audio_error", playback_id: activeId });
+          engineeringDiagnosticWarning("speakmate_tts_event", { event: "browser_audio_error", playback_id: activeId });
         }}
         aria-label={showDiagnostics && spokenText ? `Tutor voice audio: ${spokenText}` : "Tutor voice audio"}
       />
-      <div className="audio-actions">
-        <button disabled={!speech} onClick={play}>Play tutor voice</button>
-        <button aria-label="Stop tutor voice" disabled={!speech} onClick={stop}>Stop</button>
-        <button aria-label="Replay tutor voice" disabled={!speech} onClick={replay}>Replay</button>
-        <button aria-label={muted ? "Unmute tutor voice" : "Mute tutor voice"} disabled={!speech} aria-pressed={muted} onClick={toggleMute}>{muted ? "Unmute" : "Mute"}</button>
-      </div>
+      {controlsVisible && <div className="audio-actions">
+        <button disabled={!speech} onClick={requestManualPlay}>Play tutor voice</button>
+        <button aria-label="Stop tutor voice" disabled={!speech} onClick={requestStop}>Stop</button>
+        <button aria-label="Replay tutor voice" disabled={!speech} onClick={requestReplay}>Replay</button>
+        <button aria-label={muted ? "Unmute tutor voice" : "Mute tutor voice"} disabled={!speech} aria-pressed={muted} onClick={requestMuteToggle}>{muted ? "Unmute" : "Mute"}</button>
+      </div>}
       <p className={compact ? "sr-only" : undefined} role="status" aria-live="polite">{speech ? status : "No tutor audio yet."}</p>
       {showDiagnostics && speech && <p className="audio-evidence">Provider: {speech.provider} · Model: {speech.model} · Voice: {speech.voice}</p>}
     </section>
   );
-}
+});

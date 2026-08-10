@@ -223,7 +223,8 @@ def test_ai_request_entitlement_is_enforced_before_turn_attempt(client, learner,
                 learner_id=learner["id"],
                 idempotency_key=f"commercial-used-{index}",
                 learner_text="Counted tutor request.",
-                status="COMPLETED",
+                status="FAILED_FINAL",
+                failure_code="provider_unavailable",
             )
             for index in range(limit)
         ])
@@ -235,6 +236,15 @@ def test_ai_request_entitlement_is_enforced_before_turn_attempt(client, learner,
     )
     assert response.status_code == 429
     assert response.json()["error"]["code"] == "daily_ai_request_limit_reached"
+
+
+def test_opening_turn_does_not_consume_learner_ai_request_allowance(client, learner, conversation):
+    configured = replace(
+        client.app.state.commercial_service.config,
+        free_daily_conversations=1,
+    )
+    with client.app.state.session_factory() as session:
+        RuntimeEntitlementService(session, configured).enforce_ai_request(learner["id"])
 
 
 def test_supporting_provider_usage_does_not_double_count_tutor_turn_allowance(client, learner):

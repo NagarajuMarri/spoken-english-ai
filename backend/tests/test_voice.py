@@ -2,7 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 
-from backend.app.models import AudioAsset, ConsentRecord
+from backend.app.domain.tutor import TutorTurn
+from backend.app.integrations.llm import RuleBasedLLMProvider
+from backend.app.models import AudioAsset, ConsentRecord, VoiceTurn
 from backend.app.services.voice import VoiceService
 
 
@@ -152,6 +154,55 @@ def test_media_type_and_storage_key_validation(client, learner):
         response = add_turn(client, session_id, key=key)
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "unsafe_storage_key"
+
+
+def test_legacy_voice_turn_rejects_unsafe_transcript_before_tts_or_persistence(
+    client, learner,
+):
+    set_consent(client, learner)
+    session_id = create_voice_session(client, learner).json()["id"]
+
+    response = add_turn(client, session_id, transcript="a\u1037")
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unusable_transcript"
+    assert "a\u1037" not in response.text
+    with client.app.state.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(VoiceTurn)) == 0
+        assert session.scalar(select(func.count()).select_from(AudioAsset)) == 0
+
+
+def test_legacy_voice_turn_normalizes_transcript_before_persistence(client, learner):
+    set_consent(client, learner)
+    session_id = create_voice_session(client, learner).json()["id"]
+
+    response = add_turn(client, session_id, transcript="Cafe\u0301 is useful.")
+
+    assert response.status_code == 200
+    assert response.json()["transcript"] == "Café is useful."
+    with client.app.state.session_factory() as session:
+        assert session.scalar(select(VoiceTurn)).transcript == "Café is useful."
+
+
+def test_legacy_voice_turn_rejects_tutor_output_before_tts_or_persistence(
+    client, learner, monkeypatch,
+):
+    set_consent(client, learner)
+    session_id = create_voice_session(client, learner).json()["id"]
+    monkeypatch.setattr(
+        RuleBasedLLMProvider,
+        "generate_tutor_response",
+        lambda *_args, **_kwargs: TutorTurn(response="a\u1037"),
+    )
+
+    response = add_turn(client, session_id, transcript="Safe learner text.")
+
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "invalid_tutor_output"
+    assert "a\u1037" not in response.text
+    with client.app.state.session_factory() as session:
+        assert session.scalar(select(func.count()).select_from(VoiceTurn)) == 0
+        assert session.scalar(select(func.count()).select_from(AudioAsset)) == 0
 
 
 def test_cleanup_preserves_retained_asset_with_active_storage_consent(client, learner):

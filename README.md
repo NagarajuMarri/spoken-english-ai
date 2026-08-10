@@ -6,13 +6,16 @@ Spoken English AI is a voice-first learning product for Indian learners, initial
 
 - Feature 5 — OpenAI TTS / audible tutor speech: **ACCEPTED** by the founder in Windows Chrome.
 - Feature 6 — Native Telugu review and spoken correction safety: **ENGINEERING_ACCEPTED_WITH_DEFERRED_DEVICE_GATE**.
-- Feature 7 — Avatar expressions / audio synchronization: **ENGINEERING_ACCEPTED_WITH_DEFERRED_DEVICE_GATE**.
+- Feature 7 — Real 3D Ananya / audio synchronization: **ENGINEERING_REMEDIATED_WITH_DEFERRED_DEVICE_GATE**.
 
-All named RC implementation features are engineering accepted. Final RC regression and one
-consolidated founder device review remain required before release approval. Feature 7 uses real
-HTML audio playback events and audio `currentTime` for speaking and mouth motion; headless
-Chromium verifies stop/reset and replay behavior, but automation does not claim audible output or
-physical-device quality. See `docs/FEATURE_7_AVATAR_AUDIO_SYNC.md`.
+The current RC remediation adds a rigged, web-native 3D Ananya and retains explicit weak-device,
+reduced-motion, and WebGL-failure fallbacks. Speaking starts only from real HTML audio playback
+events, and mouth motion follows measured playback amplitude from a browser audio analyser.
+Conversation and TTS lifecycle events now flow through a reusable, provider-neutral multimedia
+runtime that owns tutor state, lip-sync strategy, animation timing, and renderer fallback contracts.
+Automated checks do not claim audible output, subjective visual quality, or founder physical-device
+acceptance. Final RC regression and one consolidated founder device review remain required before
+release approval. See `docs/FEATURE_7_AVATAR_AUDIO_SYNC.md`.
 
 Native Telugu quality review is a first-class learner capability. Learners choose English,
 English with Telugu explanation, or Telugu-dominant explanation. Telugu modes pass through a
@@ -63,7 +66,7 @@ python -m pytest
 
 ## Roadmap
 
-Milestone 4 implements the local voice/privacy foundation. Next comes authentication, real-upload threat modeling, provider evaluation, and durable deletion jobs. See [ROADMAP.md](docs/ROADMAP.md).
+The RC now includes the voice/privacy foundation, authentication, provider boundaries, upload controls, and durable worker jobs. The next product milestone is structured curriculum work after founder acceptance of the final RC runtime. See [ROADMAP.md](docs/ROADMAP.md).
 ## Authentication
 
 Milestone 5 adds email/password registration, bcrypt password hashing, short-lived JWT access tokens, rotated opaque refresh tokens stored only as SHA-256 hashes, and owner-scoped learner APIs. Configure every `SPOKEN_ENGLISH_JWT_*` setting in deployment; the `.env.example` values are placeholders, not production secrets.
@@ -83,11 +86,11 @@ python examples/deterministic_ai_conversation.py
 python examples/deterministic_voice_tutor.py
 ```
 
-See `docs/PROVIDER_ARCHITECTURE.md` and `docs/VOICE_TUTOR_PIPELINE.md`. The next milestone is the learner-facing frontend consuming these authenticated APIs.
+See `docs/PROVIDER_ARCHITECTURE.md` and `docs/VOICE_TUTOR_PIPELINE.md`. The learner-facing React frontend consumes these authenticated APIs in the current RC.
 
 ## Interactive avatar tutors
 
-Milestone 8 serves the typed React learner experience at `/`, with Ananya and Arjun as configuration-driven Indian-English tutors. It includes explicit guarded routes, session refresh/logout, consent-aware bounded browser microphone input, an animated 2D avatar state machine, approximate-or-provider-timed lip-sync contracts, conversation coaching, optional Telugu preferences, progress and streaks, and a subscription-ready boundary. No live provider, human-like video avatar, payment, or deployment is enabled. Run `python examples/deterministic_tutor_experience.py` for the offline tutor-catalogue example. See `docs/AVATAR_TUTOR_EXPERIENCE.md`.
+Milestone 8 serves the typed React learner experience at `/`, with Ananya and Arjun as configuration-driven Indian-English tutors. The RC remediation gives Ananya a rigged Three.js tutor rendered in live-class framing, with analyser-driven mouth movement and accessible fallbacks; Arjun retains his configured portrait. The experience also includes guarded routes, session refresh/logout, consent-aware bounded browser microphone input, conversation coaching, optional Telugu preferences, progress and streaks, and a subscription-ready boundary. This engineering candidate does not authorize payment, deployment, or production release. Run `python examples/deterministic_tutor_experience.py` for the offline tutor-catalogue example. See `docs/AVATAR_TUTOR_EXPERIENCE.md`.
 
 ## Production infrastructure
 

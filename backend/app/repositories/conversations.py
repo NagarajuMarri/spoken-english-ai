@@ -13,11 +13,16 @@ class ConversationRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def create(self, learner_id: str, scenario_id: str) -> Conversation:
+    def create(
+        self, learner_id: str, scenario_id: str, *, commit: bool = True
+    ) -> Conversation:
         conversation = Conversation(learner_id=learner_id, scenario_id=scenario_id)
         self.session.add(conversation)
-        self.session.commit()
-        self.session.refresh(conversation)
+        if commit:
+            self.session.commit()
+            self.session.refresh(conversation)
+        else:
+            self.session.flush()
         return conversation
 
     def get(self, conversation_id: str) -> Conversation | None:

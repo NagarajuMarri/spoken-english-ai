@@ -18,6 +18,7 @@ export interface CapturedAudio {
   mimeType: string;
   sizeBytes: number;
   durationMs: number;
+  finishedAtMonotonicMs?: number;
 }
 
 const ACCEPTED = [
@@ -45,6 +46,7 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
   const chunks = useRef<Blob[]>([]);
   const bytes = useRef(0);
   const startedAt = useRef(0);
+  const finishedAt = useRef(0);
   const cancelled = useRef(false);
   const abortReason = useRef<"too_large" | "error" | undefined>(undefined);
   const callback = useRef(onCaptured);
@@ -92,6 +94,7 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
     if (recorder.current?.state !== "recording") return;
     if (timer.current !== undefined) window.clearInterval(timer.current);
     timer.current = undefined;
+    finishedAt.current = performance.now();
     setState("processing");
     recorder.current.stop();
   }, []);
@@ -127,6 +130,7 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
       bytes.current = 0;
       cancelled.current = false;
       abortReason.current = undefined;
+      finishedAt.current = 0;
       next.ondataavailable = (event) => {
         if (!event.data.size || cancelled.current) return;
         chunks.current.push(event.data);
@@ -160,7 +164,13 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
         }
         setState("processing");
         try {
-          await callback.current?.({ blob, mimeType: blob.type, sizeBytes: blob.size, durationMs });
+          await callback.current?.({
+            blob,
+            mimeType: blob.type,
+            sizeBytes: blob.size,
+            durationMs,
+            finishedAtMonotonicMs: finishedAt.current || performance.now(),
+          });
           if (mounted.current) setState("ready");
         } catch (error) {
           if (mounted.current) {

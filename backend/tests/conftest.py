@@ -19,6 +19,7 @@ def client(tmp_path):
         text_to_speech_provider="fake",
         language_review_provider="fake",
         password_reset_delivery_provider="memory",
+        password_reset_minimum_response_milliseconds=0,
         _env_file=None,
     )
     app = create_app(settings)

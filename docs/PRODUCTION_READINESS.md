@@ -9,7 +9,7 @@ Milestone 11 packages the modular application for repeatable staging review. It 
 - Private S3-compatible storage holds temporary audio bytes. Relational records retain metadata and time-limited scoped references only.
 - The web image serves the PWA and reverse-proxies same-origin `/api/` and `/health/` requests to the backend. Compose publishes it only on host loopback behind an approved same-host TLS ingress; the exact observed ingress peer is the only trusted forwarded-address source.
 - The STT proxy route streams a bounded upload with buffering disabled. Nginx caps it at `10m`, the backend enforces 10,000,000 bytes, and read-only/tmpfs container storage prevents persistent raw-audio request buffering.
-- Readiness checks schema revision `0017_provider_call_events`, signing keys, configured providers, PostgreSQL, Redis, object storage, payment configuration, password-reset delivery, and the Redis worker heartbeat.
+- Readiness checks schema revision `0018_opening_turns`, signing keys, configured providers, PostgreSQL, Redis, object storage, payment configuration, password-reset delivery, and the Redis worker heartbeat.
 
 ## Release sequence
 
