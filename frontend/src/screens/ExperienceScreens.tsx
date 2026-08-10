@@ -3,7 +3,7 @@ import { normalizeExpression } from "../avatar/machine";
 import { ApiError, api } from "../api/client";
 import { useAuth as requireAuth } from "../auth/AuthProvider";
 import { Avatar } from "../components/Avatar";
-import type { Account, Dashboard, LanguageMode, Tutor, TutorSpeech, VoiceTranscription } from "../models";
+import type { Account, CurriculumLesson, Dashboard, LanguageMode, Tutor, TutorSpeech, VoiceTranscription } from "../models";
 import { useSpeakMateMultimediaRuntime } from "../multimedia";
 import { useRouter } from "../routes/router";
 import {
@@ -20,7 +20,23 @@ import { TutorAudioPlayer, type AudioLifecycleEvent, type TutorAudioPlayerHandle
 import { useMicrophone, type CapturedAudio } from "../voice/useMicrophone";
 
 const ACTIVE_LESSON_TITLE_KEY = "speakmate.active-lesson-title.v1";
-const DAILY_LESSON_TITLE = "A confident morning routine";
+const ACTIVE_LESSON_KEY = "speakmate.active-lesson.v1";
+
+interface ActiveLesson {
+  learnerId: string;
+  lesson: CurriculumLesson;
+  sessionId: string;
+  startedAt: number;
+}
+
+function readActiveLesson(learnerId: string): ActiveLesson | null {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(ACTIVE_LESSON_KEY) ?? "null") as ActiveLesson | null;
+    return value?.learnerId === learnerId && value.lesson?.id && value.sessionId ? value : null;
+  } catch {
+    return null;
+  }
+}
 
 type PracticeMode = "VOICE" | "TEXT";
 type ConversationRole = "learner" | "tutor";
@@ -67,19 +83,46 @@ export function DashboardScreen({ data, tutor }: { data: Dashboard; tutor: Tutor
 
 export function DailyLessonScreen() {
   const { navigate } = useRouter();
-  const beginLesson = () => {
-    sessionStorage.setItem(ACTIVE_LESSON_TITLE_KEY, DAILY_LESSON_TITLE);
-    navigate("/app/conversation");
+  const { account } = useAuthBridge();
+  const [lesson, setLesson] = useState<CurriculumLesson | null>(() => account ? readActiveLesson(account.learner_id)?.lesson ?? null : null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const active = account ? readActiveLesson(account.learner_id) : null;
+  useEffect(() => {
+    if (!account || lesson) return;
+    api.dailyLesson(account.learner_id).then(setLesson).catch(() => setError("Today's lesson could not be loaded. Please retry."));
+  }, [account, lesson]);
+  const beginLesson = async () => {
+    if (!account || !lesson || busy) return;
+    if (active) {
+      navigate("/app/conversation");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const session = await api.createLessonSession(account.learner_id, lesson.id);
+      const value: ActiveLesson = { learnerId: account.learner_id, lesson, sessionId: session.id, startedAt: Date.now() };
+      sessionStorage.setItem(ACTIVE_LESSON_KEY, JSON.stringify(value));
+      sessionStorage.setItem(ACTIVE_LESSON_TITLE_KEY, lesson.title);
+      navigate("/app/conversation");
+    } catch {
+      setError("The lesson could not be started. Please try again.");
+    } finally {
+      setBusy(false);
+    }
   };
+  if (!lesson) return <section className="page"><h1>Structured learning</h1><p>{error || "Preparing today's lesson…"}</p></section>;
   return (
     <section className="page">
-      <h1>{DAILY_LESSON_TITLE}</h1>
+      <h1>{lesson.title}</h1>
       <article className="lesson">
-        <b>10 minutes · Indian English</b>
-        <h2>Describe your morning clearly</h2>
-        <p>Use usually, afterwards, and routine. Focus on present simple and natural sentence stress.</p>
-        <ol><li>Warm-up and listen</li><li>Speak naturally</li><li>Review grammar and vocabulary</li></ol>
-        <button onClick={beginLesson}>Begin lesson</button>
+        <b>{lesson.estimated_duration_minutes} minutes · {lesson.category}</b>
+        <h2>{lesson.practice_prompt}</h2>
+        <p>{lesson.instruction_prompt}</p>
+        <ol><li>Listen to Ananya's instruction</li><li>Respond and retry any genuine correction</li><li>Complete the roleplay: {lesson.roleplay_prompt}</li></ol>
+        {error && <p role="alert">{error}</p>}
+        <button disabled={busy} onClick={() => void beginLesson()}>{active ? "Resume lesson" : busy ? "Starting…" : "Begin lesson"}</button>
       </article>
     </section>
   );
@@ -153,6 +196,8 @@ export function ConversationScreen({
   telugu?: boolean;
 }) {
   const selectedLanguageMode: LanguageMode = languageMode ?? (telugu ? "ENGLISH_TELUGU" : "ENGLISH");
+  const { navigate } = useRouter();
+  const [activeLesson] = useState(() => readActiveLesson(account.learner_id));
   const [practiceMode, setPracticeMode] = useState<PracticeMode>("VOICE");
   const [lessonTitle] = useState(() => sessionStorage.getItem(ACTIVE_LESSON_TITLE_KEY) ?? "");
   const [id, setId] = useState("");
@@ -165,6 +210,8 @@ export function ConversationScreen({
   const [input, setInput] = useState("");
   const [lastTranscript, setLastTranscript] = useState("");
   const [turnError, setTurnError] = useState("");
+  const [lessonCompletionBusy, setLessonCompletionBusy] = useState(false);
+  const [lessonCompletionError, setLessonCompletionError] = useState("");
   const [audioError, setAudioError] = useState("");
   const [audioBusy, setAudioBusy] = useState(false);
   const [speech, setSpeech] = useState<TutorSpeech | null>(null);
@@ -212,7 +259,7 @@ export function ConversationScreen({
     const requestKey = conversationSessionKey;
     const request = conversationRequest.current?.key === requestKey
       ? conversationRequest.current.promise
-      : api.conversation(account.learner_id);
+      : api.conversation(account.learner_id, activeLesson?.lesson);
     conversationRequest.current = { key: requestKey, promise: request };
     let active = true;
     request
@@ -233,7 +280,7 @@ export function ConversationScreen({
     return () => {
       active = false;
     };
-  }, [account.learner_id, conversationSessionKey, dispatch, tutor.display_name, tutor.tutor_id]);
+  }, [account.learner_id, activeLesson?.lesson, conversationSessionKey, dispatch, tutor.display_name, tutor.tutor_id]);
 
   useEffect(() => {
     engineeringDiagnosticInfo("speakmate_avatar_event", {
@@ -387,7 +434,9 @@ export function ConversationScreen({
     setInterruptSequence((value) => value + 1);
     setTurnBusy(true);
     if (!retryKey) {
-      setMessages((items) => [...items, { id: `learner-${key}`, role: "learner", text: learnerText, source: voice ? "VOICE" : "TEXT" }]);
+      setMessages((items) => items.some((item) => item.id === `learner-${key}`)
+        ? items
+        : [...items, { id: `learner-${key}`, role: "learner", text: learnerText, source: voice ? "VOICE" : "TEXT" }]);
     }
     setInput("");
     dispatch({ type: "TUTOR_PROCESSING_STARTED" });
@@ -400,7 +449,10 @@ export function ConversationScreen({
       markConversationLatency(trace, "t5", tutorOutputReady);
       const spoken = result.spoken_text || `${result.tutor_message} ${result.next_question}`.trim();
       const expression = normalizeExpression(result.expression_hint);
-      setMessages((items) => [...items, { id: `tutor-${result.turn_id || key}`, role: "tutor", text: spoken }]);
+      const tutorMessageId = `tutor-${result.turn_id || key}`;
+      setMessages((items) => items.some((item) => item.id === tutorMessageId)
+        ? items
+        : [...items, { id: tutorMessageId, role: "tutor", text: spoken }]);
       setSpokenText(spoken);
       setLastExpression(expression);
       setFeedback({
@@ -460,7 +512,7 @@ export function ConversationScreen({
     setInput(result.transcript);
     await submit(
       result.transcript,
-      undefined,
+      `${key}-turn`,
       { detectedLanguage: result.detected_language, confidence: result.confidence },
       trace,
     );
@@ -540,6 +592,23 @@ export function ConversationScreen({
   const showVoiceCoaching = hasCorrection || hasTeluguExplanation;
   const showCoach = practiceMode === "TEXT" || showVoiceCoaching;
   const startMicrophoneLabel = mic.state === "denied" ? "Retry microphone" : "Start microphone";
+  const learnerTurnCount = messages.filter((message) => message.role === "learner").length;
+  const completeLesson = async () => {
+    if (!activeLesson || lessonCompletionBusy || learnerTurnCount < 2) return;
+    setLessonCompletionBusy(true);
+    setLessonCompletionError("");
+    try {
+      const durationSeconds = Math.max(1, Math.round((Date.now() - activeLesson.startedAt) / 1000));
+      await api.completeLessonSession(activeLesson.sessionId, durationSeconds);
+      sessionStorage.removeItem(ACTIVE_LESSON_KEY);
+      sessionStorage.removeItem(ACTIVE_LESSON_TITLE_KEY);
+      navigate("/app/daily-lesson");
+    } catch {
+      setLessonCompletionError("Your progress could not be saved. Please retry lesson completion.");
+    } finally {
+      setLessonCompletionBusy(false);
+    }
+  };
 
   return (
     <section
@@ -600,6 +669,13 @@ export function ConversationScreen({
           </details>
 
           {turnError && <div className="learner-error"><p role="alert">{turnError}</p>{pendingTurn?.retryable && <button disabled={turnBusy} onClick={() => void submit(pendingTurn.text, pendingTurn.key)}>Retry tutor response</button>}</div>}
+          {activeLesson && <section className="lesson-completion" aria-label="Lesson progress">
+            <p>{Math.min(learnerTurnCount, 2)} of 2 practice responses completed.</p>
+            <button disabled={learnerTurnCount < 2 || lessonCompletionBusy || turnBusy} onClick={() => void completeLesson()}>
+              {lessonCompletionBusy ? "Saving progress…" : "Complete lesson"}
+            </button>
+            {lessonCompletionError && <p role="alert">{lessonCompletionError}</p>}
+          </section>}
 
           <div className={`voice-control-dock${conversationStarted ? "" : " prestart"}`}>
             {!conversationStarted ? <section className="start-conversation-gate" aria-label="Start live lesson">

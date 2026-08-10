@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.app.unicode_safety import normalize_output_text
 
@@ -19,6 +21,15 @@ class UsageInfo(BaseModel):
     cached_input_units: int = Field(default=0, ge=0)
     output_units: int = Field(default=0, ge=0)
     provider_requests: int = Field(default=1, ge=0)
+
+
+class CorrectionType(StrEnum):
+    GRAMMAR_ERROR = "GRAMMAR_ERROR"
+    VOCABULARY_ERROR = "VOCABULARY_ERROR"
+    PRONUNCIATION_ERROR = "PRONUNCIATION_ERROR"
+    NATURALNESS_SUGGESTION = "NATURALNESS_SUGGESTION"
+    STYLE_SUGGESTION = "STYLE_SUGGESTION"
+    VALID_SENTENCE = "VALID_SENTENCE"
 
 
 class LearningSignals(BaseModel):
@@ -66,6 +77,7 @@ class AIConversationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tutor_message: str = Field(min_length=1, max_length=2000)
+    correction_type: CorrectionType = CorrectionType.VALID_SENTENCE
     corrected_learner_sentence: str | None = Field(max_length=2000)
     correction_explanation: str | None = Field(max_length=1000)
     grammar_feedback: list[str] = Field(max_length=5)
@@ -77,6 +89,16 @@ class AIConversationResponse(BaseModel):
     learning_signals: LearningSignals
     provider_metadata_reference: str = Field(min_length=1, max_length=100)
     usage: UsageInfo
+
+    @model_validator(mode="after")
+    def classify_legacy_correction(self):
+        if (
+            "correction_type" not in self.model_fields_set
+            and self.corrected_learner_sentence
+            and self.correction_explanation
+        ):
+            self.correction_type = CorrectionType.GRAMMAR_ERROR
+        return self
 
     @field_validator(
         "tutor_message", "corrected_learner_sentence", "correction_explanation",

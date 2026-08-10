@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from enum import StrEnum
 
-from backend.app.ai.models import AIConversationResponse
+from backend.app.ai.models import AIConversationResponse, CorrectionType
 from backend.app.domain.enums import LanguageMode
 from backend.app.explanation_language import ExplanationLanguageState
 
@@ -54,6 +54,7 @@ def _normalized(value: str) -> str:
 def _retry_words(value: str) -> list[str]:
     normalized = value.casefold().replace("’", "'")
     normalized = re.sub(r"\bi\s*'m\b|\bim\b", "i am", normalized)
+    normalized = re.sub(r"\bmy\s+day\s*'s\b", "my day is", normalized)
     words = re.findall(r"[a-z0-9]+", normalized)
     while words and words[0] in {"hi", "hey", "hello"}:
         words.pop(0)
@@ -213,7 +214,9 @@ def _factual_slot(value: str) -> tuple[str, str] | None:
 
 def _style_words(value: str) -> list[str]:
     words = _retry_words(value)
-    optional_prefixes = (["yes"], ["excuse", "me"])
+    optional_prefixes = (
+        ["yes"], ["yeah"], ["hi"], ["hey"], ["hello"], ["ananya"], ["excuse", "me"],
+    )
     changed = True
     while changed:
         changed = False
@@ -245,7 +248,8 @@ def protect_learner_facts(response: AIConversationResponse, learner_text: str) -
         return response
     if corrected and _style_words(learner_text) == _style_words(corrected):
         return response.model_copy(update={
-            "tutor_message": f"Thanks for sharing. {learner_text.strip()}",
+            "tutor_message": f"That's correct. {learner_text.strip()}",
+            "correction_type": CorrectionType.VALID_SENTENCE,
             "corrected_learner_sentence": None,
             "correction_explanation": None,
             "grammar_feedback": [],
@@ -466,6 +470,23 @@ def build_coaching_outcome(
 
     corrected = response.corrected_learner_sentence
     explanation = response.correction_explanation
+    if response.correction_type not in {
+        CorrectionType.GRAMMAR_ERROR,
+        CorrectionType.VOCABULARY_ERROR,
+        CorrectionType.PRONUNCIATION_ERROR,
+    }:
+        response = response.model_copy(update={
+            "corrected_learner_sentence": None,
+            "correction_explanation": None,
+            "grammar_feedback": [],
+            "learning_signals": response.learning_signals.model_copy(update={"grammar_focus": []}),
+        })
+        return CoachingOutcome(
+            response=response,
+            mode=CoachingMode.NO_CORRECTION,
+            state=CoachingState.NORMAL_CONVERSATION,
+            spoken_text=_join(response.tutor_message, response.conversation_question),
+        )
     if not corrected or not explanation:
         return CoachingOutcome(
             response=response,

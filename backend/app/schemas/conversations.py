@@ -12,6 +12,7 @@ class ScenarioRead(BaseModel):
 class ConversationCreate(BaseModel):
     learner_id: str
     scenario_id: str
+    lesson_id: str | None = Field(default=None, max_length=100)
 
 
 class LearnerMessageCreate(BaseModel):

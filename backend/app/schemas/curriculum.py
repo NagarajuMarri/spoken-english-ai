@@ -8,6 +8,7 @@ from backend.app.domain.enums import LessonSessionStatus, ProficiencyLevel
 class CurriculumLessonRead(BaseModel):
     id: str
     title: str
+    category: str
     proficiency_level: ProficiencyLevel
     scenario_id: str
     learning_objectives: tuple[str, ...]
@@ -15,6 +16,9 @@ class CurriculumLessonRead(BaseModel):
     grammar_focus: tuple[str, ...]
     estimated_duration_minutes: int
     completion_criteria: str
+    instruction_prompt: str
+    practice_prompt: str
+    roleplay_prompt: str
 
 
 class LessonSessionCreate(BaseModel):

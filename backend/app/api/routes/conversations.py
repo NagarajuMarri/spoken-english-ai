@@ -73,7 +73,7 @@ def create_conversation(
         request.app.state.commercial_service.config,
     ).enforce_conversation(data.learner_id)
     conversation, opening = ConversationService(session).create(
-        data.learner_id, data.scenario_id
+        data.learner_id, data.scenario_id, data.lesson_id
     )
     return {
         **conversation.__dict__,

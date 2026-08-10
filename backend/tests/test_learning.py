@@ -15,7 +15,7 @@ def test_curriculum_levels_and_filtering(client):
     assert levels.status_code == 200
     assert len(levels.json()) == 5
     assert lessons.status_code == 200
-    assert len(lessons.json()) == 2
+    assert len(lessons.json()) == 16
     assert {item["proficiency_level"] for item in lessons.json()} == {"STARTER"}
 
 
@@ -68,6 +68,17 @@ def test_deterministic_evaluation():
 def test_curriculum_ids_are_unique():
     ids = [lesson.id for lesson in LESSONS]
     assert len(ids) == len(set(ids))
+
+
+def test_minimum_curriculum_has_eight_categories_with_five_playable_lessons_each():
+    assert len(LESSONS) == 40
+    categories = {lesson.category for lesson in LESSONS}
+    assert len(categories) == 8
+    assert all(sum(lesson.category == category for lesson in LESSONS) == 5 for category in categories)
+    assert all(
+        lesson.instruction_prompt and lesson.practice_prompt and lesson.roleplay_prompt
+        for lesson in LESSONS
+    )
 
 
 def test_progress_and_same_day_streak(client, learner):

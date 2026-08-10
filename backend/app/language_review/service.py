@@ -27,6 +27,7 @@ def protected_content_digest(
     learning_objective: str,
 ) -> str:
     protected = {
+        "correction_type": response.correction_type,
         "corrected_learner_sentence": response.corrected_learner_sentence,
         "grammar_feedback": response.grammar_feedback,
         "vocabulary_suggestions": response.vocabulary_suggestions,

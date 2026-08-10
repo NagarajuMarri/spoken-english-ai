@@ -79,7 +79,11 @@ from backend.app.coaching import (
     protect_learner_facts,
     tutor_input_for_retry,
 )
-from backend.app.transcript_safety import UnusableTranscript, safe_transcript
+from backend.app.transcript_safety import (
+    UnusableTranscript,
+    normalize_known_tutor_reference,
+    safe_transcript,
+)
 from backend.app.explanation_language import (
     ExplanationLanguage,
     ExplanationLanguageState,
@@ -101,6 +105,7 @@ class AITurnCreate(BaseModel):
 class AITurnRead(BaseModel):
     turn_id: str
     tutor_message: str
+    correction_type: str
     corrected_sentence: str | None
     incorrect_span: str | None
     corrected_form: str | None
@@ -332,6 +337,7 @@ def _api_result(
     result = {
         "turn_id": turn_id,
         "tutor_message": response.tutor_message,
+        "correction_type": response.correction_type,
         "corrected_sentence": response.corrected_learner_sentence,
         "incorrect_span": coaching.incorrect_span,
         "corrected_form": coaching.corrected_form,
@@ -563,6 +569,14 @@ def ai_turn(
         expected_language = "te"
     try:
         learner_message = safe_transcript(data.message, expected_language=expected_language)
+        if (
+            data.input_source == "VOICE"
+            and (principal.learner.preferred_tutor_id or "ananya").casefold() == "ananya"
+        ):
+            learner_message = normalize_known_tutor_reference(
+                learner_message,
+                confidence=data.stt_confidence,
+            )
         if data.input_source == "VOICE" and data.stt_confidence is not None and data.stt_confidence < 0.2:
             raise UnusableTranscript("Speech confidence is too low.")
     except UnusableTranscript as exc:

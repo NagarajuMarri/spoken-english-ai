@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy import func, select
 
 from backend.app.ai.deterministic_provider import DeterministicAIProvider
-from backend.app.ai.models import AIConversationResponse, AIConversationRequest
+from backend.app.ai.models import AIConversationResponse, AIConversationRequest, CorrectionType
 from backend.app.coaching import (
     CoachingMode,
     CoachingState,
@@ -418,6 +418,34 @@ def test_no_correction_continues_naturally():
     assert outcome.mode == CoachingMode.NO_CORRECTION
     assert outcome.state == CoachingState.NORMAL_CONVERSATION
     assert outcome.spoken_text == f"{response.tutor_message} {response.conversation_question}"
+
+
+@pytest.mark.parametrize(("learner", "alternative"), [
+    ("Yeah, hi Ananya. My day is good.", "Hi Ananya, my day's good."),
+    ("Hi Ananya, my day is good.", "My day is going well."),
+    ("I am happy today.", "I'm happy today."),
+])
+def test_valid_english_and_optional_contractions_never_require_retry(learner, alternative):
+    response = _response(
+        correction_type=CorrectionType.NATURALNESS_SUGGESTION,
+        tutor_message=f"That's correct. You could also say: {alternative}",
+        corrected_learner_sentence=alternative,
+        correction_explanation="This is only an optional conversational alternative.",
+        grammar_feedback=[],
+    )
+    protected = protect_learner_facts(response, learner)
+    outcome = build_coaching_outcome(
+        protected,
+        learner_level="BEGINNER",
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learner_text=learner,
+    )
+    assert outcome.mode == CoachingMode.NO_CORRECTION
+    assert outcome.state == CoachingState.NORMAL_CONVERSATION
+    assert outcome.response.corrected_learner_sentence is None
+    assert outcome.response.correction_explanation is None
+    assert "Correct form" not in outcome.spoken_text
+    assert "once" not in outcome.spoken_text
 
 
 @pytest.mark.parametrize(("learner", "corrected", "wrong", "right"), [

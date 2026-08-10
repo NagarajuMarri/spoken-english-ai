@@ -1,4 +1,4 @@
-import type { Account, AiTurn, Dashboard, LanguageMode, ProgressDetail, SubscriptionView, TokenPair, Tutor, TutorPreference, TutorSpeech, VoiceTranscription } from "../models";
+import type { Account, AiTurn, CurriculumLesson, Dashboard, LanguageMode, LessonSession, ProgressDetail, SubscriptionView, TokenPair, Tutor, TutorPreference, TutorSpeech, VoiceTranscription } from "../models";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 export class ApiError extends Error {
@@ -149,7 +149,10 @@ export const api={
   tutors:()=>raw<Tutor[]>("/api/v1/tutors"), preference:()=>raw<TutorPreference>("/api/v1/tutors/preference"),
   savePreference:(tutor_id:string,language_mode:LanguageMode)=>raw<TutorPreference>("/api/v1/tutors/preference",{method:"PUT",body:JSON.stringify({tutor_id,language_mode})}),
   dashboard:()=>raw<Dashboard>("/api/v1/tutors/dashboard"),
-  conversation:(learner_id:string)=>raw<{id:string;opening_prompt?:string;opening_turn_id?:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:"daily-conversation"})}),
+  dailyLesson:(learnerId:string)=>raw<CurriculumLesson>(`/api/v1/learners/${learnerId}/daily-lesson`),
+  createLessonSession:(learner_id:string,lesson_id:string)=>raw<LessonSession>("/api/v1/lesson-sessions",{method:"POST",body:JSON.stringify({learner_id,lesson_id})}),
+  completeLessonSession:(sessionId:string,duration_seconds:number)=>raw<LessonSession>(`/api/v1/lesson-sessions/${sessionId}/complete`,{method:"POST",body:JSON.stringify({duration_seconds})}),
+  conversation:(learner_id:string,lesson?:Pick<CurriculumLesson,"id"|"scenario_id">)=>raw<{id:string;opening_prompt?:string;opening_turn_id?:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:lesson?.scenario_id??"daily-conversation",lesson_id:lesson?.id})}),
   transcribe:(id:string,capture:{blob:Blob;durationMs:number},idempotencyKey:string=globalThis.crypto?.randomUUID?.()??`voice-${Date.now()}-${Math.random().toString(16).slice(2)}`)=>raw<VoiceTranscription>(`/api/v1/conversations/${id}/transcriptions`,{method:"POST",headers:{"Content-Type":capture.blob.type,"X-Audio-Duration-Ms":String(capture.durationMs),"X-Voice-Processing-Consent":"accepted","Idempotency-Key":idempotencyKey},body:capture.blob}),
   turn:(id:string,message:string,_languageMode:LanguageMode,idempotencyKey:string,voice?:{detectedLanguage:string;confidence?:number|null})=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({message,input_source:voice?"VOICE":"TEXT",detected_language:voice?.detectedLanguage,stt_confidence:voice?.confidence})}),
   speech:(id:string,turnId:string)=>speechRaw(`/api/v1/conversations/${id}/ai-turns/${turnId}/speech`),

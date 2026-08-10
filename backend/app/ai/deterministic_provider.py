@@ -1,4 +1,4 @@
-from backend.app.ai.models import AIConversationResponse, LearningSignals, UsageInfo
+from backend.app.ai.models import AIConversationResponse, CorrectionType, LearningSignals, UsageInfo
 
 
 class DeterministicAIProvider:
@@ -22,6 +22,7 @@ class DeterministicAIProvider:
         }.get(scenario, ["confident", "practice"])
         return AIConversationResponse(
             tutor_message=f"Thanks for sharing. {corrected}",
+            correction_type=CorrectionType.GRAMMAR_ERROR,
             corrected_learner_sentence=corrected,
             correction_explanation="Start with a capital letter and finish the sentence clearly.",
             grammar_feedback=["sentence boundaries"],

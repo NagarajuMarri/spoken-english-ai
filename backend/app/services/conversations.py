@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.core.errors import AppError
 from backend.app.domain.scenarios import SCENARIOS_BY_ID
+from backend.app.domain.curriculum import LESSONS_BY_ID
 from backend.app.integrations.llm import RuleBasedLLMProvider
 from backend.app.repositories.ai_turns import AITurnAttemptRepository
 from backend.app.repositories.conversations import ConversationRepository, TurnSequenceConflict
@@ -22,18 +23,23 @@ class ConversationService:
         self.learners = LearnerRepository(session)
         self.provider = provider or RuleBasedLLMProvider()
 
-    def create(self, learner_id: str, scenario_id: str):
+    def create(self, learner_id: str, scenario_id: str, lesson_id: str | None = None):
         learner = self.learners.get(learner_id)
         if learner is None:
             raise AppError(status.HTTP_404_NOT_FOUND, "learner_not_found", "Learner not found.")
         if scenario_id not in SCENARIOS_BY_ID:
             raise AppError(status.HTTP_404_NOT_FOUND, "scenario_not_found", "Scenario not found.")
+        lesson = LESSONS_BY_ID.get(lesson_id) if lesson_id else None
+        if lesson_id and lesson is None:
+            raise AppError(status.HTTP_404_NOT_FOUND, "lesson_not_found", "Lesson not found.")
+        if lesson is not None and lesson.scenario_id != scenario_id:
+            raise AppError(status.HTTP_422_UNPROCESSABLE_CONTENT, "lesson_scenario_mismatch", "Lesson does not match the selected scenario.")
         try:
             conversation = self.repository.create(learner_id, scenario_id, commit=False)
             opening = self.ai_turns.create_opening(
                 conversation_id=conversation.id,
                 learner_id=learner_id,
-                spoken_text=SCENARIOS_BY_ID[scenario_id].opening_prompt,
+                spoken_text=(lesson.instruction_prompt if lesson is not None else SCENARIOS_BY_ID[scenario_id].opening_prompt),
                 language_mode=learner.language_mode or "ENGLISH",
                 commit=False,
             )

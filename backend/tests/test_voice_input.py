@@ -14,8 +14,31 @@ from backend.app.core.config import Settings
 from backend.app.models import AIUsageRecord, Learner, ProviderCallEvent, VoiceTranscriptionAttempt
 from backend.app.providers.stt.contracts import SpeechToTextRequest, SpeechToTextResult
 from backend.app.providers.stt.openai_boundary import OpenAICompatibleSTTProvider, OpenAITranscriptionHTTPClient
-from backend.app.transcript_safety import UnusableTranscript, safe_transcript
+from backend.app.transcript_safety import (
+    UnusableTranscript,
+    normalize_known_tutor_reference,
+    safe_transcript,
+)
 from backend.app.usage.service import ProviderCallLeaseLost, UsageService
+
+
+@pytest.mark.parametrize("variant", [
+    "Hey An India water, why are you not responding?",
+    "Hi an india, how are you?",
+    "Yeah, hello Ananya, can you hear me?",
+])
+def test_known_ananya_stt_variants_normalize_only_in_greeting_context(variant):
+    normalized = normalize_known_tutor_reference(variant, confidence=0.8)
+    assert "Ananya" in normalized
+    assert "An India" not in normalized
+
+
+def test_contextual_tutor_normalization_does_not_change_arbitrary_names_or_low_confidence():
+    assert normalize_known_tutor_reference("I met An India Water yesterday.", confidence=0.9) == (
+        "I met An India Water yesterday."
+    )
+    uncertain = "Hey An India water, why are you not responding?"
+    assert normalize_known_tutor_reference(uncertain, confidence=0.3) == uncertain
 
 
 def wav_fixture(duration_ms=250):
