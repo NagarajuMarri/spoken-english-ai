@@ -420,10 +420,11 @@ export function ConversationScreen({
     retryKey?: string,
     voice?: { detectedLanguage: string; confidence?: number | null },
     latencyTrace?: ConversationLatencyTrace,
+    requestKey?: string,
   ) => {
     const learnerText = text.trim();
     if (!learnerText || !id || turnBusyRef.current) return;
-    const key = retryKey ?? turnIdentity();
+    const key = retryKey ?? requestKey ?? turnIdentity();
     const trace = latencyTrace ?? createConversationLatencyTrace(voice ? "VOICE" : "TEXT");
     turnBusyRef.current = true;
     setTurnError("");
@@ -512,9 +513,10 @@ export function ConversationScreen({
     setInput(result.transcript);
     await submit(
       result.transcript,
-      `${key}-turn`,
+      undefined,
       { detectedLanguage: result.detected_language, confidence: result.confidence },
       trace,
+      `${key}-turn`,
     );
   }, [dispatch, id, submit]);
 
