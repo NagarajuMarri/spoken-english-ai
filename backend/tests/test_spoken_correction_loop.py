@@ -82,6 +82,30 @@ def test_new_telugu_help_intent_preserves_pending_correction():
     assert outcome.response.corrected_learner_sentence == "I'm Nagaraj."
 
 
+def test_plain_telugu_explanation_request_links_to_pending_correction():
+    prior = {
+        "coaching_state": "WAITING_FOR_RETRY",
+        "corrected_sentence": "I have been working since this morning.",
+        "incorrect_span": "from morning",
+        "corrected_form": "since this morning",
+        "correction_explanation": "Use since for a starting point.",
+    }
+    message = "I need explanation in Telugu."
+    intent = classify_learner_intent(message, prior)
+    outcome = build_coaching_outcome(
+        _response(corrected_learner_sentence=None, correction_explanation=None),
+        learner_level="BEGINNER",
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        previous_result=prior,
+        previous_turn_id="original",
+        learner_text=message,
+        learner_intent=intent,
+    )
+    assert outcome.state == CoachingState.EXPLAINING_CORRECTION
+    assert outcome.retry_of_turn_id == "original"
+    assert outcome.response.corrected_learner_sentence == prior["corrected_sentence"]
+
+
 def test_semantically_equivalent_self_introduction_closes_retry_without_optional_words():
     prior = {
         "coaching_state": "WAITING_FOR_RETRY",

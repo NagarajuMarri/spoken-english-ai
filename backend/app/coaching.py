@@ -235,6 +235,8 @@ def _references_pending_correction(message: str, prior: dict) -> bool:
     normalized = _normalized(message)
     if normalized in {"why", "explain", "explain it", "examples", "give examples"}:
         return True
+    if re.search(r"\b(explain|explanation)\b.*\b(english|telugu)\b", normalized):
+        return True
     if re.search(r"\b(this|that|the)\s+(correction|sentence|form|mistake)\b", normalized):
         return True
     evidence = " ".join(str(prior.get(key) or "") for key in ("incorrect_span", "corrected_form"))

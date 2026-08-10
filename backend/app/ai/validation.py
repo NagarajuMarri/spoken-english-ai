@@ -1,3 +1,5 @@
+import logging
+
 from pydantic import ValidationError
 
 from backend.app.ai.exceptions import ProviderOutputInvalid
@@ -9,6 +11,7 @@ _SAFE_SCHEMA_FIELDS = {
     *LearningSignals.model_fields,
     *UsageInfo.model_fields,
 }
+logger = logging.getLogger("spoken_english.provider_validation")
 
 
 def _safe_schema_path(location: tuple[object, ...]) -> str:
@@ -33,6 +36,11 @@ def validate_provider_output(
     except ValidationError as exc:
         first_error = exc.errors(include_url=False, include_context=False, include_input=False)[0]
         schema_path = _safe_schema_path(tuple(first_error.get("loc", ())))
+        logger.warning(
+            "provider_output_validation_failed schema_path=%s error_type=%s",
+            schema_path[:200],
+            str(first_error.get("type", "unknown"))[:80],
+        )
         raise ProviderOutputInvalid(
             "Provider returned invalid structured output.",
             provider_requests=provider_requests,

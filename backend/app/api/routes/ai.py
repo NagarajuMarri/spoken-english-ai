@@ -233,15 +233,15 @@ def _provider_app_error(exc: ProviderError) -> AppError:
         return AppError(
             status.HTTP_502_BAD_GATEWAY,
             "llm_malformed_response",
-            "The tutor returned an incomplete response. Send the turn again.",
-            retryable=False,
+            "The tutor returned an incomplete response. Retry this turn safely.",
+            retryable=True,
         )
     if isinstance(exc, ProviderOutputInvalid):
         return AppError(
             status.HTTP_502_BAD_GATEWAY,
             "llm_schema_validation_failed",
-            "The tutor response could not be validated. Send the turn again.",
-            retryable=False,
+            "The tutor response could not be validated. Retry this turn safely.",
+            retryable=True,
         )
     return AppError(
         status.HTTP_503_SERVICE_UNAVAILABLE,

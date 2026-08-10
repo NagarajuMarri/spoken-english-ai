@@ -65,7 +65,9 @@ class ProviderRefusal(ProviderError):
 
 class ProviderMalformedResponse(ProviderError):
     failure_code = "provider_malformed_response"
+    retryable = True
 
 
 class ProviderOutputInvalid(ProviderError):
     failure_code = "provider_schema_validation_failed"
+    retryable = True

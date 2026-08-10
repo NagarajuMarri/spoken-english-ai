@@ -483,8 +483,8 @@ def test_ai_turn_uses_provider_for_greetings_carries_three_turns_and_persists_us
             True,
         ),
         (ProviderRefusal("raw refusal detail"), 422, "llm_refused", False),
-        (ProviderMalformedResponse("raw malformed detail"), 502, "llm_malformed_response", False),
-        (ProviderOutputInvalid("raw schema detail"), 502, "llm_schema_validation_failed", False),
+        (ProviderMalformedResponse("raw malformed detail"), 502, "llm_malformed_response", True),
+        (ProviderOutputInvalid("raw schema detail"), 502, "llm_schema_validation_failed", True),
         (ProviderUnavailable("raw provider detail"), 503, "llm_unavailable", False),
     ],
 )
