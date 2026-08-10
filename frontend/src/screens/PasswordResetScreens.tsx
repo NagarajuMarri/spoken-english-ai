@@ -22,6 +22,13 @@ export function UpdatePasswordScreen() {
   const [state, setState] = useState<"checking"|"valid"|"invalid"|"complete">("checking");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const revalidateReopenedLink = () => {
+      if (new URLSearchParams(location.hash.replace(/^#/, "")).has("token")) location.reload();
+    };
+    window.addEventListener("hashchange", revalidateReopenedLink);
+    return () => window.removeEventListener("hashchange", revalidateReopenedLink);
+  }, []);
   useLayoutEffect(() => {
     const search=new URLSearchParams(location.search);
     const hadQueryToken=search.has("token");
