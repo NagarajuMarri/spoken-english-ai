@@ -13,13 +13,21 @@
 - Closed-beta invitation, allowlist, founder override and waiting-list controls.
 - Durable feedback and a founder-authorized read-only launch dashboard.
 - PostgreSQL, Redis, private object storage, worker, readiness, telemetry, backup, restore and rollback foundations.
-- Alembic revisions through `0010_beta_launch_readiness`.
+- Alembic revisions through `0017_provider_call_events`.
 
 ### Security and privacy
 
 - Added password hashing, bounded JWT sessions, refresh-reuse response, throttling, audit events and privacy-safe errors.
 - Added explicit voice consent, minimization, retention and deletion boundaries.
 - Kept provider credentials, payment secrets and production controls environment-driven and fail-closed.
+- Added refresh single-flight protection, fragment-only password-reset tokens, reset-route cache/log exclusion, and production browser security headers.
+
+### Final RC hardening
+
+- Made migration readiness use the actual Alembic head and fixed worker-heartbeat readiness.
+- Connected persisted subscriptions to configuration-backed entitlements, trial expiry, runtime limits, and honest test-upgrade presentation.
+- Replaced hard-coded launch progress, registration, pricing, and health claims with evidence-backed values or the authoritative readiness endpoint.
+- Added live-account Playwright configuration that uses isolated, unique test identities and an explicit beta invitation.
 
 ### Verification
 

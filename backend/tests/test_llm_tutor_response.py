@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from urllib import error
 
@@ -21,7 +22,14 @@ from backend.app.ai.exceptions import (
 )
 from backend.app.ai.models import AIConversationRequest, AIConversationResponse, ConversationHistoryTurn, UsageInfo
 from backend.app.core.config import Settings
-from backend.app.models import AICostMetricEvent, AITurnAttempt, AIUsageRecord, ConversationMessage
+from backend.app.models import (
+    AICostMetricEvent,
+    AITurnAttempt,
+    AIUsageRecord,
+    ConversationMessage,
+    Learner,
+    ProviderCallEvent,
+)
 from backend.app.providers.llm import build_llm_provider
 from backend.app.providers.llm.openai_boundary import (
     TUTOR_RESPONSE_SCHEMA,
@@ -571,6 +579,99 @@ def test_transient_failure_retries_with_same_identity_and_persists_exactly_once(
     )
     assert continued.status_code == 200
     assert provider.requests[-1].conversation_history[-1].learner_message == payload["message"]
+
+
+def test_ai_provider_retries_stop_after_three_actual_dispatches(client, conversation):
+    class TimeoutProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, _request):
+            self.calls += 1
+            raise ProviderTimeout("private provider detail", provider_requests=1)
+
+    provider = TimeoutProvider()
+    client.app.state.llm_provider = provider
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns"
+    headers = {"Idempotency-Key": "bounded-llm-provider-retries"}
+    payload = {"message": "Please help me practise safely."}
+    responses = [client.post(route, json=payload, headers=headers) for _ in range(4)]
+
+    assert [item.status_code for item in responses] == [504, 504, 503, 503]
+    assert [item.json()["error"]["code"] for item in responses] == [
+        "llm_timeout",
+        "llm_timeout",
+        "llm_retry_limit_reached",
+        "llm_retry_limit_reached",
+    ]
+    assert provider.calls == 3
+    with client.app.state.session_factory() as db:
+        attempt = db.scalar(select(AITurnAttempt))
+        events = list(db.scalars(select(ProviderCallEvent).where(
+            ProviderCallEvent.operation_kind == "llm"
+        )))
+        assert attempt.status == "FAILED_FINAL"
+        assert attempt.provider_attempts == 3
+        assert len(events) == 3
+        assert sum(item.request_count for item in events) == 3
+        assert all(item.outcome == "FAILURE" for item in events)
+
+
+def test_stale_ai_provider_lease_is_fenced_before_retry(client, learner, conversation):
+    class CountingProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, request):
+            self.calls += 1
+            return DeterministicAIProvider().generate(request)
+
+    provider = CountingProvider()
+    client.app.state.llm_provider = provider
+    key = "stale-llm-provider-lease"
+    message = "Please recover this tutor turn."
+    stale_at = datetime.now(UTC) - timedelta(minutes=6)
+    with client.app.state.session_factory() as db:
+        learner_row = db.get(Learner, learner["id"])
+        attempt = AITurnAttempt(
+            conversation_id=conversation["id"],
+            learner_id=learner["id"],
+            idempotency_key=key,
+            learner_text=message,
+            status="IN_PROGRESS",
+            provider_attempts=1,
+            result_json={},
+            updated_at=stale_at,
+        )
+        db.add(attempt)
+        db.flush()
+        db.add(ProviderCallEvent(
+            learner_id=learner["id"],
+            user_id=learner_row.user_account_id,
+            operation_kind="llm",
+            attempt_reference=attempt.id,
+            request_count=1,
+            outcome="RESERVED",
+            occurred_at=stale_at,
+        ))
+        db.commit()
+
+    recovered = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns",
+        json={"message": message},
+        headers={"Idempotency-Key": key},
+    )
+    assert recovered.status_code == 200
+    assert provider.calls == 1
+    with client.app.state.session_factory() as db:
+        events = list(db.scalars(
+            select(ProviderCallEvent)
+            .where(ProviderCallEvent.operation_kind == "llm")
+            .order_by(ProviderCallEvent.occurred_at)
+        ))
+        assert len(events) == 2
+        assert [item.outcome for item in events] == ["FAILURE", "SUCCESS"]
+        assert events[0].failed is True
 
 
 def test_incomplete_openai_turn_can_be_retried_safely_and_is_persisted_once(

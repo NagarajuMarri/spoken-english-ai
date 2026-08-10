@@ -1,10 +1,14 @@
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from backend.app.core.errors import AppError
-from backend.app.models import AIUsageRecord
+from backend.app.models import AIUsageRecord, ProviderCallEvent
 from backend.app.usage.limits import UsageLimits
 from fastapi import status
+
+
+class ProviderCallLeaseLost(RuntimeError):
+    """The provider result arrived after its reservation was superseded."""
 
 
 class UsageService:
@@ -17,16 +21,22 @@ class UsageService:
 
     def enforce(self, learner_id, user_id, voice_session_id=None):
         since = self._day_start()
+        tutor_request_kinds = ("llm", "voice_pipeline")
         learner_count = self.session.scalar(select(func.sum(AIUsageRecord.request_count)).where(
-            AIUsageRecord.learner_id == learner_id, AIUsageRecord.occurred_at >= since
+            AIUsageRecord.learner_id == learner_id,
+            AIUsageRecord.occurred_at >= since,
+            AIUsageRecord.provider_kind.in_(tutor_request_kinds),
         )) or 0
         account_count = self.session.scalar(select(func.sum(AIUsageRecord.request_count)).where(
-            AIUsageRecord.user_id == user_id, AIUsageRecord.occurred_at >= since
+            AIUsageRecord.user_id == user_id,
+            AIUsageRecord.occurred_at >= since,
+            AIUsageRecord.provider_kind.in_(tutor_request_kinds),
         )) or 0
         session_count = 0
         if voice_session_id:
             session_count = self.session.scalar(select(func.sum(AIUsageRecord.request_count)).where(
-                AIUsageRecord.voice_session_id == voice_session_id
+                AIUsageRecord.voice_session_id == voice_session_id,
+                AIUsageRecord.provider_kind.in_(tutor_request_kinds),
             )) or 0
         if (
             learner_count >= self.limits.learner_requests_per_day
@@ -52,6 +62,65 @@ class UsageService:
         else:
             self.session.flush()
         return record
+
+    def reserve_provider_call(
+        self,
+        *,
+        learner_id: str,
+        user_id: str,
+        operation_kind: str,
+        attempt_reference: str,
+        duration_ms: int = 0,
+    ) -> ProviderCallEvent:
+        event = ProviderCallEvent(
+            learner_id=learner_id,
+            user_id=user_id,
+            operation_kind=operation_kind,
+            attempt_reference=attempt_reference,
+            request_count=1,
+            duration_ms=duration_ms,
+            outcome="RESERVED",
+        )
+        self.session.add(event)
+        self.session.flush()
+        return event
+
+    def reconcile_provider_call(
+        self,
+        event_id: str,
+        *,
+        request_count: int,
+        duration_ms: int = 0,
+        input_units: float = 0,
+        output_units: float = 0,
+        outcome: str = "SUCCESS",
+        failed: bool = False,
+    ) -> ProviderCallEvent:
+        reconciled = self.session.execute(
+            update(ProviderCallEvent)
+            .where(
+                ProviderCallEvent.id == event_id,
+                ProviderCallEvent.outcome == "RESERVED",
+            )
+            .values(
+                request_count=max(1, request_count),
+                duration_ms=max(0, duration_ms),
+                input_units=max(0, input_units),
+                output_units=max(0, output_units),
+                outcome=outcome,
+                failed=failed,
+                completed_at=datetime.now(timezone.utc),
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount == 1
+        if not reconciled:
+            if self.session.get(ProviderCallEvent, event_id) is None:
+                raise RuntimeError("Provider call reservation is missing.")
+            raise ProviderCallLeaseLost("Provider call reservation is no longer active.")
+        self.session.flush()
+        event = self.session.get(ProviderCallEvent, event_id)
+        self.session.refresh(event)
+        return event
 
     def record_failure_attempt(
         self,

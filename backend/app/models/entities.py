@@ -179,12 +179,42 @@ class TTSSynthesisAttempt(Base):
     audio_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     audio_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     input_characters: Mapped[int] = mapped_column(Integer, default=0)
-    provider_requests: Mapped[int] = mapped_column(Integer, default=0)
+    provider_requests: Mapped[int] = mapped_column(Integer, default=1)
     generation_latency_ms: Mapped[float] = mapped_column(Float, default=0)
     usage_classification: Mapped[str] = mapped_column(
         String(80), default="CHARACTERS_AND_BYTES_PROVIDER_TOKEN_USAGE_UNAVAILABLE"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VoiceTranscriptionAttempt(Base):
+    __tablename__ = "voice_transcription_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "idempotency_key",
+            name="uq_voice_transcription_identity",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), index=True
+    )
+    learner_id: Mapped[str] = mapped_column(
+        ForeignKey("learners.id", ondelete="CASCADE"), index=True
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    audio_digest: Mapped[str] = mapped_column(String(64))
+    content_type: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    charge_duration_ms: Mapped[int] = mapped_column(Integer, default=60_000)
+    provider_requests: Mapped[int] = mapped_column(Integer, default=1)
+    result_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -360,6 +390,34 @@ class AIUsageRecord(Base):
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
+class ProviderCallEvent(Base):
+    """One dated reservation/reconciliation record for each provider dispatch."""
+
+    __tablename__ = "provider_call_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    learner_id: Mapped[str] = mapped_column(
+        ForeignKey("learners.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True
+    )
+    operation_kind: Mapped[str] = mapped_column(String(30), index=True)
+    attempt_reference: Mapped[str] = mapped_column(String(100), index=True)
+    request_count: Mapped[int] = mapped_column(Integer, default=1)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    input_units: Mapped[float] = mapped_column(Float, default=0)
+    output_units: Mapped[float] = mapped_column(Float, default=0)
+    outcome: Mapped[str] = mapped_column(String(20), default="RESERVED", index=True)
+    failed: Mapped[bool] = mapped_column(Boolean, default=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class VoiceProcessingAttempt(Base):
     __tablename__ = "voice_processing_attempts"
     __table_args__ = (UniqueConstraint("voice_turn_id", "idempotency_key"),)
@@ -437,6 +495,7 @@ class AICostMetricEvent(Base):
 
 class CommercialSubscription(Base):
     __tablename__ = "commercial_subscriptions"
+    __table_args__ = (UniqueConstraint("learner_id", name="uq_commercial_subscription_learner"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id", ondelete="CASCADE"), index=True)

@@ -2,7 +2,7 @@
 
 ## Provider-neutral flow
 
-Client audio is recorded with `getUserMedia` and `MediaRecorder` in bounded chunks. Stopping produces one non-empty Blob that is uploaded as the raw request body to the authenticated conversation transcription endpoint. Audio ingress validates ownership, media type, duration and size, calls the configured speech-to-text interface, and does not retain the raw request body. The normalized transcript is displayed to the learner and enters the same conversation use case as typed text.
+Client audio is recorded with `getUserMedia` and `MediaRecorder` in bounded chunks. Stopping produces one non-empty Blob that is uploaded as the raw request body to the authenticated conversation transcription endpoint. Audio ingress validates ownership, media type, duration and size, calls the configured speech-to-text interface, and does not retain the raw request body. The normalized transcript is displayed to the learner and enters the same conversation use case as typed text. Privacy-minimised transcription-attempt rows retain an audio digest, idempotency identity, safe status/result metadata and charge duration for replay and quota accounting; they never retain audio bytes.
 
 Interfaces should expose provider-independent requests, results, confidence, language hints, timing, and error categories. Adapters translate these to vendors. LLM, speech-to-text, and text-to-speech providers are all `disabled` in Milestone 1.
 

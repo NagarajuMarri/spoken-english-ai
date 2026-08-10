@@ -1,17 +1,18 @@
 # Version 1.0 RC1 known issues
 
-## Release blockers
+## Blocking production release
 
-- Closed-beta mode is reported by configuration but is not enforced during registration; invite-code configuration is unused.
-- No customer-facing feedback form invokes the authenticated feedback endpoint.
-- The founder metrics route is learner-owner scoped, in-memory and is not a founder/admin launch dashboard.
-- Pricing is present, but trial activation, subscription status and entitlement UX are not connected into the customer journey.
-- The required end-to-end journey lacks explicit profile management, conversation completion/progress acceptance and pronunciation-persistence acceptance.
+- The consolidated founder acceptance on physical Chrome/Edge, microphone, real STT, speaker output, live tutor/TTS quality, and avatar/audio synchronization is still pending.
+- Staging infrastructure, DNS/HTTPS, production secrets, monitoring/alerts, backup/restore, rollback, and immutable-image evidence have not been supplied in this repository workspace.
+- Docker and Nginx executables are unavailable in this workspace, so rendered-template `nginx -t`, container smoke, actual host-ingress peer observation, spoofed-header verification, streamed-upload behavior, and service-worker cache-migration evidence remain staging gates.
+- Automated database concurrency coverage in this workspace is SQLite/sequential. The implemented PostgreSQL row-lock/CAS paths for quota reservations, refresh rotation, provider retry claims, and subscription expiry still require real-contention staging stress evidence before production; this is an evidence gap, not a claim that those implementations are incorrect.
+- Final legal text, brand, pricing, beta cohort, production domain, and support/incident ownership require founder approval.
+- Production deployment, public release, Razorpay live mode, and real charges are not authorized.
 
-## Non-blocking limitations
+## Non-blocking engineering limitations
 
-- Forgot-password is not implemented and was treated as optional by the audit request.
-- Pytest 8.4.2 is development-only and is flagged by pip-audit; its compatible upgrade is tracked separately.
-- One pre-existing nullable-conversation mypy warning remains; runtime ownership tests pass.
-- Legal text is explicitly draft and still requires legal/founder approval.
-- Live OpenAI latency was not measured because live provider invocation is not authorized.
+- Pronunciation guidance remains synthetic/non-acoustic unless a validated provider supplies acoustic evidence.
+- Live OpenAI latency and subjective Telugu/English voice quality require the deferred founder device run; deterministic and contract-level provider paths are automated.
+- The full MyPy run has 56 existing errors confined to test files; the checked production modules pass their typed gate.
+- Payment upgrade is intentionally a Razorpay test-mode preview. It creates an audit event but no subscription and no charge.
+- Legal pages remain draft until the production-release approval gate.

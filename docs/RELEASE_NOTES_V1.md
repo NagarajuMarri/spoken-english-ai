@@ -1,6 +1,6 @@
 # SpeakMate Version 1.0 RC1 release notes
 
-Release candidate `v1.0.0-rc1` is the human-approved Version 1.0 product candidate for controlled review and production go-live preparation. It is not a deployment or public-release authorization.
+Release candidate `v1.0.0-rc1` is the engineering-validated Version 1.0 candidate awaiting consolidated founder acceptance. It is not a deployment, public-release, or production-payment authorization.
 
 ## Learner experience
 
@@ -14,12 +14,12 @@ Release candidate `v1.0.0-rc1` is the human-approved Version 1.0 product candida
 
 - Configuration-driven closed beta with invitation codes, allowlist, founder override, waiting list and customer-safe access messages.
 - Authenticated feedback and a founder-authorized read-only launch dashboard.
-- Free, trial, subscription and upgrade presentation with server-side entitlements and fair-use messaging.
+- Free, trial and subscription presentation backed by persisted expiry and server-side conversation, voice, tutor-request, token, and cost ceilings; upgrade remains an explicitly non-charging test preview.
 - Razorpay remains in test mode; no real payment path is authorized.
 
 ## Operations and assurance
 
-- PostgreSQL, Redis, private object-storage and worker boundaries; migrations through `0010_beta_launch_readiness`.
+- PostgreSQL, Redis, private object-storage and worker boundaries; migrations through `0017_provider_call_events`.
 - Readiness, telemetry, security audit, backup, restore, rollback and incident-response guidance.
 - RC audit: `RC1_READY`; 183 backend, 37 frontend and 7 deterministic Playwright tests passed.
 

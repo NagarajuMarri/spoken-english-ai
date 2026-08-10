@@ -1,21 +1,26 @@
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { assertSafeLiveTarget, assertSameOrigin } from "./live-target-safety";
 
 test.skip(!process.env.LIVE_PASSWORD_RESET_ACCEPTANCE, "requires the migrated Feature 2 backend");
 test.setTimeout(180_000);
 
-test("live forgot-password and single-use update-password journey", async ({ page }) => {
-  const email = process.env.LIVE_PASSWORD_RESET_EMAIL ?? "live-reset@example.com";
+test("live forgot-password and single-use update-password journey", async ({ page, request }) => {
+  await assertSafeLiveTarget(request);
+  const email = process.env.LIVE_PASSWORD_RESET_EMAIL
+    ?? `live-reset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const oldPassword = "StrongPassword123!";
   const newPassword = "NewStrongPassword456!";
   const outboxPath = process.env.PASSWORD_RESET_OUTBOX_PATH;
+  const invitationCode = process.env.LIVE_PASSWORD_RESET_INVITE ?? process.env.LIVE_REGISTRATION_INVITE;
   if (!outboxPath) throw new Error("PASSWORD_RESET_OUTBOX_PATH is required");
+  if (!invitationCode) throw new Error("LIVE_PASSWORD_RESET_INVITE or LIVE_REGISTRATION_INVITE is required");
 
   await page.goto("/register");
   await page.getByLabel("Name").fill("Live Reset Learner");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(oldPassword);
-  await page.getByLabel("Closed-beta invitation code (if provided)").fill(process.env.LIVE_PASSWORD_RESET_INVITE ?? "");
+  await page.getByLabel("Closed-beta invitation code (if provided)").fill(invitationCode);
   await page.getByLabel(/Terms and Privacy/).check();
   await page.getByRole("button", {name:"Create learner account"}).click();
   await expect(page).toHaveURL(/\/onboarding$/);
@@ -34,6 +39,7 @@ test("live forgot-password and single-use update-password journey", async ({ pag
   const delivery = lines.map(line=>JSON.parse(line) as {recipient:string;reset_url:string}).reverse()
     .find(item=>item.recipient===email);
   if (!delivery) throw new Error("Development reset delivery was not found");
+  assertSameOrigin(delivery.reset_url, page.url());
   await page.goto(delivery.reset_url);
   await expect(page.getByLabel("New password")).toBeVisible();
   await page.getByLabel("New password").fill(newPassword);

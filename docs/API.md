@@ -14,7 +14,7 @@ OpenAI responses that end at the configured output limit return `502 llm_incompl
 
 # Voice input
 
-`POST /api/v1/conversations/{conversation_id}/transcriptions` accepts an authenticated raw audio request (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav`, or `audio/mpeg`) with `X-Audio-Duration-Ms` and explicit `X-Voice-Processing-Consent: accepted`. It returns the normalized transcript, detected language, captured duration and byte count. Raw audio is transient request data and is not persisted by this endpoint.
+`POST /api/v1/conversations/{conversation_id}/transcriptions` accepts an authenticated raw audio request (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/wav`, or `audio/mpeg`) with `X-Audio-Duration-Ms` and explicit `X-Voice-Processing-Consent: accepted`. Clients should also send a stable `Idempotency-Key`; the server falls back to the request identity when it is omitted. The duration header is a bounded capture hint, not billing authority; successful quota accounting uses provider-reported duration and failed attempts retain a conservative reservation. A completed retry with the same key and audio returns the stored safe result without another provider call, while reuse with different audio is rejected. The response contains the normalized transcript, detected language, authoritative duration and byte count. Raw audio is transient request data and is never persisted; only its digest, idempotency/status metadata, safe result fields and charged duration are retained.
 
 # Tutor speech
 

@@ -48,7 +48,7 @@ async function mockApi(page: Page) {
     else if (path.endsWith("/me")) body = account;
     else if (path === "/api/v1/tutors") body = [tutor("ananya"), tutor("arjun")];
     else if (path.endsWith("/preference")) body = { learner_id: "learner-1", tutor: tutor("ananya"), telugu_explanations_enabled: true, language_mode: "ENGLISH_TELUGU" };
-    else if (path.endsWith("/dashboard")) body = { learner_id: "learner-1", completed_sessions: 3, current_streak_days: 2, total_practice_minutes: 8, preferred_tutor_id: "ananya", subscription_tier: "FREE", subscription_status: "READY_FOR_PROVIDER_INTEGRATION" };
+    else if (path.endsWith("/dashboard")) body = { learner_id: "learner-1", completed_sessions: 3, current_streak_days: 2, total_practice_minutes: 8, preferred_tutor_id: "ananya", subscription_tier: "FREE", subscription_status: "FREE" };
     else if (path.endsWith("/conversations")) body = { id: "conversation-1" };
     else if (path.endsWith("/ai-turns")) body = { turn_id: "feature-7-turn", tutor_message: "Thanks for sharing.", next_question: "What happened next?", correction_explanation: "Use the past tense here.", vocabulary_suggestions: ["confident", "routine"], telugu_explanation: "ఇక్కడ భూతకాలం ఉపయోగించండి.", expression_hint: "CORRECTIVE" };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });

@@ -7,13 +7,13 @@ interface AuthValue { status:"restoring"|"authenticated"|"anonymous"; account:Ac
 const Context=createContext<AuthValue|null>(null);
 export function AuthProvider({children}:{children:ReactNode}) {
   const [tokens,setTokens]=useState<TokenPair|null>(()=>sessionStore.read()); const [account,setAccount]=useState<Account|null>(null); const [status,setStatus]=useState<AuthValue["status"]>(tokens?"restoring":"anonymous");
-  const save=useCallback((next:TokenPair)=>{sessionStore.write(next);setTokens(next)},[]); const clear=useCallback(()=>{sessionStore.clear();setTokens(null);setAccount(null);setStatus("anonymous")},[]);
+  const save=useCallback((next:TokenPair)=>{sessionStore.write(next);setTokens(next)},[]); const clear=useCallback((expectedRefreshToken?:string)=>{const current=sessionStore.read();if(expectedRefreshToken&&current&&current.refresh_token!==expectedRefreshToken)return;sessionStore.clear();setTokens(null);setAccount(null);setStatus("anonymous")},[]);
   useEffect(()=>configureSession({get:()=>sessionStore.read(),update:save,clear}),[save,clear]);
   useEffect(()=>{if(!tokens){setStatus("anonymous");return}let active=true;api.me().then(value=>{if(active){setAccount(value);setStatus("authenticated")}}).catch(()=>{if(active)clear()});return()=>{active=false}},[tokens,clear]);
   async function login(email:string,password:string){const pair=await api.login(email,password);save(pair);setAccount(await api.me());setStatus("authenticated")}
   async function register(name:string,email:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean){const result=await api.register({display_name:name,email,password,invitation_code:invitationCode||undefined,terms_privacy_accepted:termsPrivacyAccepted});save(result.tokens);setAccount(result);setStatus("authenticated")}
-  async function logout(){const current=sessionStore.read();try{if(current)await api.logout(current.refresh_token)}finally{clear()}}
-  async function logoutAll(){try{await api.logoutAll()}finally{clear()}}
+  async function logout(){const current=sessionStore.read();try{if(current)await api.logout(current.refresh_token)}finally{clear(current?.refresh_token)}}
+  async function logoutAll(){const current=sessionStore.read();try{await api.logoutAll()}finally{clear(current?.refresh_token)}}
   return <Context.Provider value={{status,account,login,register,logout,logoutAll}}>{children}</Context.Provider>
 }
 export function useAuth(){const value=useContext(Context);if(!value)throw new Error("AuthProvider missing");return value}

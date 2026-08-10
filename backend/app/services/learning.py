@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import status
 from sqlalchemy.orm import Session
 
@@ -32,7 +32,7 @@ class LearningService:
             LearningGoal(learner.learning_goal),
             set(self.repository.completed_lesson_ids(learner_id)),
             set(self.repository.recent_lesson_ids(learner_id)),
-            current_date or date.today(),
+            current_date or datetime.now(timezone.utc).date(),
         )
 
     def create_session(self, learner_id, lesson_id, conversation_id=None):
@@ -84,7 +84,7 @@ class LearningService:
         for previous, current in zip(days, days[1:]):
             run = run + 1 if current == previous + timedelta(days=1) else 1
             longest = max(longest, run)
-        today = today or date.today()
+        today = today or datetime.now(timezone.utc).date()
         current = 0
         if days[-1] in {today, today - timedelta(days=1)}:
             current = 1

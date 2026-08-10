@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
+from backend.app.commercial.runtime import RuntimeEntitlementService
 from backend.app.db.session import get_db
 from backend.app.domain.scenarios import SCENARIOS, SCENARIOS_BY_ID
 from backend.app.schemas.conversations import (
@@ -24,10 +25,15 @@ def list_scenarios():
 @router.post("/conversations", response_model=ConversationRead, status_code=status.HTTP_201_CREATED)
 def create_conversation(
     data: ConversationCreate,
+    request: Request,
     principal: Principal = Depends(current_principal),
     session: Session = Depends(get_db),
 ):
     ensure_owner(data.learner_id, principal)
+    RuntimeEntitlementService(
+        session,
+        request.app.state.commercial_service.config,
+    ).enforce_conversation(data.learner_id)
     conversation = ConversationService(session).create(data.learner_id, data.scenario_id)
     return {
         **conversation.__dict__,

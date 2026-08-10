@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
+from backend.app.commercial.runtime import RuntimeEntitlementService
 from backend.app.core.security import Principal, current_principal
 from backend.app.db.session import get_db
 from backend.app.schemas.tutors import (
@@ -30,5 +31,17 @@ def update_preference(data: TutorPreferenceUpdate, principal: Principal = Depend
 
 
 @router.get("/dashboard", response_model=LearnerDashboardRead)
-def dashboard(principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
-    return TutorExperienceService(session).dashboard(principal.learner)
+def dashboard(
+    request: Request,
+    principal: Principal = Depends(current_principal),
+    session: Session = Depends(get_db),
+):
+    subscription = RuntimeEntitlementService(
+        session,
+        request.app.state.commercial_service.config,
+    ).view(principal.learner.id, payment_mode=request.app.state.settings.razorpay_mode)
+    return TutorExperienceService(session).dashboard(
+        principal.learner,
+        subscription_tier=subscription["plan_id"],
+        subscription_status=subscription["status"],
+    )

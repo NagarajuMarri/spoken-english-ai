@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from backend.app.models import AITurnAttempt
 
@@ -34,6 +34,7 @@ class AITurnAttemptRepository:
         learner_id: str,
         idempotency_key: str,
         learner_text: str,
+        commit: bool = True,
     ) -> AITurnAttempt:
         attempt = AITurnAttempt(
             conversation_id=conversation_id,
@@ -41,23 +42,68 @@ class AITurnAttemptRepository:
             idempotency_key=idempotency_key,
             learner_text=learner_text,
             status="IN_PROGRESS",
+            provider_attempts=1,
             result_json={},
         )
         self.session.add(attempt)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         return attempt
 
-    def mark_in_progress(self, attempt: AITurnAttempt) -> None:
-        attempt.status = "IN_PROGRESS"
-        attempt.failure_code = None
-        attempt.updated_at = utc_now()
-        self.session.commit()
+    def claim_provider_retry(
+        self,
+        attempt: AITurnAttempt,
+        *,
+        maximum_provider_requests: int,
+        commit: bool = True,
+    ) -> bool:
+        claimed = self.session.execute(
+            update(AITurnAttempt)
+            .where(
+                AITurnAttempt.id == attempt.id,
+                AITurnAttempt.status == "FAILED_RETRYABLE",
+                AITurnAttempt.provider_attempts < maximum_provider_requests,
+            )
+            .values(
+                status="IN_PROGRESS",
+                failure_code=None,
+                provider_attempts=AITurnAttempt.provider_attempts + 1,
+                updated_at=utc_now(),
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount == 1
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
+        if claimed:
+            self.session.refresh(attempt)
+        return claimed
 
-    def mark_review_in_progress(self, attempt: AITurnAttempt) -> None:
-        attempt.status = "REVIEW_IN_PROGRESS"
-        attempt.failure_code = None
-        attempt.updated_at = utc_now()
-        self.session.commit()
+    def claim_review(self, attempt: AITurnAttempt, *, commit: bool = True) -> bool:
+        claimed = self.session.execute(
+            update(AITurnAttempt)
+            .where(
+                AITurnAttempt.id == attempt.id,
+                AITurnAttempt.status.in_(("PROVIDER_SUCCEEDED", "REVIEW_FAILED_RETRYABLE")),
+            )
+            .values(
+                status="REVIEW_IN_PROGRESS",
+                failure_code=None,
+                provider_attempts=AITurnAttempt.provider_attempts + 1,
+                updated_at=utc_now(),
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount == 1
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
+        if claimed:
+            self.session.refresh(attempt)
+        return claimed
 
     def checkpoint_provider_success(
         self,
@@ -68,7 +114,10 @@ class AITurnAttemptRepository:
     ) -> None:
         attempt.status = "PROVIDER_SUCCEEDED"
         attempt.failure_code = None
-        attempt.provider_attempts += response.usage.provider_requests
+        attempt.provider_attempts = max(
+            0,
+            attempt.provider_attempts + response.usage.provider_requests - 1,
+        )
         attempt.result_json = {
             "provider_response": response.model_dump(mode="json"),
             "provider_latency_ms": provider_latency_ms,
@@ -76,10 +125,25 @@ class AITurnAttemptRepository:
         attempt.updated_at = utc_now()
         self.session.commit()
 
-    def mark_provider_failure(self, attempt: AITurnAttempt, error) -> None:
-        attempt.status = "FAILED_RETRYABLE" if error.retryable else "FAILED_FINAL"
+    def mark_provider_failure(
+        self,
+        attempt: AITurnAttempt,
+        error,
+        *,
+        maximum_provider_requests: int,
+    ) -> None:
         attempt.failure_code = error.failure_code
-        attempt.provider_attempts += error.provider_requests
+        attempt.provider_attempts = max(
+            0,
+            attempt.provider_attempts + error.provider_requests - 1,
+        )
+        attempt.status = (
+            "FAILED_RETRYABLE"
+            if error.retryable and attempt.provider_attempts < maximum_provider_requests
+            else "FAILED_FINAL"
+        )
+        if attempt.status == "FAILED_FINAL" and error.retryable:
+            attempt.failure_code = "provider_retry_limit_reached"
         attempt.updated_at = utc_now()
 
     def checkpoint_review_success(
@@ -97,7 +161,10 @@ class AITurnAttemptRepository:
         attempt.result_json = checkpoint
         attempt.status = "REVIEW_SUCCEEDED"
         attempt.failure_code = None
-        attempt.provider_attempts += review_result.usage.provider_requests
+        attempt.provider_attempts = max(
+            0,
+            attempt.provider_attempts + review_result.usage.provider_requests - 1,
+        )
         attempt.updated_at = utc_now()
         self.session.commit()
 
@@ -116,14 +183,20 @@ class AITurnAttemptRepository:
         attempt.result_json = checkpoint
         attempt.status = "REVIEW_SUCCEEDED"
         attempt.failure_code = None
-        attempt.provider_attempts += error.provider_requests
+        attempt.provider_attempts = max(
+            0,
+            attempt.provider_attempts + error.provider_requests - 1,
+        )
         attempt.updated_at = utc_now()
         self.session.commit()
 
     def mark_review_failure(self, attempt: AITurnAttempt, error) -> None:
         attempt.status = "REVIEW_FAILED_RETRYABLE" if error.retryable else "REVIEW_FAILED_FINAL"
         attempt.failure_code = error.failure_code
-        attempt.provider_attempts += error.provider_requests
+        attempt.provider_attempts = max(
+            0,
+            attempt.provider_attempts + error.provider_requests - 1,
+        )
         attempt.updated_at = utc_now()
 
     def mark_completed(self, attempt: AITurnAttempt, result: dict) -> None:

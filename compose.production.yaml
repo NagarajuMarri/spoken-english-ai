@@ -6,6 +6,7 @@ services:
     restart: "no"
   backend:
     image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE}
+    command: ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
     restart: unless-stopped
     read_only: true
     tmpfs: [/tmp]
@@ -13,7 +14,7 @@ services:
     depends_on:
       migrate: {condition: service_completed_successfully}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      test: ["CMD", "python", "-c", "from urllib.parse import urlparse; import urllib.request; from backend.app.core.config import get_settings; settings=get_settings(); request=urllib.request.Request('http://127.0.0.1:8000/health/ready', headers={'Host': urlparse(settings.public_api_url).netloc, 'X-Forwarded-Proto': 'https'}); urllib.request.urlopen(request, timeout=2)"]
       interval: 30s
       timeout: 3s
       start_period: 15s
@@ -37,6 +38,10 @@ services:
     restart: unless-stopped
     depends_on:
       backend: {condition: service_healthy}
-    ports: ["8080:8080"]
+    environment:
+      TRUSTED_INGRESS_CIDR: ${TRUSTED_INGRESS_CIDR:?Set TRUSTED_INGRESS_CIDR to the approved ingress network}
+    read_only: true
+    tmpfs: [/tmp, /var/cache/nginx]
+    ports: ["127.0.0.1:8080:8080"]
     deploy:
       resources: {limits: {memory: 128M, cpus: "0.25"}}

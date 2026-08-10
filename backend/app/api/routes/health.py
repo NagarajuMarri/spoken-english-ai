@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 
 from backend.app.core.config import get_settings
+from backend.app.db.schema import ALEMBIC_HEAD_REVISION
 
 router = APIRouter(tags=["system"])
 
@@ -63,7 +64,7 @@ def ready(request: Request):
                 revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
                 checks["migration"] = (
                     "ready"
-                    if revision == "0011_password_recovery" and authentication_schema_is_compatible(connection)
+                    if revision == ALEMBIC_HEAD_REVISION and authentication_schema_is_compatible(connection)
                     else "incompatible"
                 )
             except Exception:
@@ -115,7 +116,7 @@ def ready(request: Request):
                 or settings.openai_api_key
             ) else "unavailable",
             "payment": "configured" if (not settings.razorpay_enabled or settings.razorpay_webhook_secret) else "unavailable",
-            "worker": "ready" if (not settings.worker_enabled or getattr(request.app.state, "worker_healthy", False)) else "unavailable",
+            "worker": "ready" if worker_ready else "unavailable",
         })
         ready_state = ready_state and all(
             value in {"ready", "configured"}
@@ -136,7 +137,7 @@ def version(request: Request):
         "build_identifier": settings.build_identifier,
         "environment": settings.environment,
         "api_version": "v1",
-        "dependencies": {"python": "3.12+", "database_schema": "0013_openai_tts"},
+        "dependencies": {"python": "3.12+", "database_schema": ALEMBIC_HEAD_REVISION},
     }
 
 

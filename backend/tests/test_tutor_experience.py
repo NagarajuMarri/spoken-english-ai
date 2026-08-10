@@ -1,9 +1,10 @@
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 
 from sqlalchemy.orm import Session
 
 from backend.app.models import ProgressRecord
+from backend.app.models.entities import CommercialSubscription
 from backend.app.tutors import TUTORS
 
 
@@ -49,7 +50,7 @@ def test_dashboard_reports_progress_streak_and_subscription_boundary(client, lea
     session_factory = client.app.state.session_factory
     with session_factory() as session:
         session: Session
-        today = date.today()
+        today = datetime.now(timezone.utc).date()
         session.add_all([
             ProgressRecord(learner_id=learner["id"], practice_date=today, duration_seconds=600),
             ProgressRecord(learner_id=learner["id"], practice_date=today - timedelta(days=1), duration_seconds=300),
@@ -64,8 +65,28 @@ def test_dashboard_reports_progress_streak_and_subscription_boundary(client, lea
         "total_practice_minutes": 15,
         "preferred_tutor_id": "ananya",
         "subscription_tier": "FREE",
-        "subscription_status": "READY_FOR_PROVIDER_INTEGRATION",
+        "subscription_status": "FREE",
     }
+
+
+def test_dashboard_reports_current_persisted_subscription(client, learner):
+    session_factory = client.app.state.session_factory
+    with session_factory() as session:
+        session.add(CommercialSubscription(
+            learner_id=learner["id"],
+            plan_id="PREMIUM_MONTHLY",
+            status="TRIAL",
+            provider_id="test",
+            trial_started_at=datetime.now(timezone.utc),
+            current_period_end=datetime.now(timezone.utc) + timedelta(days=7),
+        ))
+        session.commit()
+
+    dashboard = client.get("/api/v1/tutors/dashboard")
+
+    assert dashboard.status_code == 200
+    assert dashboard.json()["subscription_tier"] == "PREMIUM_MONTHLY"
+    assert dashboard.json()["subscription_status"] == "TRIAL"
 
 
 def test_onboarding_persists_tutor_and_optional_telugu(client, learner):

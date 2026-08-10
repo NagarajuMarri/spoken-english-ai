@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -9,7 +10,13 @@ from backend.app.ai.exceptions import ProviderOutputInvalid, ProviderTimeout, Pr
 from backend.app.ai.models import AIConversationRequest, AIConversationResponse
 from backend.app.ai.service import AIConversationService, AdaptivePolicy
 from backend.app.ai.validation import validate_provider_output
-from backend.app.models import AIUsageRecord, LearnerMemorySignal, VoiceProcessingAttempt
+from backend.app.models import (
+    AIUsageRecord,
+    AITurnAttempt,
+    LearnerMemorySignal,
+    ProviderCallEvent,
+    VoiceProcessingAttempt,
+)
 from backend.app.providers.llm.openai_boundary import OpenAICompatibleAIProvider
 from backend.app.providers.pronunciation.contracts import PronunciationRequest, PronunciationResult
 from backend.app.providers.pronunciation.deterministic import DeterministicPronunciationProvider
@@ -240,7 +247,7 @@ def test_ai_memory_blocks_cross_account_access(client, learner):
     assert response.json()["error"]["code"] == "resource_not_found"
 
 
-def test_voice_processing_is_idempotent_and_synthetic(client, learner):
+def test_voice_processing_is_idempotent_and_synthetic(client, learner, conversation):
     from backend.tests.test_voice import add_turn, create_voice_session, set_consent
     set_consent(client, learner)
     voice_session = create_voice_session(client, learner).json()
@@ -248,6 +255,19 @@ def test_voice_processing_is_idempotent_and_synthetic(client, learner):
     path = f"/api/v1/voice-sessions/{voice_session['id']}/turns/{turn['id']}/process"
     headers = {"Idempotency-Key": "stable-processing-key"}
     first = client.post(path, json={"generate_audio": True}, headers=headers)
+    limit = client.app.state.commercial_service.config.free_daily_conversations
+    with client.app.state.session_factory() as db:
+        db.add_all([
+            AITurnAttempt(
+                conversation_id=conversation["id"],
+                learner_id=learner["id"],
+                idempotency_key=f"exhaust-after-voice-{index}",
+                learner_text="Quota evidence.",
+                status="COMPLETED",
+            )
+            for index in range(limit - 1)
+        ])
+        db.commit()
     second = client.post(path, json={"generate_audio": True}, headers=headers)
     assert first.status_code == 200
     assert second.json() == first.json()
@@ -256,6 +276,114 @@ def test_voice_processing_is_idempotent_and_synthetic(client, learner):
         assert db.scalar(select(func.count()).select_from(VoiceProcessingAttempt)) == 1
         assert db.scalar(select(func.count()).select_from(AIUsageRecord)) == 1
         assert db.scalar(select(func.count()).select_from(LearnerMemorySignal)) >= 1
+
+
+def test_voice_processing_cached_replay_never_crosses_accounts(client, learner):
+    from backend.tests.test_voice import add_turn, create_voice_session, set_consent
+
+    set_consent(client, learner)
+    voice_session = create_voice_session(client, learner).json()
+    turn = add_turn(client, voice_session["id"], key="ai/cross-account.wav").json()
+    path = f"/api/v1/voice-sessions/{voice_session['id']}/turns/{turn['id']}/process"
+    headers = {"Idempotency-Key": "cross-account-processing-key"}
+    completed = client.post(path, json={"generate_audio": True}, headers=headers)
+    assert completed.status_code == 200
+
+    second = client.post("/api/v1/auth/register", json={
+        "email": "voice-replay-attacker@example.com",
+        "password": "StrongPassword123!",
+        "display_name": "Second Learner",
+        "terms_privacy_accepted": True,
+    }).json()
+    client.headers["Authorization"] = f"Bearer {second['tokens']['access_token']}"
+    blocked = client.post(path, json={"generate_audio": True}, headers=headers)
+    assert blocked.status_code == 404
+    assert blocked.json()["error"]["code"] == "resource_not_found"
+    assert completed.json()["transcript"] not in blocked.text
+
+
+def test_voice_processing_provider_retries_are_cas_bounded(
+    client,
+    learner,
+    monkeypatch,
+):
+    from backend.tests.test_voice import add_turn, create_voice_session, set_consent
+
+    class FailedSTT:
+        def __init__(self):
+            self.calls = 0
+
+        def transcribe(self, _request):
+            self.calls += 1
+            raise ProviderUnavailable("private provider detail", provider_requests=1)
+
+    failed_provider = FailedSTT()
+    monkeypatch.setattr(
+        "backend.app.api.routes.ai.DeterministicSpeechToTextProvider",
+        lambda: failed_provider,
+    )
+    set_consent(client, learner)
+    voice_session = create_voice_session(client, learner).json()
+    turn = add_turn(client, voice_session["id"], key="ai/bounded-retry.wav").json()
+    path = f"/api/v1/voice-sessions/{voice_session['id']}/turns/{turn['id']}/process"
+    headers = {"Idempotency-Key": "bounded-processing-key"}
+
+    responses = [
+        client.post(path, json={"generate_audio": True}, headers=headers)
+        for _ in range(4)
+    ]
+    assert [item.status_code for item in responses] == [503, 503, 503, 503]
+    assert [item.json()["error"]["code"] for item in responses] == [
+        "provider_unavailable",
+        "provider_unavailable",
+        "voice_retry_limit_reached",
+        "voice_retry_limit_reached",
+    ]
+    assert failed_provider.calls == 3
+    with client.app.state.session_factory() as db:
+        attempt = db.scalar(select(VoiceProcessingAttempt))
+        events = list(db.scalars(select(ProviderCallEvent).where(
+            ProviderCallEvent.operation_kind == "voice_pipeline"
+        )))
+        assert attempt.status == "FAILED_FINAL"
+        assert len(events) == 3
+        assert sum(item.request_count for item in events) == 3
+        assert all(item.outcome == "FAILURE" for item in events)
+
+
+def test_stale_pre_event_voice_attempt_recovers_and_counts_actual_dispatches(
+    client,
+    learner,
+):
+    from backend.tests.test_voice import add_turn, create_voice_session, set_consent
+
+    set_consent(client, learner)
+    voice_session = create_voice_session(client, learner).json()
+    turn = add_turn(client, voice_session["id"], key="ai/stale-legacy.wav").json()
+    with client.app.state.session_factory() as db:
+        db.add(VoiceProcessingAttempt(
+            voice_turn_id=turn["id"],
+            learner_id=learner["id"],
+            idempotency_key="stale-legacy-processing",
+            status="PROCESSING",
+            created_at=datetime.now(UTC) - timedelta(minutes=6),
+        ))
+        db.commit()
+
+    response = client.post(
+        f"/api/v1/voice-sessions/{voice_session['id']}/turns/{turn['id']}/process",
+        json={"generate_audio": True},
+        headers={"Idempotency-Key": "stale-legacy-processing"},
+    )
+    assert response.status_code == 200
+    with client.app.state.session_factory() as db:
+        attempt = db.scalar(select(VoiceProcessingAttempt))
+        event = db.scalar(select(ProviderCallEvent).where(
+            ProviderCallEvent.operation_kind == "voice_pipeline"
+        ))
+        assert attempt.status == "SUCCEEDED"
+        assert event.outcome == "SUCCESS"
+        assert event.request_count == 4
 
 
 def test_withdrawn_consent_blocks_processing(client, learner):

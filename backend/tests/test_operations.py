@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from backend.app.core.config import Settings
 from backend.app.core.operations import InMemoryMetrics, InMemoryRateLimiter, RateLimitPolicy
+from backend.app.db.schema import ALEMBIC_HEAD_REVISION
 from backend.app.main import create_app
 from backend.app.models import AudioAsset, SecurityAuditEvent, UserAccount
 from backend.app.services.admin import AdministrativeService
@@ -47,6 +48,7 @@ def test_health_readiness_version_and_missing_secret(client):
     }
     version = client.get("/health/version").json()
     assert version["api_version"] == "v1"
+    assert version["dependencies"]["database_schema"] == ALEMBIC_HEAD_REVISION
     assert "secret" not in str(version).lower()
 
     with pytest.raises(ValueError, match="Unsafe production configuration"):

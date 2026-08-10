@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -40,7 +40,13 @@ class TutorExperienceService:
         self.session.refresh(learner)
         return self.preference(learner)
 
-    def dashboard(self, learner: Learner) -> dict:
+    def dashboard(
+        self,
+        learner: Learner,
+        *,
+        subscription_tier: str,
+        subscription_status: str,
+    ) -> dict:
         records = list(self.session.scalars(
             select(ProgressRecord).where(ProgressRecord.learner_id == learner.id)
         ))
@@ -51,8 +57,8 @@ class TutorExperienceService:
             "current_streak_days": self._streak(dates),
             "total_practice_minutes": sum(record.duration_seconds for record in records) // 60,
             "preferred_tutor_id": self._selected_tutor(learner).tutor_id,
-            "subscription_tier": "FREE",
-            "subscription_status": "READY_FOR_PROVIDER_INTEGRATION",
+            "subscription_tier": subscription_tier,
+            "subscription_status": subscription_status,
         }
 
     @staticmethod
@@ -67,6 +73,9 @@ class TutorExperienceService:
         if not dates:
             return 0
         cursor = max(dates)
+        today = datetime.now(timezone.utc).date()
+        if cursor not in {today, today - timedelta(days=1)}:
+            return 0
         streak = 0
         while cursor in dates:
             streak += 1

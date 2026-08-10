@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
 from backend.app.db.session import get_db
+from backend.app.commercial.runtime import RuntimeEntitlementService
 from backend.app.schemas.voice import (
     DailyPlanRead,
     VoiceConsentRead,
@@ -60,6 +61,10 @@ def delete_consent(learner_id: str, request: Request, _: Principal = Depends(req
 def create_voice_session(data: VoiceSessionCreate, request: Request, principal: Principal = Depends(current_principal), session: Session = Depends(get_db)):
     enforce_rate_limit(request, "authenticated_burst", principal.user.id)
     ensure_owner(data.learner_id, principal)
+    RuntimeEntitlementService(
+        session,
+        request.app.state.commercial_service.config,
+    ).enforce_conversation(data.learner_id)
     result = session_payload(service(request, session).create_session(data.learner_id, data.scenario_id))
     request.app.state.metrics.increment("voice_sessions_started")
     request.app.state.metrics.gauge("active_voice_sessions", 1)

@@ -1,16 +1,21 @@
 import { expect, test } from "@playwright/test";
+import { assertSafeLiveTarget } from "./live-target-safety";
 
 test.skip(!process.env.LIVE_AUTH_ACCEPTANCE, "requires the migrated local backend");
 test.setTimeout(180_000);
 
-test("live registration, logout, login, restoration, and safe rejection", async ({ page }) => {
-  const email = "live-acceptance@example.com";
+test("live registration, logout, login, restoration, and safe rejection", async ({ page, request }) => {
+  await assertSafeLiveTarget(request);
+  const email = `live-acceptance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = "StrongPassword123!";
+  const invitationCode = process.env.LIVE_AUTH_INVITE ?? process.env.LIVE_REGISTRATION_INVITE;
+  if (!invitationCode) throw new Error("LIVE_AUTH_INVITE or LIVE_REGISTRATION_INVITE is required");
 
   await page.goto("/register");
   await page.getByLabel("Name").fill("Live Acceptance");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Closed-beta invitation code (if provided)").fill(invitationCode);
   await page.getByLabel(/Terms and Privacy/).check();
   await page.getByRole("button", { name: "Create learner account" }).click();
   await expect(page).toHaveURL(/\/onboarding$/, { timeout: 45_000 });
@@ -33,6 +38,7 @@ test("live registration, logout, login, restoration, and safe rejection", async 
   await page.getByLabel("Name").fill("Duplicate");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Closed-beta invitation code (if provided)").fill(invitationCode);
   await page.getByLabel(/Terms and Privacy/).check();
   const duplicate = page.waitForResponse((response) => response.url().endsWith("/auth/register"));
   await page.getByRole("button", { name: "Create learner account" }).click();

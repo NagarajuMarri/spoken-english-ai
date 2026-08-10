@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useState, type FormEvent } from "react";
 import { ApiError, api } from "../api/client";
 import { useRouter } from "../routes/router";
 
@@ -18,10 +18,19 @@ export function RequestPasswordResetScreen() {
 
 export function UpdatePasswordScreen() {
   const { navigate } = useRouter();
-  const token = new URLSearchParams(location.search).get("token") ?? "";
+  const [token] = useState(()=>new URLSearchParams(location.hash.replace(/^#/, "")).get("token") ?? "");
   const [state, setState] = useState<"checking"|"valid"|"invalid"|"complete">("checking");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  useLayoutEffect(() => {
+    const search=new URLSearchParams(location.search);
+    const hadQueryToken=search.has("token");
+    search.delete("token");
+    if(location.hash||hadQueryToken){
+      const safeSearch=search.toString();
+      history.replaceState(history.state,"",`${location.pathname}${safeSearch?`?${safeSearch}`:""}`);
+    }
+  }, []);
   useEffect(() => {
     let active = true;
     if (!token) { setState("invalid"); setMessage("This password reset link is invalid."); return; }

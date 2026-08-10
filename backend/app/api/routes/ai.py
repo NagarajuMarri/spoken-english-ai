@@ -1,11 +1,15 @@
 import hashlib
 import logging
 import re
+from datetime import UTC, datetime, timedelta
+from math import ceil, isfinite
 from time import perf_counter
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Header, Request, Response, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -27,6 +31,7 @@ from backend.app.ai.exceptions import (
 )
 from backend.app.ai.models import AIConversationRequest, AIConversationResponse, ConversationHistoryTurn
 from backend.app.ai.service import AIConversationService, AdaptivePolicy
+from backend.app.commercial.runtime import RuntimeEntitlementService
 from backend.app.conversation_memory.models import MemorySignalInput
 from backend.app.conversation_memory.service import ConversationMemoryService
 from backend.app.core.errors import AppError
@@ -34,7 +39,14 @@ from backend.app.core.operations import enforce_rate_limit
 from backend.app.core.security import Principal, current_principal, ensure_owner
 from backend.app.db.session import get_db
 from backend.app.domain.scenarios import SCENARIOS_BY_ID
-from backend.app.models import AICostMetricEvent, AITurnAttempt, Conversation, VoiceProcessingAttempt
+from backend.app.models import (
+    AICostMetricEvent,
+    AITurnAttempt,
+    Conversation,
+    ProviderCallEvent,
+    VoiceProcessingAttempt,
+    VoiceTranscriptionAttempt,
+)
 from backend.app.intelligent_learning.models import CostEvent
 from backend.app.providers.pronunciation.deterministic import DeterministicPronunciationProvider
 from backend.app.providers.stt.contracts import SpeechToTextRequest
@@ -45,7 +57,8 @@ from backend.app.repositories.conversations import ConversationRepository
 from backend.app.repositories.ai_turns import AITurnAttemptRepository
 from backend.app.repositories.tts_synthesis import TTSSynthesisRepository
 from backend.app.repositories.conversations import TurnSequenceConflict
-from backend.app.usage.service import UsageService
+from backend.app.usage.service import ProviderCallLeaseLost, UsageService
+from backend.app.usage.limits import UsageLimits
 from backend.app.voice.models import VoiceTutorResult
 from backend.app.voice.orchestration import VoiceTutorOrchestrationService
 from backend.app.tutors import get_tutor
@@ -229,6 +242,13 @@ def _provider_app_error(exc: ProviderError) -> AppError:
 
 
 def _failure_from_attempt(attempt: AITurnAttempt, *, language_review: bool = False) -> AppError:
+    if attempt.failure_code == "provider_retry_limit_reached":
+        return AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "llm_retry_limit_reached",
+            "The tutor could not recover after the allowed retries.",
+            retryable=False,
+        )
     error_types = {
         "provider_timeout": ProviderTimeout,
         "provider_connection_error": ProviderConnectionError,
@@ -339,6 +359,144 @@ class VoiceTranscriptionRead(BaseModel):
     size_bytes: int
 
 
+_TRANSCRIPTION_RESERVATION_MS = 60_000
+_PROVIDER_LEASE = timedelta(minutes=5)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _reconcile_provider_call(usage: UsageService, event_id: str, **values):
+    try:
+        return usage.reconcile_provider_call(event_id, **values)
+    except ProviderCallLeaseLost as exc:
+        usage.session.rollback()
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "provider_result_superseded",
+            "This provider result arrived after its processing lease expired. Retry safely.",
+            retryable=True,
+        ) from exc
+
+
+def _recover_stale_provider_claim(
+    session: Session,
+    attempt,
+    *,
+    transitions: dict[str, str],
+    maximum_provider_requests: int | None = None,
+) -> None:
+    target = transitions.get(attempt.status)
+    cutoff = datetime.now(UTC) - _PROVIDER_LEASE
+    if target is None or _as_utc(attempt.updated_at) > cutoff:
+        return
+    failure_code = "provider_lease_expired"
+    if (
+        maximum_provider_requests is not None
+        and attempt.provider_requests >= maximum_provider_requests
+    ):
+        target = "FAILED_FINAL"
+        failure_code = "provider_retry_limit_reached"
+    reserved_event_ids = list(session.scalars(
+        select(ProviderCallEvent.id).where(
+            ProviderCallEvent.attempt_reference == attempt.id,
+            ProviderCallEvent.outcome == "RESERVED",
+        )
+    ))
+    if reserved_event_ids:
+        fenced_events = cast(CursorResult[Any], session.execute(
+            update(ProviderCallEvent)
+            .where(
+                ProviderCallEvent.id.in_(reserved_event_ids),
+                ProviderCallEvent.outcome == "RESERVED",
+            )
+            .values(
+                outcome="FAILURE",
+                failed=True,
+                completed_at=datetime.now(UTC),
+            )
+            .execution_options(synchronize_session=False)
+        )).rowcount
+        if fenced_events != len(reserved_event_ids):
+            session.rollback()
+            session.refresh(attempt)
+            return
+    recovered = cast(CursorResult[Any], session.execute(
+        update(type(attempt))
+        .where(
+            type(attempt).id == attempt.id,
+            type(attempt).status == attempt.status,
+            type(attempt).updated_at <= cutoff,
+        )
+        .values(
+            status=target,
+            failure_code=failure_code,
+            updated_at=datetime.now(UTC),
+        )
+        .execution_options(synchronize_session=False)
+    )).rowcount == 1
+    if recovered:
+        session.commit()
+        session.refresh(attempt)
+    elif reserved_event_ids:
+        session.rollback()
+        session.refresh(attempt)
+
+
+def _transcription_attempt_outcome(attempt: VoiceTranscriptionAttempt) -> dict | None:
+    if attempt.status == "COMPLETED":
+        return dict(attempt.result_json)
+    if attempt.status == "IN_PROGRESS":
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "speech_to_text_in_progress",
+            "This voice capture is already being transcribed.",
+            retryable=True,
+        )
+    if attempt.status == "REJECTED_FINAL":
+        raise AppError(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "no_speech_detected",
+            "No clear speech was detected.",
+            retryable=False,
+        )
+    if attempt.status == "FAILED_FINAL":
+        raise AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "speech_to_text_retry_limit_reached",
+            "Speech recognition could not recover after the allowed retries.",
+            retryable=False,
+        )
+    return None
+
+
+def _ensure_transcription_identity(
+    attempt: VoiceTranscriptionAttempt,
+    *,
+    learner_id: str,
+    audio_digest: str,
+    content_type: str,
+) -> None:
+    if (
+        attempt.learner_id != learner_id
+        or attempt.audio_digest != audio_digest
+        or attempt.content_type != content_type
+    ):
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "speech_to_text_idempotency_conflict",
+            "This retry identity belongs to a different voice capture.",
+            retryable=False,
+        )
+
+
+def _authoritative_duration_ms(duration_seconds: float) -> int:
+    if not isfinite(duration_seconds) or duration_seconds <= 0:
+        return _TRANSCRIPTION_RESERVATION_MS
+    return min(_TRANSCRIPTION_RESERVATION_MS, max(100, ceil(duration_seconds * 1000)))
+
+
 @router.post("/conversations/{conversation_id}/ai-turns", response_model=AITurnRead)
 def ai_turn(
     conversation_id: str,
@@ -400,6 +558,14 @@ def ai_turn(
                 "This retry identity belongs to a different learner turn.",
                 retryable=False,
             )
+        _recover_stale_provider_claim(
+            session,
+            attempt,
+            transitions={
+                "IN_PROGRESS": "FAILED_RETRYABLE",
+                "REVIEW_IN_PROGRESS": "REVIEW_FAILED_RETRYABLE",
+            },
+        )
         if attempt.status == "COMPLETED":
             completed_result = dict(attempt.result_json["api_result"])
             completed_result.setdefault("turn_id", attempt.id)
@@ -408,8 +574,6 @@ def ai_turn(
             content_response = AIConversationResponse.model_validate(
                 attempt.result_json["provider_response"]
             )
-            if attempt.status == "REVIEW_FAILED_RETRYABLE":
-                attempts.mark_review_in_progress(attempt)
         elif attempt.status == "REVIEW_SUCCEEDED":
             content_response = AIConversationResponse.model_validate(
                 attempt.result_json["provider_response"]
@@ -436,33 +600,71 @@ def ai_turn(
     else:
         needs_provider = True
 
+    if needs_provider and provider is None:
+        raise AppError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "llm_unavailable",
+            "The tutor is temporarily unavailable. Please try again shortly.",
+            retryable=True,
+        )
+    if needs_provider:
+        RuntimeEntitlementService(
+            session,
+            request.app.state.commercial_service.config,
+        ).enforce_ai_request(principal.learner.id, new_request=attempt is None)
+
+    provider_call_id = None
+    maximum_provider_requests = UsageLimits().maximum_provider_retries + 1
     if needs_provider:
         usage.enforce(principal.learner.id, principal.user.id)
-        if provider is None:
-            raise AppError(
-                status.HTTP_503_SERVICE_UNAVAILABLE,
-                "llm_unavailable",
-                "The tutor is temporarily unavailable. Please try again shortly.",
-                retryable=True,
-            )
-        if attempt is not None:
-            attempts.mark_in_progress(attempt)
-        else:
-            try:
+        try:
+            if attempt is not None:
+                if not attempts.claim_provider_retry(
+                    attempt,
+                    maximum_provider_requests=maximum_provider_requests,
+                    commit=False,
+                ):
+                    session.rollback()
+                    session.refresh(attempt)
+                    if (
+                        attempt.status == "FAILED_RETRYABLE"
+                        and attempt.provider_attempts >= maximum_provider_requests
+                    ):
+                        attempt.status = "FAILED_FINAL"
+                        attempt.failure_code = "provider_retry_limit_reached"
+                        session.commit()
+                        raise _failure_from_attempt(attempt)
+                    raise AppError(
+                        status.HTTP_409_CONFLICT,
+                        "ai_turn_in_progress",
+                        "This tutor turn is already being processed.",
+                        retryable=True,
+                    )
+            else:
                 attempt = attempts.create(
                     conversation_id=conversation.id,
                     learner_id=principal.learner.id,
                     idempotency_key=turn_key,
                     learner_text=learner_message,
+                    commit=False,
                 )
-            except IntegrityError as exc:
-                session.rollback()
-                raise AppError(
-                    status.HTTP_409_CONFLICT,
-                    "ai_turn_in_progress",
-                    "This tutor turn is already being processed.",
-                    retryable=True,
-                ) from exc
+            provider_call = usage.reserve_provider_call(
+                learner_id=principal.learner.id,
+                user_id=principal.user.id,
+                operation_kind="llm",
+                attempt_reference=attempt.id,
+            )
+            provider_call_id = provider_call.id
+            session.commit()
+            session.refresh(attempt)
+        except IntegrityError as exc:
+            session.rollback()
+            raise AppError(
+                status.HTTP_409_CONFLICT,
+                "ai_turn_in_progress",
+                "This tutor turn is already being processed.",
+                retryable=True,
+            ) from exc
 
     if attempt is None:
         raise AppError(
@@ -535,7 +737,21 @@ def ai_turn(
                     "The tutor turn could not be recovered. Send it again.",
                     retryable=False,
                 ) from exc
-            attempts.mark_provider_failure(attempt, exc)
+            if provider_call_id is not None:
+                _reconcile_provider_call(
+                    usage,
+                    provider_call_id,
+                    request_count=exc.provider_requests,
+                    input_units=exc.input_units,
+                    output_units=exc.output_units,
+                    outcome="FAILURE",
+                    failed=True,
+                )
+            attempts.mark_provider_failure(
+                attempt,
+                exc,
+                maximum_provider_requests=maximum_provider_requests,
+            )
             usage.record_failure_attempt(
                 ai_turn_attempt_id=attempt.id,
                 learner_id=principal.learner.id,
@@ -561,7 +777,17 @@ def ai_turn(
                 if isinstance(exc, ProviderTimeout)
                 else "ai_provider_failures"
             )
+            if attempt.status == "FAILED_FINAL" and exc.retryable:
+                raise _failure_from_attempt(attempt) from exc
             raise _provider_app_error(exc) from exc
+        if provider_call_id is not None:
+            _reconcile_provider_call(
+                usage,
+                provider_call_id,
+                request_count=content_response.usage.provider_requests,
+                input_units=content_response.usage.input_units,
+                output_units=content_response.usage.output_units,
+            )
         attempts.checkpoint_provider_success(
             attempt,
             content_response,
@@ -569,6 +795,34 @@ def ai_turn(
         )
 
     if response is None or review_result is None:
+        review_uses_provider = (
+            language_decision.effective_mode != LanguageMode.ENGLISH
+            and request.app.state.language_review_provider is not None
+        )
+        if review_uses_provider:
+            RuntimeEntitlementService(
+                session,
+                request.app.state.commercial_service.config,
+            ).enforce_provider_budget(principal.learner.id)
+        if not attempts.claim_review(attempt, commit=False):
+            session.rollback()
+            raise AppError(
+                status.HTTP_409_CONFLICT,
+                "ai_turn_in_progress",
+                "This tutor turn is already being reviewed.",
+                retryable=True,
+            )
+        review_call_id = None
+        if review_uses_provider:
+            review_call = usage.reserve_provider_call(
+                learner_id=principal.learner.id,
+                user_id=principal.user.id,
+                operation_kind="language_review",
+                attempt_reference=attempt.id,
+            )
+            review_call_id = review_call.id
+        session.commit()
+        session.refresh(attempt)
         review_started_at = perf_counter()
         try:
             language_mode = language_decision.effective_mode
@@ -601,6 +855,16 @@ def ai_turn(
                 correlation_id=request.state.correlation_id,
                 failure_code=exc.failure_code,
             )
+            if review_call_id is not None:
+                _reconcile_provider_call(
+                    usage,
+                    review_call_id,
+                    request_count=exc.provider_requests,
+                    input_units=exc.input_units,
+                    output_units=exc.output_units,
+                    outcome="FAILURE",
+                    failed=True,
+                )
             attempts.checkpoint_review_degraded(
                 attempt,
                 response,
@@ -635,6 +899,14 @@ def ai_turn(
             )
             request.app.state.metrics.increment("language_review_failures")
         else:
+            if review_call_id is not None:
+                _reconcile_provider_call(
+                    usage,
+                    review_call_id,
+                    request_count=review_result.usage.provider_requests,
+                    input_units=review_result.usage.input_units,
+                    output_units=review_result.usage.output_units,
+                )
             attempts.checkpoint_review_success(
                 attempt,
                 response,
@@ -809,6 +1081,7 @@ def synthesize_tutor_speech(
         or ai_attempt.status != "COMPLETED"
     ):
         raise AppError(status.HTTP_404_NOT_FOUND, "tutor_turn_not_found", "Completed tutor turn not found.")
+    ai_attempt_id = str(ai_attempt.id)
 
     api_result = ai_attempt.result_json.get("api_result", {})
     spoken_text = str(api_result.get("spoken_text") or "").strip()
@@ -843,18 +1116,72 @@ def synthesize_tutor_speech(
 
     spoken_hash = hashlib.sha256(spoken_text.encode()).hexdigest()
     repository = TTSSynthesisRepository(session)
+    usage = UsageService(session)
+    provider_call_id = None
     attempt = repository.get(ai_attempt.id)
     if attempt is not None:
         if attempt.learner_id != principal.learner.id or attempt.spoken_text_hash != spoken_hash:
             raise AppError(status.HTTP_409_CONFLICT, "tts_turn_conflict", "Tutor voice identity conflict.", retryable=False)
+        _recover_stale_provider_claim(
+            session,
+            attempt,
+            transitions={"IN_PROGRESS": "RETRYABLE_FAILURE"},
+            maximum_provider_requests=UsageLimits().maximum_provider_retries + 1,
+        )
         if attempt.status == "SUCCEEDED" and attempt.audio_bytes and attempt.content_type:
             return _speech_response(attempt, cache_status="HIT")
         if attempt.status == "IN_PROGRESS":
             raise AppError(status.HTTP_409_CONFLICT, "tts_in_progress", "Tutor voice is already being generated.", retryable=True)
         if attempt.status == "FAILED_FINAL":
+            if attempt.failure_code == "provider_retry_limit_reached":
+                raise AppError(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "tts_retry_limit_reached",
+                    "Tutor voice could not recover after the allowed retries.",
+                    retryable=False,
+                )
             raise AppError(status.HTTP_502_BAD_GATEWAY, "tts_invalid_audio", "Tutor voice could not produce valid audio.", retryable=False)
-        repository.retry(attempt)
+        RuntimeEntitlementService(
+            session,
+            request.app.state.commercial_service.config,
+        ).enforce_provider_budget(principal.learner.id)
+        maximum_provider_requests = UsageLimits().maximum_provider_retries + 1
+        if attempt.provider_requests >= maximum_provider_requests:
+            attempt.status = "FAILED_FINAL"
+            attempt.failure_code = "provider_retry_limit_reached"
+            session.commit()
+            raise AppError(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "tts_retry_limit_reached",
+                "Tutor voice could not recover after the allowed retries.",
+                retryable=False,
+            )
+        if not repository.claim_retry(
+            attempt,
+            maximum_provider_requests=maximum_provider_requests,
+            commit=False,
+        ):
+            session.rollback()
+            raise AppError(
+                status.HTTP_409_CONFLICT,
+                "tts_in_progress",
+                "Tutor voice is already being generated.",
+                retryable=True,
+            )
+        provider_call = usage.reserve_provider_call(
+            learner_id=principal.learner.id,
+            user_id=principal.user.id,
+            operation_kind="tts",
+            attempt_reference=attempt.id,
+        )
+        provider_call_id = provider_call.id
+        session.commit()
+        session.refresh(attempt)
     else:
+        RuntimeEntitlementService(
+            session,
+            request.app.state.commercial_service.config,
+        ).enforce_provider_budget(principal.learner.id)
         try:
             attempt = repository.create(
                 ai_turn_attempt_id=ai_attempt.id,
@@ -865,7 +1192,17 @@ def synthesize_tutor_speech(
                 voice=voice,
                 spoken_text_hash=spoken_hash,
                 input_characters=len(spoken_text),
+                commit=False,
             )
+            provider_call = usage.reserve_provider_call(
+                learner_id=principal.learner.id,
+                user_id=principal.user.id,
+                operation_kind="tts",
+                attempt_reference=attempt.id,
+            )
+            provider_call_id = provider_call.id
+            session.commit()
+            session.refresh(attempt)
         except IntegrityError as exc:
             session.rollback()
             raise AppError(status.HTTP_409_CONFLICT, "tts_in_progress", "Tutor voice is already being generated.", retryable=True) from exc
@@ -881,18 +1218,74 @@ def synthesize_tutor_speech(
             correlation_id=request.state.correlation_id,
         ))
     except ProviderError as exc:
-        repository.fail(attempt, exc.failure_code, exc.provider_requests)
-        if not exc.retryable:
+        session.rollback()
+        attempt = repository.get(ai_attempt_id)
+        if attempt is None:
+            raise AppError(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "tts_state_lost",
+                "Tutor voice could not be recovered. Try again.",
+                retryable=True,
+            ) from exc
+        repository.fail(attempt, exc.failure_code, exc.provider_requests, commit=False)
+        if provider_call_id is not None:
+            _reconcile_provider_call(
+                usage,
+                provider_call_id,
+                request_count=exc.provider_requests,
+                input_units=len(spoken_text),
+                outcome="FAILURE",
+                failed=True,
+            )
+        usage.record(
+            learner_id=principal.learner.id,
+            user_id=principal.user.id,
+            provider_kind="tts",
+            voice_session_id=conversation.id,
+            outcome="FAILURE",
+            request_count=max(1, exc.provider_requests),
+            input_units=len(spoken_text),
+            failed=True,
+            commit=False,
+        )
+        retry_limit_reached = attempt.provider_requests >= UsageLimits().maximum_provider_retries + 1
+        if not exc.retryable or retry_limit_reached:
             attempt.status = "FAILED_FINAL"
-            session.commit()
+        if retry_limit_reached and exc.retryable:
+            attempt.failure_code = "provider_retry_limit_reached"
+        session.commit()
         logger.warning(
             "tts_provider_failure request_id=%s attempt_id=%s failure_code=%s retryable=%s",
             request.state.request_id, attempt.id, exc.failure_code, exc.retryable,
         )
         request.app.state.metrics.increment("tts_provider_failures")
+        if retry_limit_reached and exc.retryable:
+            raise AppError(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "tts_retry_limit_reached",
+                "Tutor voice could not recover after the allowed retries.",
+                retryable=False,
+            ) from exc
         raise _tts_app_error(exc) from exc
 
-    repository.succeed(attempt, result)
+    if provider_call_id is not None:
+        _reconcile_provider_call(
+            usage,
+            provider_call_id,
+            request_count=result.provider_requests,
+            input_units=len(spoken_text),
+        )
+    repository.succeed(attempt, result, commit=False)
+    usage.record(
+        learner_id=principal.learner.id,
+        user_id=principal.user.id,
+        provider_kind="tts",
+        voice_session_id=conversation.id,
+        request_count=max(1, result.provider_requests),
+        input_units=len(spoken_text),
+        commit=False,
+    )
+    session.commit()
     request.app.state.metrics.increment("tts_requests")
     request.app.state.metrics.observe("tts_audio_size_bytes", len(result.audio_bytes))
     logger.info(
@@ -927,6 +1320,12 @@ def _speech_response(attempt, *, cache_status: str) -> Response:
 async def transcribe_voice_input(
     conversation_id: str,
     request: Request,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=100,
+    ),
     principal: Principal = Depends(current_principal),
     session: Session = Depends(get_db),
 ):
@@ -957,7 +1356,6 @@ async def transcribe_voice_input(
             "invalid_audio_duration",
             "Audio duration must be between 0.1 and 60 seconds.",
         )
-
     audio = await request.body()
     if not audio:
         raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "empty_audio", "No audio was captured.")
@@ -970,6 +1368,146 @@ async def transcribe_voice_input(
             "speech_to_text_unavailable",
             "Speech recognition is unavailable.",
         )
+
+    turn_key = idempotency_key or request.state.request_id
+    audio_digest = hashlib.sha256(audio).hexdigest()
+    attempt = session.scalar(select(VoiceTranscriptionAttempt).where(
+        VoiceTranscriptionAttempt.conversation_id == conversation.id,
+        VoiceTranscriptionAttempt.idempotency_key == turn_key,
+    ))
+    if attempt is not None:
+        _ensure_transcription_identity(
+            attempt,
+            learner_id=principal.learner.id,
+            audio_digest=audio_digest,
+            content_type=content_type,
+        )
+        _recover_stale_provider_claim(
+            session,
+            attempt,
+            transitions={"IN_PROGRESS": "FAILED_RETRYABLE"},
+            maximum_provider_requests=UsageLimits().maximum_provider_retries + 1,
+        )
+        completed = _transcription_attempt_outcome(attempt)
+        if completed is not None:
+            return completed
+
+    entitlements = RuntimeEntitlementService(
+        session,
+        request.app.state.commercial_service.config,
+    )
+    try:
+        entitlements.enforce_voice(principal.learner.id, _TRANSCRIPTION_RESERVATION_MS)
+        entitlements.enforce_provider_budget(principal.learner.id)
+    except AppError:
+        # A request can finish while this request waits for the learner quota lock.
+        # Preserve idempotent replay even when no fresh allowance remains.
+        session.rollback()
+        latest = session.scalar(select(VoiceTranscriptionAttempt).where(
+            VoiceTranscriptionAttempt.conversation_id == conversation.id,
+            VoiceTranscriptionAttempt.idempotency_key == turn_key,
+        ))
+        if latest is not None:
+            _ensure_transcription_identity(
+                latest,
+                learner_id=principal.learner.id,
+                audio_digest=audio_digest,
+                content_type=content_type,
+            )
+            completed = _transcription_attempt_outcome(latest)
+            if completed is not None:
+                return completed
+        raise
+
+    # Re-read after taking the learner quota lock so concurrent requests with
+    # the same identity cannot create or retry duplicate provider work.
+    locked_attempt = session.scalar(select(VoiceTranscriptionAttempt).where(
+        VoiceTranscriptionAttempt.conversation_id == conversation.id,
+        VoiceTranscriptionAttempt.idempotency_key == turn_key,
+    ).execution_options(populate_existing=True))
+    maximum_provider_requests = UsageLimits().maximum_provider_retries + 1
+    if locked_attempt is not None:
+        _ensure_transcription_identity(
+            locked_attempt,
+            learner_id=principal.learner.id,
+            audio_digest=audio_digest,
+            content_type=content_type,
+        )
+        completed = _transcription_attempt_outcome(locked_attempt)
+        if completed is not None:
+            session.rollback()
+            return completed
+        claimed = cast(CursorResult[Any], session.execute(
+            update(VoiceTranscriptionAttempt)
+            .where(
+                VoiceTranscriptionAttempt.id == locked_attempt.id,
+                VoiceTranscriptionAttempt.status == "FAILED_RETRYABLE",
+                VoiceTranscriptionAttempt.provider_requests < maximum_provider_requests,
+            )
+            .values(
+                status="IN_PROGRESS",
+                failure_code=None,
+                charge_duration_ms=(
+                    VoiceTranscriptionAttempt.charge_duration_ms
+                    + _TRANSCRIPTION_RESERVATION_MS
+                ),
+                provider_requests=VoiceTranscriptionAttempt.provider_requests + 1,
+                updated_at=datetime.now(UTC),
+            )
+            .execution_options(synchronize_session=False)
+        )).rowcount == 1
+        if not claimed:
+            session.rollback()
+            latest = session.scalar(select(VoiceTranscriptionAttempt).where(
+                VoiceTranscriptionAttempt.id == locked_attempt.id
+            ).execution_options(populate_existing=True))
+            if latest is not None:
+                completed = _transcription_attempt_outcome(latest)
+                if completed is not None:
+                    return completed
+            raise AppError(
+                status.HTTP_409_CONFLICT,
+                "speech_to_text_in_progress",
+                "This voice capture is already being transcribed.",
+                retryable=True,
+            )
+        session.flush()
+        session.refresh(locked_attempt)
+        attempt = locked_attempt
+    else:
+        attempt = VoiceTranscriptionAttempt(
+            conversation_id=conversation.id,
+            learner_id=principal.learner.id,
+            idempotency_key=turn_key,
+            audio_digest=audio_digest,
+            content_type=content_type,
+            status="IN_PROGRESS",
+            charge_duration_ms=_TRANSCRIPTION_RESERVATION_MS,
+            provider_requests=1,
+            result_json={},
+        )
+        session.add(attempt)
+        session.flush()
+    usage = UsageService(session)
+    provider_call = usage.reserve_provider_call(
+        learner_id=principal.learner.id,
+        user_id=principal.user.id,
+        operation_kind="stt",
+        attempt_reference=attempt.id,
+        duration_ms=_TRANSCRIPTION_RESERVATION_MS,
+    )
+    attempt_id = str(attempt.id)
+    provider_call_id = provider_call.id
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "speech_to_text_in_progress",
+            "This voice capture is already being transcribed.",
+            retryable=True,
+        ) from exc
 
     extension = {
         "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a",
@@ -984,7 +1522,7 @@ async def transcribe_voice_input(
         language_hint=expected_language or "en",
         learner_id=principal.learner.id,
         voice_session_id=conversation.id,
-        voice_turn_id=request.state.request_id,
+        voice_turn_id=turn_key,
         correlation_id=request.state.correlation_id,
         maximum_duration_seconds=60,
         duration_seconds=duration_ms / 1000,
@@ -993,44 +1531,166 @@ async def transcribe_voice_input(
     try:
         result = await run_in_threadpool(provider.transcribe, stt_request)
     except ValueError as exc:
+        rejected_provider_requests = max(
+            1,
+            int(getattr(exc, "provider_requests", 1)),
+        )
+        _reconcile_provider_call(
+            usage,
+            provider_call_id,
+            request_count=rejected_provider_requests,
+            duration_ms=_TRANSCRIPTION_RESERVATION_MS,
+            outcome="REJECTED",
+            failed=True,
+        )
+        attempt.provider_requests += max(0, rejected_provider_requests - 1)
+        attempt.status = "REJECTED_FINAL"
+        attempt.failure_code = "no_speech_detected"
+        attempt.completed_at = datetime.now(UTC)
+        attempt.updated_at = attempt.completed_at
+        session.commit()
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "no_speech_detected",
             "No clear speech was detected.",
         ) from exc
     except ProviderTimeout as exc:
+        session.rollback()
+        attempt = session.get(VoiceTranscriptionAttempt, attempt_id)
+        if attempt is None:
+            raise RuntimeError("Voice transcription attempt disappeared during timeout recovery") from exc
+        _reconcile_provider_call(
+            usage,
+            provider_call_id,
+            request_count=exc.provider_requests,
+            duration_ms=_TRANSCRIPTION_RESERVATION_MS,
+            outcome="FAILURE",
+            failed=True,
+        )
+        attempt.provider_requests += max(0, exc.provider_requests - 1)
+        attempt.failure_code = "speech_to_text_timeout"
+        attempt.status = (
+            "FAILED_RETRYABLE"
+            if attempt.provider_requests < UsageLimits().maximum_provider_retries + 1
+            else "FAILED_FINAL"
+        )
+        attempt.updated_at = datetime.now(UTC)
+        session.commit()
+        if attempt.status == "FAILED_FINAL":
+            raise AppError(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "speech_to_text_retry_limit_reached",
+                "Speech recognition could not recover after the allowed retries.",
+                retryable=False,
+            ) from exc
         raise AppError(
             status.HTTP_504_GATEWAY_TIMEOUT,
             "speech_to_text_timeout",
             "Speech recognition timed out.",
+            retryable=True,
         ) from exc
     except ProviderUnavailable as exc:
+        session.rollback()
+        attempt = session.get(VoiceTranscriptionAttempt, attempt_id)
+        if attempt is None:
+            raise RuntimeError("Voice transcription attempt disappeared during unavailable recovery") from exc
+        _reconcile_provider_call(
+            usage,
+            provider_call_id,
+            request_count=exc.provider_requests,
+            duration_ms=_TRANSCRIPTION_RESERVATION_MS,
+            outcome="FAILURE",
+            failed=True,
+        )
+        attempt.provider_requests += max(0, exc.provider_requests - 1)
+        attempt.failure_code = "speech_to_text_unavailable"
+        attempt.status = (
+            "FAILED_RETRYABLE"
+            if attempt.provider_requests < UsageLimits().maximum_provider_retries + 1
+            else "FAILED_FINAL"
+        )
+        attempt.updated_at = datetime.now(UTC)
+        session.commit()
+        if attempt.status == "FAILED_FINAL":
+            raise AppError(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                "speech_to_text_retry_limit_reached",
+                "Speech recognition could not recover after the allowed retries.",
+                retryable=False,
+            ) from exc
         raise AppError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "speech_to_text_unavailable",
             "Speech recognition is unavailable.",
+            retryable=True,
         ) from exc
 
+    actual_duration_ms = _authoritative_duration_ms(result.duration_seconds)
+    attempt.charge_duration_ms = max(
+        0,
+        attempt.charge_duration_ms - _TRANSCRIPTION_RESERVATION_MS,
+    ) + actual_duration_ms
     try:
         if result.confidence is not None and result.confidence < 0.2:
             raise UnusableTranscript("Speech confidence is too low.")
         expected_language = "te" if _expects_telugu(principal.learner, result.detected_language) else None
         transcript = safe_transcript(result.transcript, expected_language=expected_language)
     except UnusableTranscript as exc:
+        _reconcile_provider_call(
+            usage,
+            provider_call_id,
+            request_count=result.provider_requests,
+            duration_ms=actual_duration_ms,
+            input_units=actual_duration_ms,
+            output_units=len(result.transcript),
+            outcome="REJECTED",
+            failed=True,
+        )
+        attempt.status = "REJECTED_FINAL"
+        attempt.failure_code = "no_speech_detected"
+        attempt.completed_at = datetime.now(UTC)
+        attempt.updated_at = attempt.completed_at
+        session.commit()
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "no_speech_detected",
             "No clear speech was detected.",
         ) from exc
-    request.app.state.metrics.increment("voice_transcriptions_completed")
-    request.app.state.metrics.observe("voice_capture_size_bytes", len(audio))
-    return {
+    result_json = {
         "transcript": transcript,
         "detected_language": result.detected_language,
         "confidence": result.confidence,
-        "duration_ms": duration_ms,
+        "duration_ms": actual_duration_ms,
         "size_bytes": len(audio),
     }
+    attempt.provider_requests += max(0, result.provider_requests - 1)
+    attempt.status = "COMPLETED"
+    attempt.failure_code = None
+    attempt.result_json = result_json
+    attempt.completed_at = datetime.now(UTC)
+    attempt.updated_at = attempt.completed_at
+    _reconcile_provider_call(
+        usage,
+        provider_call_id,
+        request_count=result.provider_requests,
+        duration_ms=actual_duration_ms,
+        input_units=actual_duration_ms,
+        output_units=len(transcript),
+    )
+    usage.record(
+        learner_id=principal.learner.id,
+        user_id=principal.user.id,
+        provider_kind="stt",
+        voice_session_id=conversation.id,
+        input_units=actual_duration_ms,
+        output_units=len(transcript),
+        request_count=max(1, result.provider_requests),
+        commit=False,
+    )
+    session.commit()
+    request.app.state.metrics.increment("voice_transcriptions_completed")
+    request.app.state.metrics.observe("voice_capture_size_bytes", len(audio))
+    return result_json
 
 
 @router.get("/learners/{learner_id}/memory")
@@ -1087,9 +1747,10 @@ def process_voice_turn(
         pronunciation=DeterministicPronunciationProvider(),
         tts=DeterministicTextToSpeechProvider(),
         metrics=request.app.state.metrics,
+        commercial_config=request.app.state.commercial_service.config,
     )
     return service.process(
-        turn_id=turn_id, learner=principal.learner, user=principal.user,
+        session_id=session_id, turn_id=turn_id, learner=principal.learner, user=principal.user,
         idempotency_key=idempotency_key, correlation_id=request.state.correlation_id,
         request_id=request.state.request_id, generate_audio=data.generate_audio,
     )

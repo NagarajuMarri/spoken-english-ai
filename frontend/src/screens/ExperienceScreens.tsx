@@ -3,7 +3,7 @@ import { normalizeExpression, initialTutorPresentation, reduceTutorPresentation 
 import { ApiError, api } from "../api/client";
 import { useAuth as requireAuth } from "../auth/AuthProvider";
 import { Avatar } from "../components/Avatar";
-import type { Account, Dashboard, LanguageMode, Tutor, TutorSpeech } from "../models";
+import type { Account, Dashboard, LanguageMode, Tutor, TutorSpeech, VoiceTranscription } from "../models";
 import { useRouter } from "../routes/router";
 import { TutorAudioPlayer, type AudioLifecycleEvent } from "../voice/TutorAudioPlayer";
 import { useMicrophone, type CapturedAudio } from "../voice/useMicrophone";
@@ -22,9 +22,11 @@ export function ProgressScreen({ data }: { data: Dashboard }) {
   return <section className="page"><h1>Small practice. Real momentum.</h1><div className="progress-grid">{[[data.current_streak_days, "Current streak"], [data.completed_sessions, "Completed sessions"], [data.total_practice_minutes, "Practice minutes"]].map(([value, label]) => <article key={label}><strong>{value}</strong><span>{label}</span></article>)}</div></section>;
 }
 
-export function SettingsScreen({ tutor, onChange }: { tutor: Tutor; onChange: () => void }) {
+export function SettingsScreen({ data, tutor, onChange }: { data: Dashboard; tutor: Tutor; onChange: () => void }) {
   const { logoutAll } = useAuthBridge();
-  return <section className="page"><h1>Make practice feel like yours.</h1><article className="settings-card"><img src={tutor.avatar_profile} alt="" /><div><h2>{tutor.display_name}</h2><p>{tutor.voice_profile}</p><button onClick={onChange}>Change tutor</button></div></article><p>Subscription: FREE · provider integration ready. Payments are not enabled.</p><button onClick={() => void logoutAll()}>Log out on all devices</button></section>;
+  const plan = data.subscription_tier.replaceAll("_", " ");
+  const status = data.subscription_status.replaceAll("_", " ");
+  return <section className="page"><h1>Make practice feel like yours.</h1><article className="settings-card"><img src={tutor.avatar_profile} alt="" /><div><h2>{tutor.display_name}</h2><p>{tutor.voice_profile}</p><button onClick={onChange}>Change tutor</button></div></article><p><strong>Subscription:</strong> {plan} · {status}.</p><button onClick={() => void logoutAll()}>Log out on all devices</button></section>;
 }
 
 function useAuthBridge() {
@@ -33,6 +35,13 @@ function useAuthBridge() {
 
 function turnIdentity() {
   return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function canRetryTranscription(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.retryable && [409, 503, 504].includes(error.status);
+  }
+  return error instanceof TypeError;
 }
 
 function usePrefersReducedMotion() {
@@ -72,8 +81,12 @@ export function ConversationScreen({
   const [lastExpression, setLastExpression] = useState("NEUTRAL");
   const [interruptSequence, setInterruptSequence] = useState(0);
   const [pendingTurn, setPendingTurn] = useState<{ text: string; key: string; retryable: boolean } | null>(null);
+  const [pendingTranscription, setPendingTranscription] = useState<{ capture: CapturedAudio; key: string } | null>(null);
+  const [transcriptionError, setTranscriptionError] = useState("");
+  const [transcriptionBusy, setTranscriptionBusy] = useState(false);
   const [turnBusy, setTurnBusy] = useState(false);
   const turnBusyRef = useRef(false);
+  const transcriptionBusyRef = useRef(false);
   const [messages, setMessages] = useState<string[]>([`Namaste! I’m ${tutor.display_name}. Tell me about your day.`]);
   const [feedback, setFeedback] = useState({ grammar: "Your correction will appear here.", incorrect: "", corrected: "", words: [] as string[], telugu: "" });
   const [languageReview, setLanguageReview] = useState({ changed: false, reason: "Waiting for the first reviewed response.", terms: [] as string[] });
@@ -202,16 +215,47 @@ export function ConversationScreen({
     }
   }, [id, loadSpeech, selectedLanguageMode, tutor.display_name]);
 
-  const handleCapture = useCallback(async (capture: CapturedAudio) => {
+  const transcribeCapture = useCallback(async (capture: CapturedAudio, key: string) => {
     if (!id) throw new Error("The conversation is still loading. Please try again.");
+    if (transcriptionBusyRef.current) return;
+    transcriptionBusyRef.current = true;
     dispatch({ type: "TUTOR_PROCESSING_STARTED" });
-    const result = await api.transcribe(id, { blob: capture.blob, durationMs: capture.durationMs });
+    setTranscriptionBusy(true);
+    setTranscriptionError("");
+    let result: VoiceTranscription;
+    try {
+      result = await api.transcribe(
+        id,
+        { blob: capture.blob, durationMs: capture.durationMs },
+        key,
+      );
+    } catch (error) {
+      setPendingTranscription(canRetryTranscription(error) ? { capture, key } : null);
+      setTranscriptionError(error instanceof Error ? error.message : "Speech recognition failed.");
+      dispatch({ type: "FAIL", errorCode: "microphone_error" });
+      throw error;
+    } finally {
+      transcriptionBusyRef.current = false;
+      setTranscriptionBusy(false);
+    }
+    setPendingTranscription(null);
     setLastTranscript(result.transcript);
     setInput(result.transcript);
     await submit(result.transcript, undefined, { detectedLanguage: result.detected_language, confidence: result.confidence });
   }, [id, submit]);
 
+  const handleCapture = useCallback(
+    (capture: CapturedAudio) => transcribeCapture(capture, turnIdentity()),
+    [transcribeCapture],
+  );
+
   const mic = useMicrophone(consent, handleCapture);
+
+  useEffect(() => {
+    if (consent) return;
+    setPendingTranscription(null);
+    setTranscriptionError("");
+  }, [consent]);
 
   useEffect(() => {
     if (mic.state === "recording") dispatch({ type: "MICROPHONE_STARTED" });
@@ -222,15 +266,39 @@ export function ConversationScreen({
   }, [mic.state]);
 
   const startMicrophone = async () => {
+    setPendingTranscription(null);
+    setTranscriptionError("");
     setInterruptSequence((value) => value + 1);
     dispatch({ type: "RESET" });
     await mic.start();
   };
 
   const cancelMicrophone = () => {
+    setPendingTranscription(null);
+    setTranscriptionError("");
     mic.cancel();
     dispatch({ type: "RESET" });
   };
 
-  return <div className="conversation-layout"><section className="studio"><Avatar tutor={tutor} presentation={presentation} reducedMotion={reduced} /><p className="avatar-sync-evidence"><strong>Avatar:</strong> {presentation.state.toLowerCase()} · {presentation.expression.toLowerCase()} expression · mouth {reduced ? "static (reduced motion)" : presentation.mouth.toLowerCase()}<br /><small>Speaking and mouth movement are driven by real tutor-audio playback events.</small></p><p className="capability-note"><strong>Language mode:</strong> {selectedLanguageMode.replaceAll("_", " + ")}</p><div className="transcript" aria-live="polite">{messages.map((message, index) => <p key={index}>{message}</p>)}</div><TutorAudioPlayer speech={speech} spokenText={spokenText} playbackId={lastSpeechTurn} interruptSequence={interruptSequence} onLifecycle={handleAudioLifecycle} /><p className="audio-path-status" role="status" aria-live="polite"><strong>Audio path:</strong> {audioPathStatus}</p>{audioBusy && <p role="status">Generating OpenAI tutor voice…</p>}{audioError && <div><p role="alert">{audioError}</p>{lastSpeechTurn && <button disabled={audioBusy} onClick={() => void loadSpeech(lastSpeechTurn)}>Retry OpenAI voice</button>}</div>}<label htmlFor="message">Your message</label><div className="composer"><input id="message" value={input} disabled={turnBusy} onChange={(event) => setInput(event.target.value)} /><button disabled={turnBusy} onClick={() => void submit(input, pendingTurn?.retryable && pendingTurn.text === input.trim() ? pendingTurn.key : undefined)}>{turnBusy ? "Waiting for tutor…" : "Send"}</button></div>{turnError && <div><p role="alert">{turnError}</p>{pendingTurn?.retryable && <button disabled={turnBusy} onClick={() => void submit(pendingTurn.text, pendingTurn.key)}>Retry tutor response</button>}</div>}<fieldset><legend>Voice controls</legend><label><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /> I consent to voice processing for this turn</label><p aria-live="polite">Microphone: {mic.state}{mic.state === "recording" ? ` · ${Math.ceil(mic.elapsed / 1000)} seconds` : ""}</p><p>Browser permission: {mic.permission}</p><button disabled={!consent || !id || turnBusy || mic.state === "recording" || mic.state === "processing"} onClick={() => void startMicrophone()}>{mic.state === "denied" ? "Retry microphone" : "Start microphone"}</button><button disabled={mic.state !== "recording"} onClick={mic.stop}>Stop and transcribe</button><button disabled={mic.state !== "recording"} onClick={cancelMicrophone}>Cancel</button>{lastTranscript && <p aria-live="polite" aria-label="Recognized speech"><strong>We heard:</strong> {lastTranscript}</p>}{mic.errorMessage && <p role="alert">{mic.errorMessage} {mic.state === "denied" && "Enable microphone access in Chrome site settings, then retry."}</p>}</fieldset></section><aside className="coach" aria-live="polite"><h2>Live coaching</h2><h3>Grammar correction</h3>{feedback.incorrect && <p><strong>Incorrect:</strong> {feedback.incorrect}</p>}{feedback.corrected && <p><strong>Correct:</strong> {feedback.corrected}</p>}<p>{feedback.grammar}</p><h3>Vocabulary</h3><div className="chips">{feedback.words.length ? feedback.words.map((word) => <span key={word}>{word}</span>) : <span>No suggestions yet.</span>}</div>{selectedLanguageMode !== "ENGLISH" && <><h3>Native Telugu quality review</h3><p>{feedback.telugu}</p><p><strong>Review:</strong> {languageReview.changed ? languageReview.reason : "No wording change needed"}</p>{languageReview.terms.length > 0 && <p><strong>Learning terms kept in English:</strong> {languageReview.terms.join(", ")}</p>}</>}</aside></div>;
+  const retryTranscription = async () => {
+    if (!pendingTranscription || transcriptionBusyRef.current) return;
+    mic.retry();
+    try {
+      await transcribeCapture(pendingTranscription.capture, pendingTranscription.key);
+    } catch {
+      // The safe error and retry state are owned by transcribeCapture.
+    }
+  };
+
+  const discardTranscription = () => {
+    setPendingTranscription(null);
+    setTranscriptionError("");
+    mic.retry();
+    dispatch({ type: "RESET" });
+  };
+
+  const microphoneState = transcriptionBusy ? "processing" : mic.state;
+  const microphoneError = transcriptionError || mic.errorMessage;
+
+  return <div className="conversation-layout"><section className="studio"><Avatar tutor={tutor} presentation={presentation} reducedMotion={reduced} /><p className="avatar-sync-evidence"><strong>Avatar:</strong> {presentation.state.toLowerCase()} · {presentation.expression.toLowerCase()} expression · mouth {reduced ? "static (reduced motion)" : presentation.mouth.toLowerCase()}<br /><small>Speaking and mouth movement are driven by real tutor-audio playback events.</small></p><p className="capability-note"><strong>Language mode:</strong> {selectedLanguageMode.replaceAll("_", " + ")}</p><div className="transcript" aria-live="polite">{messages.map((message, index) => <p key={index}>{message}</p>)}</div><TutorAudioPlayer speech={speech} spokenText={spokenText} playbackId={lastSpeechTurn} interruptSequence={interruptSequence} onLifecycle={handleAudioLifecycle} /><p className="audio-path-status" role="status" aria-live="polite"><strong>Audio path:</strong> {audioPathStatus}</p>{audioBusy && <p role="status">Generating OpenAI tutor voice…</p>}{audioError && <div><p role="alert">{audioError}</p>{lastSpeechTurn && <button disabled={audioBusy} onClick={() => void loadSpeech(lastSpeechTurn)}>Retry OpenAI voice</button>}</div>}<label htmlFor="message">Your message</label><div className="composer"><input id="message" value={input} disabled={turnBusy} onChange={(event) => setInput(event.target.value)} /><button disabled={turnBusy} onClick={() => void submit(input, pendingTurn?.retryable && pendingTurn.text === input.trim() ? pendingTurn.key : undefined)}>{turnBusy ? "Waiting for tutor…" : "Send"}</button></div>{turnError && <div><p role="alert">{turnError}</p>{pendingTurn?.retryable && <button disabled={turnBusy} onClick={() => void submit(pendingTurn.text, pendingTurn.key)}>Retry tutor response</button>}</div>}<fieldset><legend>Voice controls</legend><label><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /> I consent to voice processing for this turn</label><p aria-live="polite">Microphone: {microphoneState}{microphoneState === "recording" ? ` · ${Math.ceil(mic.elapsed / 1000)} seconds` : ""}</p><p>Browser permission: {mic.permission}</p><button disabled={!consent || !id || turnBusy || transcriptionBusy || mic.state === "recording" || mic.state === "processing"} onClick={() => void startMicrophone()}>{mic.state === "denied" ? "Retry microphone" : "Start microphone"}</button><button disabled={mic.state !== "recording"} onClick={mic.stop}>Stop and transcribe</button><button disabled={mic.state !== "recording"} onClick={cancelMicrophone}>Cancel</button>{lastTranscript && <p aria-live="polite" aria-label="Recognized speech"><strong>We heard:</strong> {lastTranscript}</p>}{microphoneError && <p role="alert">{microphoneError} {mic.state === "denied" && "Enable microphone access in Chrome site settings, then retry."}</p>}{pendingTranscription && <div><button disabled={transcriptionBusy || turnBusy} onClick={() => void retryTranscription()}>Retry transcription</button> <button disabled={transcriptionBusy} onClick={discardTranscription}>Discard recording</button></div>}</fieldset></section><aside className="coach" aria-live="polite"><h2>Live coaching</h2><h3>Grammar correction</h3>{feedback.incorrect && <p><strong>Incorrect:</strong> {feedback.incorrect}</p>}{feedback.corrected && <p><strong>Correct:</strong> {feedback.corrected}</p>}<p>{feedback.grammar}</p><h3>Vocabulary</h3><div className="chips">{feedback.words.length ? feedback.words.map((word) => <span key={word}>{word}</span>) : <span>No suggestions yet.</span>}</div>{selectedLanguageMode !== "ENGLISH" && <><h3>Native Telugu quality review</h3><p>{feedback.telugu}</p><p><strong>Review:</strong> {languageReview.changed ? languageReview.reason : "No wording change needed"}</p>{languageReview.terms.length > 0 && <p><strong>Learning terms kept in English:</strong> {languageReview.terms.join(", ")}</p>}</>}</aside></div>;
 }

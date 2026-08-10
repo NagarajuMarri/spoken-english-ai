@@ -265,7 +265,7 @@ class AuthService:
         self.session.add(reset)
         self._audit_event("PASSWORD_RESET_REQUESTED", user)
         self.session.commit()
-        reset_url = f"{self.settings.public_frontend_url.rstrip('/')}/reset-password?token={raw}"
+        reset_url = f"{self.settings.public_frontend_url.rstrip('/')}/reset-password#token={raw}"
         try:
             self.request.app.state.password_reset_delivery.deliver(user.email, reset_url)
         except Exception:

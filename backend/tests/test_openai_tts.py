@@ -1,12 +1,14 @@
 import json
 import logging
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.app.ai.exceptions import ProviderMalformedResponse, ProviderTimeout
 from backend.app.core.config import Settings
-from backend.app.models import TTSSynthesisAttempt
+from backend.app.models import AIUsageRecord, AITurnAttempt, Learner, ProviderCallEvent, TTSSynthesisAttempt
 from backend.app.providers.tts.contracts import TextToSpeechRequest
 from backend.app.providers.tts.deterministic import DeterministicTextToSpeechProvider
 from backend.app.providers.tts.openai_boundary import OpenAICompatibleTTSProvider, OpenAISpeechHTTPClient
@@ -220,6 +222,101 @@ def test_tts_timeout_is_visible_and_manual_recovery_is_safe(client, conversation
     assert recovered.status_code == replay.status_code == 200
     assert recovered_provider.calls == 1
     assert replay.headers["x-tts-cache"] == "HIT"
+
+
+def test_tts_provider_retries_are_bounded_and_failed_calls_are_metered(client, conversation):
+    class TimeoutProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def synthesize(self, _request):
+            self.calls += 1
+            raise ProviderTimeout("private provider detail", provider_requests=1)
+
+    timeout = TimeoutProvider()
+    client.app.state.text_to_speech_provider = timeout
+    turn = create_turn(client, conversation, "tts-bounded-retry-turn")
+    route = f"/api/v1/conversations/{conversation['id']}/ai-turns/{turn['turn_id']}/speech"
+
+    first = client.post(route)
+    second = client.post(route)
+    final = client.post(route)
+    replayed_final = client.post(route)
+
+    assert first.status_code == second.status_code == 504
+    assert final.status_code == 503
+    assert final.json()["error"]["code"] == "tts_retry_limit_reached"
+    assert final.json()["error"]["retryable"] is False
+    assert replayed_final.status_code == 503
+    assert replayed_final.json()["error"]["code"] == "tts_retry_limit_reached"
+    assert timeout.calls == 3
+    with client.app.state.session_factory() as session:
+        attempt = session.scalar(select(TTSSynthesisAttempt).where(
+            TTSSynthesisAttempt.ai_turn_attempt_id == turn["turn_id"]
+        ))
+        assert attempt.status == "FAILED_FINAL"
+        assert attempt.provider_requests == 3
+        assert session.scalar(select(func.sum(AIUsageRecord.request_count)).where(
+            AIUsageRecord.provider_kind == "tts",
+            AIUsageRecord.failed.is_(True),
+        )) == 3
+        provider_events = list(session.scalars(select(ProviderCallEvent).where(
+            ProviderCallEvent.operation_kind == "tts"
+        )))
+        assert len(provider_events) == 3
+        assert sum(item.request_count for item in provider_events) == 3
+        assert all(item.outcome == "FAILURE" for item in provider_events)
+
+
+def test_stale_tts_provider_lease_is_fenced_before_retry(client, learner, conversation):
+    turn = create_turn(client, conversation, "tts-stale-provider-lease")
+    stale_at = datetime.now(UTC) - timedelta(minutes=6)
+    spoken_text = turn["spoken_text"]
+    with client.app.state.session_factory() as session:
+        ai_attempt = session.get(AITurnAttempt, turn["turn_id"])
+        learner_row = session.get(Learner, learner["id"])
+        attempt = TTSSynthesisAttempt(
+            ai_turn_attempt_id=ai_attempt.id,
+            learner_id=learner["id"],
+            tutor_id="ananya",
+            provider="test-only-fake",
+            model_used="deterministic-tts",
+            voice_used=client.app.state.settings.openai_tts_ananya_voice,
+            spoken_text_hash=sha256(spoken_text.encode()).hexdigest(),
+            status="IN_PROGRESS",
+            input_characters=len(spoken_text),
+            provider_requests=1,
+            updated_at=stale_at,
+        )
+        session.add(attempt)
+        session.flush()
+        session.add(ProviderCallEvent(
+            learner_id=learner["id"],
+            user_id=learner_row.user_account_id,
+            operation_kind="tts",
+            attempt_reference=attempt.id,
+            request_count=1,
+            outcome="RESERVED",
+            occurred_at=stale_at,
+        ))
+        session.commit()
+
+    response = client.post(
+        f"/api/v1/conversations/{conversation['id']}/ai-turns/{turn['turn_id']}/speech"
+    )
+    assert response.status_code == 200
+    assert client.app.state.text_to_speech_provider.calls == 1
+    with client.app.state.session_factory() as session:
+        events = list(session.scalars(
+            select(ProviderCallEvent)
+            .where(ProviderCallEvent.operation_kind == "tts")
+            .order_by(ProviderCallEvent.occurred_at)
+        ))
+        attempt = session.scalar(select(TTSSynthesisAttempt))
+        assert attempt.status == "SUCCEEDED"
+        assert attempt.provider_requests == 2
+        assert len(events) == 2
+        assert [item.outcome for item in events] == ["FAILURE", "SUCCESS"]
 
 
 def test_tts_logs_shape_only_and_never_speech_or_credentials(client, conversation, caplog):

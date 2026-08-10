@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from backend.app.core.config import Settings
 from backend.app.main import create_app
-from backend.app.models import BetaFeedback, BetaWaitlistEntry
+from backend.app.models import BetaFeedback, BetaWaitlistEntry, UserAccount
 
 def registration(email="learner@example.com", invitation_code=None):
     return {"email":email,"password":"StrongPassword123!","display_name":"Anusha","invitation_code":invitation_code,"terms_privacy_accepted":True}
@@ -36,5 +36,10 @@ def test_founder_dashboard_read_only(tmp_path):
     app=create_app(settings)
     with TestClient(app) as client:
         founder=client.post("/api/v1/auth/register",json=registration("founder@example.com")).json(); client.headers["Authorization"]=f"Bearer {founder['tokens']['access_token']}"
+        assert client.get("/api/v1/launch/founder-dashboard").status_code==403
+        with app.state.session_factory() as session:
+            account=session.scalar(select(UserAccount).where(UserAccount.email=="founder@example.com"))
+            account.email_verified=True
+            session.commit()
         result=client.get("/api/v1/launch/founder-dashboard"); assert result.status_code==200 and result.json()["read_only"] is True
     app.state.engine.dispose()

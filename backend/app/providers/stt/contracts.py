@@ -26,6 +26,7 @@ class SpeechToTextResult(BaseModel):
     provider_job_id: str = Field(max_length=100)
     duration_seconds: float = Field(ge=0)
     usage_units: float = Field(ge=0)
+    provider_requests: int = Field(default=1, ge=1)
     processing_status: str
 
 

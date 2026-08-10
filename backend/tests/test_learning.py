@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 
 from backend.app.domain.curriculum import LESSONS
 from backend.app.domain.evaluation import evaluate
@@ -105,7 +105,8 @@ def test_completion_is_idempotent_and_progress_not_double_counted(client, learne
 
 def test_streak_increment_reset_and_longest(client, learner):
     with client.app.state.session_factory() as db:
-        for day in (date.today() - timedelta(days=4), date.today() - timedelta(days=3), date.today()):
+        today = datetime.now(timezone.utc).date()
+        for day in (today - timedelta(days=4), today - timedelta(days=3), today):
             db.add(ProgressRecord(
                 learner_id=learner["id"], lesson_id="starter-introductions",
                 practice_date=day, duration_seconds=60, score=70,

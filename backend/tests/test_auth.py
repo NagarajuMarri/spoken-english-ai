@@ -117,6 +117,9 @@ def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplo
     assert neutral.status_code == unknown.status_code == 200
     assert neutral.json() == unknown.json()
     assert raw_token and len(raw_token) >= 32
+    reset_url = client.app.state.password_reset_delivery.deliveries[0]["reset_url"]
+    assert "/reset-password#token=" in reset_url
+    assert "/reset-password?token=" not in reset_url
 
     with client.app.state.session_factory() as db:
         reset = db.scalar(select(PasswordResetToken))
