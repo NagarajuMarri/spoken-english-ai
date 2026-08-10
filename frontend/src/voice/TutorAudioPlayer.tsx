@@ -82,8 +82,7 @@ export const TutorAudioPlayer = forwardRef<TutorAudioPlayerHandle, TutorAudioPla
     if (!AudioContextConstructor) return;
     const context = audioContext.current ?? new AudioContextConstructor();
     audioContext.current = context;
-    void context.resume().then(() => {
-      if (context.state !== "running" || analyser.current) return;
+    try {
       const nextAnalyser = context.createAnalyser();
       nextAnalyser.fftSize = 512;
       nextAnalyser.smoothingTimeConstant = 0.45;
@@ -93,9 +92,12 @@ export const TutorAudioPlayer = forwardRef<TutorAudioPlayerHandle, TutorAudioPla
       nextAnalyser.connect(context.destination);
       analyser.current = nextAnalyser;
       timeDomainData.current = new Uint8Array(new ArrayBuffer(nextAnalyser.fftSize));
-    }).catch(() => {
+      void context.resume().catch(() => {
+        // Audio remains usable without visual analysis on restricted/older devices.
+      });
+    } catch {
       // Audio remains usable without visual analysis on restricted/older devices.
-    });
+    }
   }, [trackAmplitude]);
 
   const readAmplitude = useCallback(() => {

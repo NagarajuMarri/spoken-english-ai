@@ -4,7 +4,7 @@ const token = { access_token: "access", refresh_token: "refresh-token-value-long
 const account = { id: "user-1", learner_id: "learner-1", email: "browser@example.invalid", status: "ACTIVE" };
 const tutor = (id: "ananya" | "arjun") => ({ tutor_id: id, display_name: id === "ananya" ? "Ananya" : "Arjun", gender: id === "ananya" ? "female" : "male", avatar_profile: `/tutors/${id}.jpg`, voice_profile: `indian-english-${id}`, accent: "Indian English", teaching_style: "patient and encouraging", animation_profile: "animated-2d", prompt_profile: "supportive", vocabulary_profile: "practical", enabled: true });
 
-function wavFixture(durationSeconds = 1.4) {
+function wavFixture(durationSeconds = 4) {
   const sampleRate = 8000;
   const sampleCount = Math.floor(sampleRate * durationSeconds);
   const bytes = Buffer.alloc(44 + sampleCount * 2);
