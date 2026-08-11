@@ -1,5 +1,16 @@
 export type SyncStatus = "NOT_AVAILABLE" | "APPROXIMATE" | "VISEME_TIMED" | "SYNCHRONIZED" | "FAILED";
-export type MouthShape = "REST" | "SMALL" | "MEDIUM" | "WIDE";
+export type MouthShape =
+  | "REST"
+  | "SMALL"
+  | "MEDIUM"
+  | "WIDE"
+  | "AH"
+  | "EE"
+  | "OH"
+  | "OO"
+  | "MBP"
+  | "FV"
+  | "L";
 
 export interface VisemeEvent {
   identifier: MouthShape;

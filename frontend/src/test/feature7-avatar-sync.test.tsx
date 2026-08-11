@@ -35,7 +35,11 @@ describe("Feature 7 audio-linked avatar", () => {
   it("emits speaking frames from the real audio element lifecycle", async () => {
     const events: AudioLifecycleEvent[] = [];
     render(<TutorAudioPlayer speech={speech} spokenText="Good work." playbackId="turn-7" onLifecycle={(event) => events.push(event)} />);
-    await waitFor(() => expect(events).toContainEqual({ type: "SOURCE_READY", playbackId: "turn-7" }));
+    await waitFor(() => expect(events).toContainEqual({
+      type: "SOURCE_READY",
+      playbackId: "turn-7",
+      spokenText: "Good work.",
+    }));
     const player = screen.getByLabelText("Tutor voice audio");
     Object.defineProperty(player, "paused", { configurable: true, value: false });
     Object.defineProperty(player, "currentTime", { configurable: true, writable: true, value: 0.24 });
@@ -84,7 +88,7 @@ describe("Feature 7 audio-linked avatar", () => {
     fireEvent.playing(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
     expect(avatar).toHaveAttribute("data-expression", "CORRECTIVE");
-    expect(avatar).toHaveAttribute("data-mouth", "REST");
+    expect(avatar).toHaveAttribute("data-mouth", "AH");
 
     fireEvent.ended(player);
     expect(avatar).toHaveAttribute("data-state", "RETRY");
@@ -103,7 +107,7 @@ describe("Feature 7 audio-linked avatar", () => {
     await waitFor(() => expect(api.speech).toHaveBeenCalledTimes(2));
     fireEvent.playing(player);
     expect(avatar).toHaveAttribute("data-state", "SPEAKING");
-    expect(avatar).toHaveAttribute("data-mouth", "REST");
+    expect(avatar).toHaveAttribute("data-mouth", "AH");
   });
 
   it("interrupts playback and resets the mouth immediately", async () => {

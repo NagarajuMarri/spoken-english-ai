@@ -16,7 +16,11 @@ function BridgeHarness({
     <output aria-label="Tutor state">{multimedia.presentation.state}</output>
     <output aria-label="Tutor mouth">{multimedia.presentation.mouth}</output>
     <output aria-label="Playback identity">{multimedia.playbackSignal.current.playbackId}</output>
-    <button onClick={() => multimedia.dispatchAudioLifecycle({ type: "SOURCE_READY", playbackId: "bridge-turn" })}>Source</button>
+    <button onClick={() => multimedia.dispatchAudioLifecycle({
+      type: "SOURCE_READY",
+      playbackId: "bridge-turn",
+      spokenText: "aaaa",
+    })}>Source</button>
     <button onClick={() => multimedia.dispatchAudioLifecycle({ type: "PLAYBACK_STARTED", playbackId: "bridge-turn" })}>Play</button>
     <button onClick={() => multimedia.dispatchAudioLifecycle({
       type: "PLAYBACK_FRAME",
@@ -36,7 +40,7 @@ describe("React multimedia runtime bridge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Frame" }));
 
     await waitFor(() => expect(screen.getByLabelText("Tutor state")).toHaveTextContent("SPEAKING"));
-    expect(screen.getByLabelText("Tutor mouth")).toHaveTextContent("WIDE");
+    expect(screen.getByLabelText("Tutor mouth")).toHaveTextContent("AH");
     expect(screen.getByLabelText("Playback identity")).toHaveTextContent("bridge-turn");
   });
 
@@ -45,7 +49,7 @@ describe("React multimedia runtime bridge", () => {
     fireEvent.click(screen.getByRole("button", { name: "Source" }));
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     fireEvent.click(screen.getByRole("button", { name: "Frame" }));
-    await waitFor(() => expect(screen.getByLabelText("Tutor mouth")).toHaveTextContent("WIDE"));
+    await waitFor(() => expect(screen.getByLabelText("Tutor mouth")).toHaveTextContent("AH"));
 
     view.rerender(<BridgeHarness reducedMotion />);
 

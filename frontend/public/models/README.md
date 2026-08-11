@@ -12,5 +12,6 @@ The upstream project identifies that MPFB avatar as
 For the learner web runtime, the source model's non-face textures were capped
 at 1024 px and its geometry was compressed with Meshoptimizer. The face texture,
 rig, skinning, ARKit expression targets, and Oculus viseme targets were retained.
-SpeakMate drives the mouth from measured audio amplitude when provider visemes
-are unavailable.
+SpeakMate drives the retained facial targets from a local text-derived phoneme
+timeline aligned to media playback. Measured audio amplitude remains the safe
+fallback when a speech source does not carry its spoken text.

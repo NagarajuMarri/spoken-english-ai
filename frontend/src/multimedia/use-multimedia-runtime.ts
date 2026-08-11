@@ -11,7 +11,7 @@ import type {
   MultimediaRuntimeEvent,
 } from "./contracts";
 import { EventDrivenAnimationClock } from "./event-driven-animation-clock";
-import { AmplitudeLipSyncProvider } from "./lip-sync-providers";
+import { PhonemeLipSyncProvider } from "./lip-sync-providers";
 import { SpeakMateMultimediaRuntime } from "./runtime";
 
 function samePresentation(left: TutorPresentation, right: TutorPresentation) {
@@ -41,7 +41,7 @@ export interface SpeakMateMultimediaBridgeOptions {
 }
 
 function createDefaultLipSyncProvider() {
-  return new AmplitudeLipSyncProvider();
+  return new PhonemeLipSyncProvider();
 }
 
 /** React adapter used by the learner conversation without coupling the runtime to React or Three.js. */

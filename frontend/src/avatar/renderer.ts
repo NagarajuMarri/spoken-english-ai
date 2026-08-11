@@ -25,6 +25,20 @@ export interface TutorMouthPose {
 /** Renderer-neutral rig values selected by the active LipSyncProvider upstream. */
 export function mouthPoseFromShape(mouth: MouthShape): TutorMouthPose {
   switch (mouth) {
+    case "MBP":
+      return { openness: 0.015, width: 0.12, funnel: 0.04 };
+    case "FV":
+      return { openness: 0.12, width: 0.48, funnel: 0.02 };
+    case "L":
+      return { openness: 0.38, width: 0.42, funnel: 0.04 };
+    case "EE":
+      return { openness: 0.3, width: 0.9, funnel: 0.02 };
+    case "OH":
+      return { openness: 0.58, width: 0.22, funnel: 0.72 };
+    case "OO":
+      return { openness: 0.32, width: 0.12, funnel: 0.9 };
+    case "AH":
+      return { openness: 0.78, width: 0.56, funnel: 0.08 };
     case "SMALL":
       return { openness: 0.3, width: 0.2, funnel: 0.45 };
     case "MEDIUM":

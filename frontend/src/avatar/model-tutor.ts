@@ -148,6 +148,10 @@ export function updateModelTutorRig(
   setMorph(rig, "jawOpen", mouthOpen * 0.72);
   setMorph(rig, "viseme_aa", mouthOpen * (0.28 + mouthPose.width * 0.24));
   setMorph(rig, "mouthFunnel", mouthPose.funnel);
+  setMorph(rig, "mouthPucker", mouthPose.funnel * 0.72);
+  setMorph(rig, "mouthClose", selectedMouth === "MBP" ? 0.88 : 0);
+  setMorph(rig, "mouthLowerDownLeft", selectedMouth === "FV" ? 0.18 : 0);
+  setMorph(rig, "mouthLowerDownRight", selectedMouth === "FV" ? 0.18 : 0);
 
   const success = frame.state === "SUCCESS" || frame.expression === "POSITIVE" || frame.expression === "ENCOURAGING";
   const retry = frame.state === "RETRY" || frame.expression === "CORRECTIVE";

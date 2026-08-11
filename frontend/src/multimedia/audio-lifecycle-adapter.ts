@@ -5,7 +5,10 @@ import type { MultimediaAudioEvent } from "./contracts";
 export function multimediaAudioEventFromLifecycle(event: AudioLifecycleEvent): MultimediaAudioEvent {
   switch (event.type) {
     case "SOURCE_READY":
-      return { type: "AUDIO_SOURCE_READY", source: { playbackId: event.playbackId } };
+      return {
+        type: "AUDIO_SOURCE_READY",
+        source: { playbackId: event.playbackId, spokenText: event.spokenText },
+      };
     case "PLAYBACK_STARTED":
       return { type: "AUDIO_PLAYBACK_STARTED", playbackId: event.playbackId };
     case "PLAYBACK_FRAME":

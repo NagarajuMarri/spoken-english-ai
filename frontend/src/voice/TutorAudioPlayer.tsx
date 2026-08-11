@@ -7,7 +7,7 @@ import {
 } from "../telemetry/engineering-diagnostics";
 
 export type AudioLifecycleEvent =
-  | { type: "SOURCE_READY"; playbackId: string }
+  | { type: "SOURCE_READY"; playbackId: string; spokenText: string }
   | { type: "PLAYBACK_STARTED"; playbackId: string }
   | { type: "PLAYBACK_FRAME"; playbackId: string; currentTimeMs: number; durationMs: number; amplitude: number }
   | { type: "PLAYBACK_PAUSED"; playbackId: string }
@@ -174,7 +174,7 @@ export const TutorAudioPlayer = forwardRef<TutorAudioPlayerHandle, TutorAudioPla
     objectUrl.current = URL.createObjectURL(speech.blob);
     player.src = objectUrl.current;
     player.load();
-    lifecycle.current?.({ type: "SOURCE_READY", playbackId });
+    lifecycle.current?.({ type: "SOURCE_READY", playbackId, spokenText });
     if (autoPlay) void playbackRequest.current?.("autoplay");
 
     return () => {
@@ -194,7 +194,7 @@ export const TutorAudioPlayer = forwardRef<TutorAudioPlayerHandle, TutorAudioPla
       }
       if (sourcePlaybackId.current === releasedPlaybackId) sourcePlaybackId.current = "";
     };
-  }, [autoPlay, playbackId, speech, stopFrameLoop]);
+  }, [autoPlay, playbackId, speech, spokenText, stopFrameLoop]);
 
   useEffect(() => () => {
     void audioContext.current?.close();

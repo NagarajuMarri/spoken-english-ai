@@ -3,7 +3,7 @@ export { MultimediaAudioController } from "./audio-controller";
 export { multimediaAudioEventFromLifecycle } from "./audio-lifecycle-adapter";
 export { selectTutorRenderTier, type TutorRenderTier } from "./device-fallback";
 export { EventDrivenAnimationClock } from "./event-driven-animation-clock";
-export { AmplitudeLipSyncProvider, StaticLipSyncProvider } from "./lip-sync-providers";
+export { AmplitudeLipSyncProvider, PhonemeLipSyncProvider, StaticLipSyncProvider } from "./lip-sync-providers";
 export {
   ANANYA_NATURAL_MOTION_SEED,
   createNaturalMotionController,

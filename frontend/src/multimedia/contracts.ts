@@ -5,6 +5,7 @@ import type { TutorPlaybackSignal, TutorRendererFrame } from "../avatar/renderer
 export interface MultimediaAudioSource {
   playbackId: string;
   durationMs?: number;
+  spokenText?: string;
 }
 
 export interface MultimediaAudioFrame extends TutorPlaybackSignal {
@@ -14,7 +15,7 @@ export interface MultimediaAudioFrame extends TutorPlaybackSignal {
 export interface LipSyncSample {
   mouth: MouthShape;
   confidence: number;
-  source: "MEASURED_AMPLITUDE" | "PROVIDER_VISEME" | "STATIC";
+  source: "PHONEME_VISEME" | "MEASURED_AMPLITUDE" | "PROVIDER_VISEME" | "STATIC";
 }
 
 /** Replaceable, provider-neutral translation from playback evidence to a mouth pose. */
