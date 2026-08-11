@@ -112,6 +112,14 @@ class Settings(BaseSettings):
     openai_tts_ananya_voice: str = "marin"
     openai_tts_arjun_voice: str = "cedar"
     openai_tts_speed: float = 1.0
+    realtime_voice_enabled: bool = False
+    openai_realtime_model: str = "gpt-realtime-2.1"
+    openai_realtime_voice: str = "marin"
+    openai_realtime_connect_timeout_seconds: int = 15
+    realtime_vad_threshold: float = 0.5
+    realtime_vad_prefix_padding_ms: int = 300
+    realtime_vad_silence_ms: int = 500
+    realtime_sdp_max_bytes: int = 100_000
     tracing_enabled: bool = False
     maintenance_mode: bool = False
     product_name: str = "SpeakMate"
@@ -178,6 +186,14 @@ class Settings(BaseSettings):
             raise ValueError("openai_tts_arjun_voice is unsupported")
         if not 0.5 <= self.openai_tts_speed <= 2:
             raise ValueError("openai_tts_speed must be between 0.5 and 2")
+        if not 5 <= self.openai_realtime_connect_timeout_seconds <= 30:
+            raise ValueError("openai_realtime_connect_timeout_seconds must be between 5 and 30")
+        if not 0 <= self.realtime_vad_threshold <= 1:
+            raise ValueError("realtime_vad_threshold must be between 0 and 1")
+        if not 200 <= self.realtime_vad_prefix_padding_ms <= 1_000:
+            raise ValueError("realtime_vad_prefix_padding_ms must be between 200 and 1000")
+        if not 500 <= self.realtime_vad_silence_ms <= 1_000:
+            raise ValueError("realtime_vad_silence_ms must be between 500 and 1000")
         if not 0 <= self.password_reset_minimum_response_milliseconds <= 2_000:
             raise ValueError(
                 "password_reset_minimum_response_milliseconds must be between 0 and 2000"

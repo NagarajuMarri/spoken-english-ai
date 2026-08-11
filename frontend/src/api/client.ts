@@ -90,6 +90,19 @@ async function speechRaw(path:string,retry=true):Promise<TutorSpeech>{
     usageClassification:response.headers.get("X-TTS-Usage-Classification")??"unavailable",
   };
 }
+async function sdpRaw(path:string,sdp:string,retry=true):Promise<string>{
+  const tokens=hooks.get();const headers=new Headers({"Content-Type":"application/sdp"});
+  if(tokens)headers.set("Authorization",`Bearer ${tokens.access_token}`);
+  const response=await fetch(`${API_BASE}${path}`,{method:"POST",headers,body:sdp});
+  if(response.status===401&&tokens&&retry){
+    const refreshed=await refreshSession(tokens);
+    if(refreshed&&hooks.get()?.refresh_token===refreshed.refresh_token)return sdpRaw(path,sdp,false);
+  }
+  if(!response.ok){const body=await response.json().catch(()=>({}));throw new ApiError(response.status,body?.error?.message||"Live voice is temporarily unavailable.",body?.error?.code,Boolean(body?.error?.retryable),body?.error?.request_id)}
+  const contentType=response.headers.get("Content-Type")?.split(";",1)[0]??"";
+  if(contentType!=="application/sdp")throw new ApiError(502,"Live voice returned an invalid connection.","realtime_invalid_answer",true);
+  return response.text();
+}
 async function endSession(initialRefreshToken:string,allDevices=false):Promise<void>{
   let refreshToken=initialRefreshToken;
   const ownedTokens=new Set([refreshToken]);
@@ -153,6 +166,8 @@ export const api={
   createLessonSession:(learner_id:string,lesson_id:string)=>raw<LessonSession>("/api/v1/lesson-sessions",{method:"POST",body:JSON.stringify({learner_id,lesson_id})}),
   completeLessonSession:(sessionId:string,duration_seconds:number)=>raw<LessonSession>(`/api/v1/lesson-sessions/${sessionId}/complete`,{method:"POST",body:JSON.stringify({duration_seconds})}),
   conversation:(learner_id:string,lesson?:Pick<CurriculumLesson,"id"|"scenario_id">)=>raw<{id:string;opening_prompt?:string;opening_turn_id?:string}>("/api/v1/conversations",{method:"POST",body:JSON.stringify({learner_id,scenario_id:lesson?.scenario_id??"daily-conversation",lesson_id:lesson?.id})}),
+  realtimeCall:(conversationId:string,languageMode:LanguageMode,lessonId:string|undefined,sdp:string)=>sdpRaw(`/api/v1/realtime/calls?conversation_id=${encodeURIComponent(conversationId)}&language_mode=${encodeURIComponent(languageMode)}${lessonId?`&lesson_id=${encodeURIComponent(lessonId)}`:""}`,sdp),
+  realtimeCapability:()=>raw<{enabled:boolean}>("/api/v1/realtime/capability"),
   transcribe:(id:string,capture:{blob:Blob;durationMs:number},idempotencyKey:string=globalThis.crypto?.randomUUID?.()??`voice-${Date.now()}-${Math.random().toString(16).slice(2)}`)=>raw<VoiceTranscription>(`/api/v1/conversations/${id}/transcriptions`,{method:"POST",headers:{"Content-Type":capture.blob.type,"X-Audio-Duration-Ms":String(capture.durationMs),"X-Voice-Processing-Consent":"accepted","Idempotency-Key":idempotencyKey},body:capture.blob}),
   turn:(id:string,message:string,_languageMode:LanguageMode,idempotencyKey:string,voice?:{detectedLanguage:string;confidence?:number|null})=>raw<AiTurn>(`/api/v1/conversations/${id}/ai-turns`,{method:"POST",headers:{"Idempotency-Key":idempotencyKey},body:JSON.stringify({message,input_source:voice?"VOICE":"TEXT",detected_language:voice?.detectedLanguage,stt_confidence:voice?.confidence})}),
   speech:(id:string,turnId:string)=>speechRaw(`/api/v1/conversations/${id}/ai-turns/${turnId}/speech`),

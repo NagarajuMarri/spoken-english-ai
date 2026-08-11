@@ -13,6 +13,7 @@ from backend.app.api.routes.health import router as health_router
 from backend.app.api.routes.learners import router as learners_router
 from backend.app.api.routes.learning import router as learning_router
 from backend.app.api.routes.voice import router as voice_router
+from backend.app.api.routes.realtime import router as realtime_router
 from backend.app.api.routes.auth import router as auth_router
 from backend.app.api.routes.ai import router as ai_router
 from backend.app.api.routes.tutors import router as tutors_router
@@ -159,6 +160,7 @@ def create_app(settings=None) -> FastAPI:
     application.include_router(conversations_router)
     application.include_router(learning_router)
     application.include_router(voice_router)
+    application.include_router(realtime_router)
     application.include_router(auth_router)
     application.include_router(ai_router)
     application.include_router(tutors_router)

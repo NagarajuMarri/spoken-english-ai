@@ -19,6 +19,7 @@ import {
 } from "../telemetry/engineering-diagnostics";
 import { TutorAudioPlayer, type AudioLifecycleEvent, type TutorAudioPlayerHandle } from "../voice/TutorAudioPlayer";
 import { useMicrophone, type CapturedAudio } from "../voice/useMicrophone";
+import { useRealtimeVoice } from "../voice/useRealtimeVoice";
 
 const ACTIVE_LESSON_TITLE_KEY = "speakmate.active-lesson-title.v1";
 const ACTIVE_LESSON_KEY = "speakmate.active-lesson.v1";
@@ -238,6 +239,7 @@ export function ConversationScreen({
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [feedback, setFeedback] = useState({ grammar: "", incorrect: "", corrected: "", words: [] as string[], telugu: "" });
   const [consent, setConsent] = useState(false);
+  const [realtimeAvailable, setRealtimeAvailable] = useState(false);
   const reduced = usePrefersReducedMotion();
   const {
     presentation,
@@ -254,7 +256,22 @@ export function ConversationScreen({
   const handleAudioPlayerRef = useCallback((player: TutorAudioPlayerHandle | null) => {
     attachAudioTransport(player);
   }, [attachAudioTransport]);
+  const realtimePlaybackId = useRef("realtime-ananya");
+  const realtime = useRealtimeVoice();
+  useEffect(() => {
+    if (realtime.state === "listening") dispatch({ type: "MICROPHONE_STARTED" });
+    if (realtime.state === "thinking") dispatch({ type: "TUTOR_PROCESSING_STARTED" });
+    if (realtime.state === "speaking") {
+      dispatch({ type: "TUTOR_RESPONSE_READY", expression: "NEUTRAL" });
+      dispatch({ type: "AUDIO_SOURCE_READY", source: { playbackId: realtimePlaybackId.current } });
+      dispatch({ type: "AUDIO_PLAYBACK_STARTED", playbackId: realtimePlaybackId.current });
+    }
+  }, [dispatch, realtime.state]);
   const conversationSessionKey = `${account.learner_id}:${tutor.tutor_id}`;
+
+  useEffect(() => {
+    api.realtimeCapability().then((value) => setRealtimeAvailable(value.enabled === true)).catch(() => setRealtimeAvailable(false));
+  }, []);
 
   useEffect(() => {
     const requestKey = conversationSessionKey;
@@ -397,7 +414,15 @@ export function ConversationScreen({
     }
     startBusyRef.current = true;
     setStartBusy(true);
+    setConsent(true);
     try {
+      stopAudio();
+      if (realtimeAvailable && typeof RTCPeerConnection !== "undefined" && await realtime.start(id, selectedLanguageMode, activeLesson?.lesson.id)) {
+        setAudioError("");
+        setConversationStarted(true);
+        setGreetingCompleted(true);
+        return;
+      }
       const started = await playAudio();
       if (started) {
         setAudioError("");
@@ -683,11 +708,15 @@ export function ConversationScreen({
           <div className={`voice-control-dock${conversationStarted ? "" : " prestart"}`}>
             {!conversationStarted ? <section className="start-conversation-gate" aria-label="Start live lesson">
               <strong>{speech ? `${tutor.display_name} is ready.` : `Preparing ${tutor.display_name}…`}</strong>
-              <p>Start once to hear the welcome and begin your live lesson.</p>
+              <p>Start once to allow microphone processing and continue hands-free. You can end or mute anytime.</p>
               <button type="button" disabled={!id || !speech || !avatarReady || audioBusy || startBusy} onClick={() => void startConversation()}>
                 {startBusy ? "Starting…" : "Start conversation"}
               </button>
               {audioError && !speech && <button type="button" className="secondary" onClick={continueWithoutOpeningAudio}>Continue without audio</button>}
+            </section> : realtime.active ? <section className="microphone-controls hands-free-controls" aria-label="Hands-free voice controls">
+              <strong>Hands-free voice is active</strong>
+              <p className="microphone-state" aria-live="polite">{{connecting:"Connecting…",reconnecting:"Reconnecting…",listening:"Listening — speak naturally",thinking:"Ananya is thinking…",speaking:"Ananya is speaking",idle:"Ready",error:"Voice unavailable"}[realtime.state]}</p>
+              <div className="microphone-actions"><button onClick={realtime.stop}>End conversation</button><button onClick={() => realtime.mute(true)}>Mute microphone</button><button onClick={() => realtime.mute(false)}>Unmute microphone</button></div>
             </section> : <fieldset className="microphone-controls">
               <legend>Speak to {tutor.display_name}</legend>
               <label className="voice-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /> I consent to voice processing for this turn</label>
