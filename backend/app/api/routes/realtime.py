@@ -161,20 +161,28 @@ def realtime_capability(request: Request, _: Principal = Depends(current_princip
 def _instructions(language_mode: str, lesson_id: str | None) -> str:
     telugu = language_mode != "ENGLISH"
     language = (
-        "Keep the learning sentence in English. Give brief, natural Telugu help only when the learner uses Telugu or asks for it, and write "
-        "that help in Telugu script rather than Latin transliteration; "
+        "The learner's saved language-assistance mode is Telugu-assisted. Keep every target sentence and useful grammar term in English, "
+        "but make the teaching explanation primarily natural conversational Telugu in Telugu script. Apply this contract to ordinary Telugu, "
+        "English, and Telugu-English mixed input even when speech transcription misses Telugu words. Do not silently switch to an English-only "
+        "teaching explanation unless the learner explicitly requests English-only explanation. For every translation, correction, or teaching "
+        "answer, use this non-negotiable two-part format: begin exactly with 'ఇంగ్లీష్‌లో:' followed immediately by the exact English target, "
+        "then write 'తెలుగు వివరణ:' followed by the Telugu explanation. Never put an English planning phrase or filler before 'ఇంగ్లీష్‌లో:'. "
+        "Before completing the answer, verify that the explanation contains Telugu characters; an English-only explanation is "
+        "invalid in this mode. తప్పనిసరిగా English target తర్వాత సహజమైన తెలుగు వివరణ ఇవ్వాలి. తెలుగు వివరణ లేకుండా సమాధానం పూర్తి చేయవద్దు. "
+        "For example: 'ఇంగ్లీష్‌లో: How much is this? తెలుగు వివరణ: దీని ధర అడగడానికి ఈ sentence ఉపయోగించండి.' Preserve useful English learning terminology; "
         "never output Kannada, Cyrillic, Chinese, Arabic, or Urdu script."
         if telugu else
         "Teach in concise, friendly Indian English."
     )
     lesson = f" Current structured lesson id: {lesson_id}. Do not skip its stages." if lesson_id else ""
     return (
-        "You are Ananya, SpeakMate's warm Indian spoken-English tutor. Keep ordinary replies to one or two "
-        "short sentences. Do not overcorrect valid English. For an obvious error, give one concise correction "
+        language + " You are Ananya, SpeakMate's warm Indian spoken-English tutor. Keep ordinary non-teaching replies to one or two "
+        "short sentences; teaching answers must follow the configured language contract above. Do not overcorrect valid English. For an obvious error, give one concise correction "
         "and invite one retry. Accept 'My day is good.' and 'I am Nagaraj.' as valid; do not replace them with stylistic alternatives. "
         "Treat the learner's latest factual statement as authoritative, including a changed hometown. When the learner asks how to say "
-        "something in English, immediately give the exact natural English translation, then at most one short Telugu explanation; never use a "
-        "placeholder such as 'let us turn that into English'. Never create duplicate answers. " + language + lesson
+        "something in English, immediately give the exact natural English translation, then one short explanation in the configured assistance "
+        "language; never use a "
+        "placeholder such as 'let us turn that into English'. Never create duplicate answers. " + lesson
     )
 
 
@@ -214,7 +222,7 @@ async def create_realtime_call(
     session = {
         "type": "realtime",
         "model": settings.openai_realtime_model,
-        "instructions": _instructions(language_mode, lesson_id),
+        "instructions": _instructions(principal.learner.language_mode or language_mode, lesson_id),
         "audio": {
             "input": {
                 "format": {"type": "audio/pcm", "rate": 24000},
@@ -224,7 +232,7 @@ async def create_realtime_call(
                     "threshold": settings.realtime_vad_threshold,
                     "prefix_padding_ms": settings.realtime_vad_prefix_padding_ms,
                     "silence_duration_ms": settings.realtime_vad_silence_ms,
-                    "create_response": True,
+                    "create_response": False,
                     "interrupt_response": True,
                 }
             },

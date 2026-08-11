@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { useRealtimeVoice } from "../voice/useRealtimeVoice";
 
 class FakeChannel {
+  readyState: RTCDataChannelState = "open";
   onopen: (() => void) | null = null;
   onmessage: ((event: MessageEvent) => void) | null = null;
   sent: string[] = [];
@@ -61,6 +62,21 @@ describe("hands-free realtime voice",()=>{
     expect(result.current.state).toBe("error");
     expect(result.current.error).not.toContain("provider");
     expect(stopTrack).toHaveBeenCalled();
+  });
+
+  it("binds Telugu assistance into one response after a non-empty VAD transcription",async()=>{
+    vi.spyOn(api,"realtimeCall").mockResolvedValue("v=0\r\no=answer");
+    const{result}=renderHook(()=>useRealtimeVoice());
+    await act(async()=>{await result.current.start("conversation-1","ENGLISH_TELUGU")});
+    act(()=>FakePeer.last.channel.onmessage?.({data:JSON.stringify({type:"conversation.item.input_audio_transcription.completed",item_id:"learner-item-1",transcript:"Market lo bargaining ఎలా start చేయాలి?"})} as MessageEvent));
+    expect(FakePeer.last.channel.sent).toHaveLength(1);
+    expect(FakePeer.last.channel.sent[0]).toContain('"type":"response.create"');
+    expect(FakePeer.last.channel.sent[0]).toContain("Begin exactly with ఇంగ్లీష్‌లో:");
+    expect(FakePeer.last.channel.sent[0]).toContain("తెలుగు వివరణ లేకుండా సమాధానం పూర్తి చేయవద్దు");
+    act(()=>FakePeer.last.channel.onmessage?.({data:JSON.stringify({type:"response.created"})} as MessageEvent));
+    act(()=>FakePeer.last.channel.onmessage?.({data:JSON.stringify({type:"conversation.item.input_audio_transcription.completed",item_id:"learner-item-2",transcript:"extra VAD fragment"})} as MessageEvent));
+    act(()=>FakePeer.last.channel.onmessage?.({data:JSON.stringify({type:"response.done",response:{status:"completed"}})} as MessageEvent));
+    expect(FakePeer.last.channel.sent).toHaveLength(1);
   });
 
   it("persists completed transcript pairs serially with stable provider ids",async()=>{

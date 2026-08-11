@@ -19,6 +19,11 @@ def test_realtime_call_proxies_sdp_without_exposing_standard_key(client, learner
     settings = client.app.state.settings
     settings.realtime_voice_enabled = True
     settings.openai_api_key = "sk-standard-secret-never-return"
+    preference = client.put(
+        "/api/v1/tutors/preference",
+        json={"tutor_id": "ananya", "language_mode": "ENGLISH_TELUGU"},
+    )
+    assert preference.status_code == 200
     captured = {}
 
     def fake_urlopen(request, timeout):
@@ -45,11 +50,38 @@ def test_realtime_call_proxies_sdp_without_exposing_standard_key(client, learner
     payload = outgoing.data.decode()
     assert '"type":"server_vad"' in payload
     assert '"silence_duration_ms":500' in payload
+    assert '"create_response":false' in payload
     assert '"interrupt_response":true' in payload
     assert '"transcription":{"model":"gpt-4o-mini-transcribe"}' in payload
     assert "lesson-01" in payload
-    assert "natural Telugu help" in payload
+    assert "primarily natural conversational Telugu" in payload
+    assert "Do not silently switch to an English-only" in payload
+    assert "non-negotiable two-part format" in payload
+    assert "verify that the explanation contains Telugu characters" in payload
     assert "sk-standard-secret-never-return" not in payload
+
+
+def test_realtime_uses_saved_language_mode_instead_of_request_override(client, learner, conversation, monkeypatch):
+    settings = client.app.state.settings
+    settings.realtime_voice_enabled = True
+    settings.openai_api_key = "sk-standard-secret-never-return"
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        return _RealtimeResponse()
+
+    monkeypatch.setattr("backend.app.api.routes.realtime.urllib.request.urlopen", fake_urlopen)
+    response = client.post(
+        f"/api/v1/realtime/calls?conversation_id={conversation['id']}&language_mode=ENGLISH_TELUGU",
+        content=b"v=0\r\no=- 7 7 IN IP4 127.0.0.1\r\n",
+        headers={"Content-Type": "application/sdp"},
+    )
+
+    assert response.status_code == 200
+    payload = captured["request"].data.decode()
+    assert "Teach in concise, friendly Indian English." in payload
+    assert "primarily natural conversational Telugu" not in payload
 
 
 def test_realtime_call_fails_closed_without_provider_configuration(client, conversation):

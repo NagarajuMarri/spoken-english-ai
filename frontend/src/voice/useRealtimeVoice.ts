@@ -8,11 +8,17 @@ type Context={conversationId:string;languageMode:LanguageMode;lessonId?:string};
 const MAX_RECONNECTS=2;
 const RECONNECT_DELAYS=[400,900];
 
+function turnInstructions(languageMode:LanguageMode){
+  if(languageMode==="ENGLISH")return "Respond in concise, friendly Indian English.";
+  return "Begin exactly with ఇంగ్లీష్‌లో: followed immediately by one English target sentence. Then write తెలుగు వివరణ: followed by a primarily natural Telugu explanation in Telugu script. Never put an English planning phrase or filler first. తప్పనిసరిగా తెలుగు వివరణ ఇవ్వాలి; తెలుగు వివరణ లేకుండా సమాధానం పూర్తి చేయవద్దు. Example: ఇంగ్లీష్‌లో: How much is this? తెలుగు వివరణ: దీని ధర అడగడానికి ఈ sentence ఉపయోగించండి. Keep useful English grammar terms in English. Never give an English-only teaching explanation unless the learner explicitly requested English only.";
+}
+
 export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) {
   const [state,setState]=useState<RealtimeVoiceState>("idle");
   const [error,setError]=useState("");
   const peer=useRef<RTCPeerConnection|undefined>(undefined);const stream=useRef<MediaStream|undefined>(undefined);const audio=useRef<HTMLAudioElement|undefined>(undefined);const channel=useRef<RTCDataChannel|undefined>(undefined);
   const context=useRef<Context|undefined>(undefined);const reconnects=useRef(0);const generation=useRef(0);const reconnectTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const responseActive=useRef(false);const pendingResponse=useRef(false);
   const idleTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const maximumTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const idleMilliseconds=useRef(300_000);
   const scheduleReconnectRef=useRef<()=>void>(()=>undefined);
   const eventCallback=useRef(onEvent);const lastLearnerItem=useRef<string|undefined>(undefined);const persistence=useRef(Promise.resolve());
@@ -21,12 +27,12 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
   const release=useCallback(()=>{
     channel.current?.close();peer.current?.close();stream.current?.getTracks().forEach(track=>track.stop());audio.current?.pause();
     if(audio.current)audio.current.srcObject=null;
-    channel.current=undefined;peer.current=undefined;stream.current=undefined;audio.current=undefined;
+    channel.current=undefined;peer.current=undefined;stream.current=undefined;audio.current=undefined;responseActive.current=false;pendingResponse.current=false;
   },[]);
   const stop=useCallback(()=>{
     generation.current+=1;if(reconnectTimer.current)clearTimeout(reconnectTimer.current);reconnectTimer.current=undefined;
     if(idleTimer.current)clearTimeout(idleTimer.current);if(maximumTimer.current)clearTimeout(maximumTimer.current);idleTimer.current=undefined;maximumTimer.current=undefined;
-    context.current=undefined;reconnects.current=0;lastLearnerItem.current=undefined;release();setState("idle");
+    context.current=undefined;reconnects.current=0;lastLearnerItem.current=undefined;responseActive.current=false;pendingResponse.current=false;release();setState("idle");
   },[release]);
   useEffect(()=>stop,[stop]);
   const recordActivity=useCallback(()=>{if(idleTimer.current)clearTimeout(idleTimer.current);idleTimer.current=setTimeout(stop,idleMilliseconds.current)},[stop]);
@@ -40,15 +46,17 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
       remoteAudio.onplaying=()=>{if(run===generation.current){setState("speaking");eventCallback.current?.({type:"audio.playing",at:performance.now()})}};
       remoteAudio.onended=()=>{if(run===generation.current)setState("listening")};pc.ontrack=event=>{remoteAudio.srcObject=event.streams[0]};
       media.getTracks().forEach(track=>pc.addTrack(track,media));const dc=pc.createDataChannel("oai-events");channel.current=dc;
-      dc.onopen=()=>{if(sendGreeting&&run===generation.current)dc.send(JSON.stringify({type:"response.create",response:{instructions:"Greet the learner warmly in one short sentence, then ask the current lesson question."}}))};
+      const createResponse=()=>{if(dc.readyState!=="open")return;responseActive.current=true;dc.send(JSON.stringify({type:"response.create",response:{instructions:turnInstructions(ctx.languageMode)}}))};
+      dc.onopen=()=>{if(sendGreeting&&run===generation.current){responseActive.current=true;dc.send(JSON.stringify({type:"response.create",response:{instructions:"Greet the learner warmly in one short sentence, then ask the current lesson question."}}))}};
       dc.onmessage=message=>{
         if(run!==generation.current)return;let event:Record<string,unknown>;try{event=JSON.parse(String(message.data)) as Record<string,unknown>}catch{return}
         recordActivity();
         const type=String(event.type??"");if(type==="input_audio_buffer.speech_started")setState("listening");if(type==="input_audio_buffer.speech_stopped")setState("thinking");
-        if(type==="response.output_audio.delta")setState("speaking");if(type==="response.output_audio.done"||type==="response.done")setState("listening");
+        if(type==="response.created")responseActive.current=true;if(type==="response.output_audio.delta")setState("speaking");if(type==="response.output_audio.done"||type==="response.done")setState("listening");
         const transcript=typeof event.transcript==="string"?event.transcript:undefined;const responseId=typeof event.response_id==="string"?event.response_id:undefined;
         const itemId=typeof event.item_id==="string"?event.item_id:undefined;
-        if(type==="conversation.item.input_audio_transcription.completed"&&itemId&&transcript){lastLearnerItem.current=itemId;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"learner_transcript",learner_item_id:itemId,transcript})).then(()=>undefined).catch(()=>undefined)}
+        if(type==="conversation.item.input_audio_transcription.completed"&&itemId&&transcript){lastLearnerItem.current=itemId;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"learner_transcript",learner_item_id:itemId,transcript})).then(()=>undefined).catch(()=>undefined);if(responseActive.current)pendingResponse.current=true;else createResponse()}
+        if(type==="response.done"){const cancelled=(event.response as {status?:string}|undefined)?.status==="cancelled";responseActive.current=false;if(cancelled&&pendingResponse.current){pendingResponse.current=false;createResponse()}else pendingResponse.current=false}
         if(type==="response.output_audio_transcript.done"&&lastLearnerItem.current&&responseId&&transcript){const learnerItem=lastLearnerItem.current;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"tutor_transcript",learner_item_id:learnerItem,response_id:responseId,transcript})).then(()=>undefined).catch(()=>undefined)}
         if((type==="response.cancelled"||(type==="response.done"&&(event.response as {status?:string}|undefined)?.status==="cancelled"))&&lastLearnerItem.current){const learnerItem=lastLearnerItem.current;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"tutor_interrupted",learner_item_id:learnerItem,response_id:responseId})).then(()=>undefined).catch(()=>undefined)}
         eventCallback.current?.({type,transcript,responseId,itemId,at:performance.now()});
