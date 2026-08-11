@@ -29,7 +29,12 @@ from backend.app.ai.exceptions import (
     ProviderTimeout,
     ProviderUnavailable,
 )
-from backend.app.ai.models import AIConversationRequest, AIConversationResponse, ConversationHistoryTurn
+from backend.app.ai.models import (
+    AIConversationRequest,
+    AIConversationResponse,
+    ConversationHistoryTurn,
+    CorrectionType,
+)
 from backend.app.ai.output_safety import (
     enforce_api_result_output_safety,
     enforce_response_output_safety,
@@ -558,6 +563,7 @@ def ai_turn(
     principal: Principal = Depends(current_principal),
     session: Session = Depends(get_db),
 ):
+    route_started_at = perf_counter()
     enforce_rate_limit(request, "authenticated_burst", principal.user.id)
     conversation = session.get(Conversation, conversation_id)
     if conversation is None:
@@ -742,6 +748,7 @@ def ai_turn(
         )
 
     started_at = perf_counter()
+    record_stage_timing(request, "app_pre", (started_at - route_started_at) * 1000)
     if content_response is None:
         try:
             reexplanation = correction_reexplanation_input(
@@ -876,6 +883,16 @@ def ai_turn(
         review_uses_provider = (
             language_decision.effective_mode != LanguageMode.ENGLISH
             and request.app.state.language_review_provider is not None
+            and (
+                content_response.correction_type in {
+                    CorrectionType.GRAMMAR_ERROR,
+                    CorrectionType.VOCABULARY_ERROR,
+                    CorrectionType.PRONUNCIATION_ERROR,
+                }
+                or content_response.corrected_learner_sentence is not None
+                or content_response.correction_explanation is not None
+                or learner_intent != LearnerIntent.NORMAL_CONVERSATION
+            )
         )
         if review_uses_provider:
             RuntimeEntitlementService(
@@ -904,15 +921,23 @@ def ai_turn(
         review_started_at = perf_counter()
         try:
             language_mode = language_decision.effective_mode
-            response, review_result = LanguageReviewService(
-                request.app.state.language_review_provider
-            ).review(
-                content_response,
-                language_mode=language_mode,
-                learning_objective=SCENARIOS_BY_ID[conversation.scenario_id].name,
-                learner_level=principal.learner.proficiency_level,
-                correlation_id=request.state.correlation_id,
-            )
+            review_service = LanguageReviewService(request.app.state.language_review_provider)
+            if review_uses_provider or language_mode == LanguageMode.ENGLISH:
+                response, review_result = review_service.review(
+                    content_response,
+                    language_mode=language_mode,
+                    learning_objective=SCENARIOS_BY_ID[conversation.scenario_id].name,
+                    learner_level=principal.learner.proficiency_level,
+                    correlation_id=request.state.correlation_id,
+                )
+            else:
+                response, review_result = review_service.accept_validated_pass_through(
+                    content_response,
+                    language_mode=language_mode,
+                    learning_objective=SCENARIOS_BY_ID[conversation.scenario_id].name,
+                    learner_level=principal.learner.proficiency_level,
+                    correlation_id=request.state.correlation_id,
+                )
         except ProviderError as exc:
             review_latency_ms = (perf_counter() - review_started_at) * 1000
             record_stage_timing(request, "review", review_latency_ms)
@@ -1008,6 +1033,7 @@ def ai_turn(
             )
             request.app.state.metrics.increment("language_review_requests")
 
+    post_started_at = perf_counter()
     response = apply_pedagogy_guardrails(protect_learner_facts(response, learner_message))
     try:
         response = enforce_response_output_safety(
@@ -1131,6 +1157,7 @@ def ai_turn(
 
     request.app.state.learning_engine.metrics.record(cost_event)
     request.app.state.metrics.increment("ai_requests")
+    record_stage_timing(request, "app_post", (perf_counter() - post_started_at) * 1000)
     return result
 
 

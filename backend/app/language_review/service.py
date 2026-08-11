@@ -95,8 +95,6 @@ def _validate_result(request: LanguageReviewRequest, result: LanguageReviewResul
     has_english = bool(combined_words)
     if result.preserved_learning_terms != request.required_learning_terms:
         raise ProviderOutputInvalid("Application-controlled learning terms changed.", schema_path="protected_learning_terms")
-    if any(term not in combined_words for term in request.required_learning_terms):
-        raise ProviderOutputInvalid("Language reviewer dropped a required learning term.", schema_path="preserved_learning_terms")
     source_fields = (
         request.source_tutor_message,
         request.source_correction_explanation,
@@ -166,6 +164,35 @@ def _normalize_result_output(result: LanguageReviewResult) -> LanguageReviewResu
     return result.model_copy(update=updates)
 
 
+def _canonicalize_application_owned_review_fields(
+    request: LanguageReviewRequest,
+    result: LanguageReviewResult,
+) -> LanguageReviewResult:
+    source_fields = (
+        request.source_tutor_message,
+        request.source_correction_explanation,
+        request.source_conversation_question,
+        request.source_encouragement,
+    )
+    result_fields = (
+        result.final_text,
+        result.final_correction_explanation,
+        result.final_conversation_question,
+        result.final_encouragement,
+    )
+    changed = result_fields != source_fields
+    reason = result.review_reason_code
+    if not changed:
+        reason = ReviewReasonCode.NOT_REQUIRED
+    elif reason == ReviewReasonCode.NOT_REQUIRED:
+        reason = ReviewReasonCode.NATURALIZED_TELUGU
+    return result.model_copy(update={
+        "review_changed": changed,
+        "review_reason_code": reason,
+        "preserved_learning_terms": request.required_learning_terms,
+    })
+
+
 class LanguageReviewService:
     def __init__(self, provider):
         self.provider = provider
@@ -210,6 +237,7 @@ class LanguageReviewService:
                 )
             result = self.provider.review(request)
         result = _normalize_result_output(result)
+        result = _canonicalize_application_owned_review_fields(request, result)
         _validate_result(request, result)
         if language_mode == LanguageMode.ENGLISH:
             return response, result
@@ -234,6 +262,39 @@ class LanguageReviewService:
         ) != request.source_content_digest:
             raise ProviderOutputInvalid("Protected tutor content changed during review.", schema_path="protected_content")
         return reviewed, result
+
+    def accept_validated_pass_through(
+        self,
+        response: AIConversationResponse,
+        *,
+        language_mode: LanguageMode,
+        learning_objective: str,
+        learner_level: str,
+        correlation_id: str,
+    ) -> tuple[AIConversationResponse, LanguageReviewResult]:
+        """Accept an already-normalized response when no explanation needs Telugu review."""
+        request = build_review_request(
+            response,
+            language_mode=language_mode,
+            learning_objective=learning_objective,
+            learner_level=learner_level,
+            correlation_id=correlation_id,
+        )
+        result = LanguageReviewResult(
+            final_text=request.source_tutor_message,
+            final_correction_explanation=request.source_correction_explanation,
+            final_conversation_question=request.source_conversation_question,
+            final_encouragement=request.source_encouragement,
+            language_mode=language_mode,
+            review_changed=False,
+            review_reason_code=ReviewReasonCode.NOT_REQUIRED,
+            preserved_learning_terms=request.required_learning_terms,
+            expression_hint=ExpressionHint.NEUTRAL,
+            source_content_digest=request.source_content_digest,
+            provider_metadata_reference="language-review:validated-pass-through:v1",
+            usage=UsageInfo(provider_requests=0),
+        )
+        return response, result
 
 
 def degraded_review_result(

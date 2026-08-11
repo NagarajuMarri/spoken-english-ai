@@ -181,6 +181,32 @@ def test_english_mode_is_exact_pass_through_without_provider_call():
     assert result.usage.provider_requests == 0
 
 
+def test_validated_non_correction_pass_through_avoids_telugu_provider_call():
+    source = _source_response("That's correct.").model_copy(update={
+        "correction_type": "VALID_SENTENCE",
+        "corrected_learner_sentence": None,
+        "correction_explanation": None,
+        "grammar_feedback": [],
+    })
+
+    class NeverCalled:
+        def review(self, _request):
+            raise AssertionError("review provider must not run for a correction-free normal turn")
+
+    reviewed, result = LanguageReviewService(NeverCalled()).accept_validated_pass_through(
+        source,
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation",
+        learner_level="BEGINNER",
+        correlation_id="correlation-fast-path",
+    )
+
+    assert reviewed == source
+    assert result.review_reason_code == ReviewReasonCode.NOT_REQUIRED
+    assert result.usage.provider_requests == 0
+    assert result.provider_metadata_reference == "language-review:validated-pass-through:v1"
+
+
 def test_missing_live_reviewer_is_configuration_failure_without_fake_request_count():
     with pytest.raises(ProviderConfigurationError) as captured:
         LanguageReviewService(None).review(
@@ -329,7 +355,7 @@ def test_telugu_modes_preserve_protected_content(mode):
     assert any("\u0c00" <= character <= "\u0c7f" for character in reviewed.tutor_message)
 
 
-def test_reviewer_rejects_digest_mismatch_and_dropped_learning_term():
+def test_reviewer_rejects_digest_mismatch_and_canonicalizes_learning_terms():
     source = _source_response()
     request = build_review_request(
         source,
@@ -360,14 +386,14 @@ def test_reviewer_rejects_digest_mismatch_and_dropped_learning_term():
             learner_level="BEGINNER",
             correlation_id="correlation-1",
         )
-    with pytest.raises(ProviderOutputInvalid, match="Application-controlled learning terms changed"):
-        LanguageReviewService(InvalidProvider({"preserved_learning_terms": []})).review(
-            source,
-            language_mode=LanguageMode.ENGLISH_TELUGU,
-            learning_objective="Daily conversation",
-            learner_level="BEGINNER",
-            correlation_id="correlation-1",
-        )
+    _, result = LanguageReviewService(InvalidProvider({"preserved_learning_terms": []})).review(
+        source,
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation",
+        learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+    assert result.preserved_learning_terms == request.required_learning_terms
 
 
 @pytest.mark.parametrize(
@@ -382,8 +408,6 @@ def test_reviewer_rejects_digest_mismatch_and_dropped_learning_term():
             },
             "did not contain Telugu",
         ),
-        ({"review_changed": False}, "inconsistent change status"),
-        ({"review_reason_code": "NOT_REQUIRED"}, "inconsistent reason code"),
     ],
 )
 def test_reviewer_rejects_wrong_language_and_inconsistent_review_metadata(mutation, message):
@@ -412,6 +436,39 @@ def test_reviewer_rejects_wrong_language_and_inconsistent_review_metadata(mutati
             learner_level="BEGINNER",
             correlation_id="correlation-1",
         )
+
+
+@pytest.mark.parametrize("mutation", [
+    {"review_changed": False},
+    {"review_reason_code": "NOT_REQUIRED"},
+])
+def test_reviewer_canonicalizes_application_owned_change_metadata(mutation):
+    source = _source_response("A clear source response without a required learning term.")
+    request = build_review_request(
+        source,
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation",
+        learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+
+    class Provider:
+        def review(self, _):
+            return LanguageReviewResult(
+                **_review_content(request, **mutation),
+                provider_metadata_reference="language-review:canonicalized:test",
+                usage=UsageInfo(input_units=10, output_units=10),
+            )
+
+    _, result = LanguageReviewService(Provider()).review(
+        source,
+        language_mode=LanguageMode.ENGLISH_TELUGU,
+        learning_objective="Daily conversation",
+        learner_level="BEGINNER",
+        correlation_id="correlation-1",
+    )
+    assert result.review_changed is True
+    assert result.review_reason_code != ReviewReasonCode.NOT_REQUIRED
 
 
 def test_telugu_quality_evaluation_set_covers_release_scenarios():

@@ -843,4 +843,4 @@ def test_llm_provider_configuration_fails_closed_outside_tests():
     ))
     assert provider.name == "openai-compatible"
     assert provider.reasoning_effort == "minimal"
-    assert provider.max_output_tokens == 4096
+    assert provider.max_output_tokens == 1024

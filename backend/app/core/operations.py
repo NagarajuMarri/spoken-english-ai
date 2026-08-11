@@ -50,7 +50,7 @@ class InMemoryMetrics:
         return {"counters": self.counters, "observations": self.observations, "gauges": self.gauges}
 
 
-_SERVER_TIMING_STAGES = {"stt", "llm", "review", "tts"}
+_SERVER_TIMING_STAGES = {"stt", "llm", "review", "tts", "app_pre", "app_post"}
 
 
 def record_stage_timing(request: Request, stage: str, duration_ms: float) -> None:
@@ -199,10 +199,10 @@ async def request_context_middleware(request: Request, call_next):
     duration_ms = round((time.perf_counter() - started) * 1000, 3)
     server_timings = getattr(request.state, "server_timings", ())
     if server_timings:
-        response.headers["Server-Timing"] = ", ".join(
+        response.headers["Server-Timing"] = ", ".join((
             f"{stage};dur={stage_duration:.3f}"
             for stage, stage_duration in server_timings
-        )
+        )) + f", total;dur={duration_ms:.3f}"
         origin = request.headers.get("origin")
         allowed_origins = {
             item.strip()

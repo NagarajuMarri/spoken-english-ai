@@ -15,8 +15,19 @@ from backend.app.api.routes.health import authentication_schema_is_compatible, r
 from backend.app.core.config import Settings
 from backend.app.core.operations import RATE_POLICIES, RedisRateLimiter
 from backend.app.db.schema import ALEMBIC_HEAD_REVISION
+from backend.app.db.session import build_engine
 from backend.app.jobs import Job, JobStatus, RedisJobQueue
 from backend.app.storage import S3ObjectStorageBoundary
+
+
+def test_local_sqlite_uses_low_latency_safe_pragmas(tmp_path):
+    engine = build_engine(f"sqlite:///{tmp_path / 'latency.db'}")
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
+        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one().lower() == "wal"
+        assert connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 1
+        assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 5000
+    engine.dispose()
 
 
 class FakePipeline:
