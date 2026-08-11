@@ -46,6 +46,7 @@ def test_realtime_call_proxies_sdp_without_exposing_standard_key(client, learner
     assert '"type":"server_vad"' in payload
     assert '"silence_duration_ms":500' in payload
     assert '"interrupt_response":true' in payload
+    assert '"transcription":{"model":"gpt-4o-mini-transcribe"}' in payload
     assert "lesson-01" in payload
     assert "natural Telugu help" in payload
     assert "sk-standard-secret-never-return" not in payload

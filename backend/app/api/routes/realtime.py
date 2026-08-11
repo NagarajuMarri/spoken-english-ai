@@ -161,7 +161,8 @@ def realtime_capability(request: Request, _: Principal = Depends(current_princip
 def _instructions(language_mode: str, lesson_id: str | None) -> str:
     telugu = language_mode != "ENGLISH"
     language = (
-        "Keep the learning sentence in English. Give brief, natural Telugu help when useful; "
+        "Keep the learning sentence in English. Give brief, natural Telugu help only when the learner uses Telugu or asks for it, and write "
+        "that help in Telugu script rather than Latin transliteration; "
         "never output Kannada, Cyrillic, Chinese, Arabic, or Urdu script."
         if telugu else
         "Teach in concise, friendly Indian English."
@@ -170,7 +171,10 @@ def _instructions(language_mode: str, lesson_id: str | None) -> str:
     return (
         "You are Ananya, SpeakMate's warm Indian spoken-English tutor. Keep ordinary replies to one or two "
         "short sentences. Do not overcorrect valid English. For an obvious error, give one concise correction "
-        "and invite one retry. Never create duplicate answers. " + language + lesson
+        "and invite one retry. Accept 'My day is good.' and 'I am Nagaraj.' as valid; do not replace them with stylistic alternatives. "
+        "Treat the learner's latest factual statement as authoritative, including a changed hometown. When the learner asks how to say "
+        "something in English, immediately give the exact natural English translation, then at most one short Telugu explanation; never use a "
+        "placeholder such as 'let us turn that into English'. Never create duplicate answers. " + language + lesson
     )
 
 
@@ -213,6 +217,8 @@ async def create_realtime_call(
         "instructions": _instructions(language_mode, lesson_id),
         "audio": {
             "input": {
+                "format": {"type": "audio/pcm", "rate": 24000},
+                "transcription": {"model": settings.openai_stt_model},
                 "turn_detection": {
                     "type": "server_vad",
                     "threshold": settings.realtime_vad_threshold,

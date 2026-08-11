@@ -13,6 +13,7 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
   const [error,setError]=useState("");
   const peer=useRef<RTCPeerConnection|undefined>(undefined);const stream=useRef<MediaStream|undefined>(undefined);const audio=useRef<HTMLAudioElement|undefined>(undefined);const channel=useRef<RTCDataChannel|undefined>(undefined);
   const context=useRef<Context|undefined>(undefined);const reconnects=useRef(0);const generation=useRef(0);const reconnectTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const scheduleReconnectRef=useRef<()=>void>(()=>undefined);
   const eventCallback=useRef(onEvent);const lastLearnerItem=useRef<string|undefined>(undefined);const persistence=useRef(Promise.resolve());
   useEffect(()=>{eventCallback.current=onEvent},[onEvent]);
 
@@ -57,8 +58,9 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
     const ctx=context.current;if(!ctx||reconnectTimer.current)return;
     if(reconnects.current>=MAX_RECONNECTS){release();context.current=undefined;setState("error");setError("Live voice is temporarily unavailable. Continue in standard voice or Text mode.");return}
     const attempt=reconnects.current++;setState("reconnecting");release();const run=++generation.current;
-    reconnectTimer.current=setTimeout(async()=>{reconnectTimer.current=undefined;const ok=await connect(ctx,false,run);if(!ok&&run===generation.current)scheduleReconnect()},RECONNECT_DELAYS[attempt]);
+    reconnectTimer.current=setTimeout(async()=>{reconnectTimer.current=undefined;const ok=await connect(ctx,false,run);if(!ok&&run===generation.current)scheduleReconnectRef.current()},RECONNECT_DELAYS[attempt]);
   },[connect,release]);
+  useEffect(()=>{scheduleReconnectRef.current=scheduleReconnect},[scheduleReconnect]);
 
   const start=useCallback(async(conversationId:string,languageMode:LanguageMode,lessonId?:string)=>{
     if(peer.current||context.current)return;const ctx={conversationId,languageMode,lessonId};context.current=ctx;reconnects.current=0;setState("connecting");setError("");const run=++generation.current;

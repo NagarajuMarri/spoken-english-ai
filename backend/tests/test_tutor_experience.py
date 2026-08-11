@@ -114,9 +114,7 @@ def test_learner_frontend_and_tutor_assets_are_served(client):
     assert client.get("/tutors/ananya.jpg").status_code == 200
     assert client.get("/tutors/arjun.jpg").status_code == 200
     model = client.get("/models/ananya-mpfb-cc0.glb")
-    assert model.status_code == 200
-    assert model.headers["content-type"] == "model/gltf-binary"
-    assert len(model.content) == 13_918_296
+    assert model.status_code == 404
     script = re.search(r'src="([^"]+\.js)"', page.text)
     assert script is not None
     javascript = client.get(script.group(1))

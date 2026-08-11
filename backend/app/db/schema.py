@@ -1,6 +1,6 @@
 """Database schema identifiers shared by runtime readiness and version evidence."""
 
-ALEMBIC_HEAD_REVISION = "0018_opening_turns"
+ALEMBIC_HEAD_REVISION = "0019_realtime_turns"
 
 
 def ensure_no_duplicate_subscriptions(connection) -> None:
