@@ -14,4 +14,5 @@ def safe_prompt_context(request) -> dict:
         "recent_corrections": request.recent_corrections,
         "response_limit": request.allowed_response_length,
         "safety_policy": request.safety_policy,
+        "correlation_id": request.correlation_id,
     }

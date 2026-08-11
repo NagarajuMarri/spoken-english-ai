@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from time import perf_counter
 from urllib import error, request as urllib_request
 
@@ -13,6 +14,9 @@ from backend.app.ai.exceptions import (
     ProviderUnavailable,
 )
 from backend.app.providers.tts.contracts import TextToSpeechResult
+
+
+logger = logging.getLogger("spoken_english.openai_speech")
 
 
 def _looks_like_mp3(value: bytes) -> bool:
@@ -49,9 +53,20 @@ class OpenAISpeechHTTPClient:
                 "Accept": "audio/mpeg",
             },
         )
+        dispatch_started = perf_counter()
         try:
             with self.opener(outgoing, timeout=values["timeout"]) as response:
-                return response.read(), response.headers.get_content_type()
+                dispatch_ms = (perf_counter() - dispatch_started) * 1000
+                read_started = perf_counter()
+                audio = response.read()
+                read_ms = (perf_counter() - read_started) * 1000
+                logger.info(
+                    "openai_speech_timing correlation_id=%s model=%s dispatch_headers_ms=%.3f "
+                    "body_read_ms=%.3f total_ms=%.3f bytes=%s",
+                    values["correlation_id"], values["model"], dispatch_ms, read_ms,
+                    (perf_counter() - dispatch_started) * 1000, len(audio),
+                )
+                return audio, response.headers.get_content_type()
         except TimeoutError as exc:
             raise ProviderTimeout("Speech synthesis timed out.") from exc
         except error.HTTPError as exc:
@@ -84,6 +99,7 @@ class OpenAICompatibleTTSProvider:
             response_format=self.response_format,
             speed=request.speaking_rate,
             timeout=self.timeout_seconds,
+            correlation_id=request.correlation_id,
         )
         if not _looks_like_mp3(audio):
             raise ProviderMalformedResponse("Speech provider returned invalid audio.")

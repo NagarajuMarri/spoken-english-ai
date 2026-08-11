@@ -309,7 +309,7 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
 
   test("desktop loads the bundled Ananya GLB into a real WebGL canvas", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.emulateMedia({ reducedMotion: "no-preference" });
     await installDeterministicMedia(page, 8);
     await installAuthenticatedApi(page);
     const modelResponsePromise = page.waitForResponse((response) => (
@@ -324,6 +324,8 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
     const canvas = page.getByTestId("ananya-3d-canvas");
     await expect(avatar).toHaveAttribute("data-renderer", "three", { timeout: 120_000 });
     await expect(avatar).toHaveAttribute("data-renderer-profile", "model", { timeout: 120_000 });
+    await expect.poll(async () => page.evaluate(() => window.__speakmateThreeMetrics
+      ?.some((metric) => metric.event === "renderer_performance") ?? false), { timeout: 30_000 }).toBe(true);
     await expect(canvas).toBeVisible();
     expect(await canvas.evaluate((element) => Boolean(
       (element as HTMLCanvasElement).getContext("webgl2")
@@ -335,7 +337,8 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
     expect(modelMetrics.some((metric) => metric.event === "model_loaded" && Number(metric.load_ms) > 0)).toBe(true);
     expect(modelMetrics.some((metric) => metric.event === "renderer_upgraded" && metric.profile === "model")).toBe(true);
     console.log("RC1_3D_MODEL_PERFORMANCE", modelMetrics.filter((metric) => (
-      metric.event === "model_loaded" || metric.event === "renderer_upgraded"
+      metric.event === "renderer_capability" || metric.event === "renderer_performance"
+        || metric.event === "model_loaded" || metric.event === "renderer_upgraded"
     )));
     await expect(page.getByRole("button", { name: "Start conversation" })).toBeEnabled();
   });

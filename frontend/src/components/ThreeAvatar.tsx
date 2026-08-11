@@ -112,6 +112,21 @@ export default function ThreeAvatar({
     renderer.shadowMap.enabled = !lowPower;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowPower ? 1 : 1.5));
+    const debugInfo = context.getExtension("WEBGL_debug_renderer_info") as {
+      UNMASKED_RENDERER_WEBGL: number;
+    } | null;
+    const rendererName = debugInfo
+      ? String(context.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) ?? "unknown")
+      : "unavailable";
+    engineeringDiagnosticInfo("speakmate_3d_metric", {
+      event: "renderer_capability",
+      renderer: rendererName.slice(0, 160),
+      software_rendering: /swiftshader|llvmpipe|software/i.test(rendererName),
+      webgl_version: context instanceof WebGL2RenderingContext ? 2 : 1,
+      device_pixel_ratio: window.devicePixelRatio || 1,
+      effective_pixel_ratio: renderer.getPixelRatio(),
+      profile: lowPower ? "lite" : "model-capable",
+    });
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(27, 1, 0.1, 30);
@@ -151,6 +166,8 @@ export default function ThreeAvatar({
     let firstRenderedAt = 0;
     let renderedFrames = 0;
     let frameRateReported = false;
+    const frameTimes: number[] = [];
+    let previousRenderedAt = 0;
 
     const reportReady = (profile: "model" | "lite") => {
       if (disposed || fatal) return;
@@ -213,6 +230,8 @@ export default function ThreeAvatar({
         }
         renderer.render(scene, camera);
         const renderedAt = performance.now();
+        if (previousRenderedAt > 0) frameTimes.push(renderedAt - previousRenderedAt);
+        previousRenderedAt = renderedAt;
         if (firstRenderedAt === 0) firstRenderedAt = renderedAt;
         renderedFrames += 1;
         const measurementWindowMs = renderedAt - firstRenderedAt;
@@ -221,10 +240,14 @@ export default function ThreeAvatar({
           const memory = (performance as Performance & {
             memory?: { usedJSHeapSize?: number };
           }).memory;
+          const orderedFrameTimes = [...frameTimes].sort((left, right) => left - right);
+          const p90FrameTime = orderedFrameTimes[Math.floor(orderedFrameTimes.length * 0.9)] ?? 0;
           engineeringDiagnosticInfo("speakmate_3d_metric", {
             event: "renderer_performance",
             average_fps: Math.round((renderedFrames / (measurementWindowMs / 1_000)) * 10) / 10,
             profile: modelRig ? "model" : "lite",
+            p10_fps: p90FrameTime > 0 ? Math.round((1000 / p90FrameTime) * 10) / 10 : null,
+            p90_frame_time_ms: Math.round(p90FrameTime * 10) / 10,
             memory_usage_mb: memory?.usedJSHeapSize === undefined
               ? null
               : Math.round((memory.usedJSHeapSize / (1024 * 1024)) * 10) / 10,

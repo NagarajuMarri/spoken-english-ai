@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     object_storage_secret_key: str = ""
     object_storage_retention_hours: int = 24
     openai_api_key: str = ""
+    openai_llm_fast_model: str = "gpt-4.1-mini"
     openai_llm_model: str = "gpt-5-mini"
     openai_llm_timeout_seconds: int = 45
     openai_llm_max_retries: int = 0
@@ -98,7 +99,7 @@ class Settings(BaseSettings):
     openai_llm_input_usd_per_million: float = 0.25
     openai_llm_cached_input_usd_per_million: float = 0.025
     openai_llm_output_usd_per_million: float = 2.0
-    openai_language_review_model: str = "gpt-5-mini"
+    openai_language_review_model: str = "gpt-4.1-mini"
     openai_language_review_timeout_seconds: int = 45
     openai_language_review_max_retries: int = 0
     openai_language_review_reasoning_effort: str = "minimal"

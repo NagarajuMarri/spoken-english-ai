@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import socket
-from time import sleep
+from time import perf_counter, sleep
 from typing import TypedDict
 from urllib import error, request as urllib_request
 
@@ -105,7 +105,10 @@ class OpenAIResponsesHTTPClient:
             "acknowledgement and one short continuation question. For a grammar error, give only the smallest "
             "useful correction, a short explanation, the corrected sentence, and a retry request. Give a longer "
             "explanation only when explicitly asked. Keep the combined spoken response under 45 words for a "
-            "normal turn and return well-formed NFC Unicode. Keep every field concise. Use null for "
+            "normal turn and return well-formed NFC Unicode. Keep every field concise. In learner-facing output "
+            "use only English Latin "
+            "script, Telugu characters U+0C00-U+0C7F, ordinary punctuation, and digits. Never emit Kannada, "
+            "Devanagari, Tamil, Malayalam, Arabic/Urdu, Cyrillic, Chinese, or other writing systems. Use null for "
             "correction fields when no correction is needed, and use empty arrays when there are no "
             "grammar or vocabulary suggestions. Never change learner-provided facts such as names, "
             "hometowns, cities, countries, prices, dates, quantities, occupations, or personal details, "
@@ -331,7 +334,7 @@ class OpenAIResponsesHTTPClient:
         reasoning_effort: str,
         max_output_tokens: int,
     ) -> AIConversationResponse:
-        payload = json.dumps({
+        payload_values = {
             "model": model,
             "instructions": self._instructions(context),
             "input": self._input(context),
@@ -343,10 +346,12 @@ class OpenAIResponsesHTTPClient:
                     "schema": TUTOR_RESPONSE_SCHEMA,
                 },
             },
-            "reasoning": {"effort": reasoning_effort},
             "max_output_tokens": max_output_tokens,
             "store": False,
-        }).encode()
+        }
+        if model.startswith("gpt-5"):
+            payload_values["reasoning"] = {"effort": reasoning_effort}
+        payload = json.dumps(payload_values).encode()
         outgoing = urllib_request.Request(
             self.endpoint,
             data=payload,
@@ -357,13 +362,24 @@ class OpenAIResponsesHTTPClient:
             },
         )
         value = None
+        dispatch_ms = 0.0
+        read_ms = 0.0
+        json_ms = 0.0
+        request_started = perf_counter()
         provider_requests = 0
         for attempt in range(max_retries + 1):
             provider_requests += 1
             try:
+                dispatch_started = perf_counter()
                 with self.opener(outgoing, timeout=timeout) as response:
+                    dispatch_ms += (perf_counter() - dispatch_started) * 1000
                     try:
-                        value = json.loads(response.read())
+                        read_started = perf_counter()
+                        response_body = response.read()
+                        read_ms += (perf_counter() - read_started) * 1000
+                        json_started = perf_counter()
+                        value = json.loads(response_body)
+                        json_ms += (perf_counter() - json_started) * 1000
                     except (json.JSONDecodeError, TypeError) as exc:
                         raise ProviderMalformedResponse(
                             "OpenAI response body was malformed.",
@@ -402,7 +418,9 @@ class OpenAIResponsesHTTPClient:
                 provider_requests=provider_requests,
             )
         self._log_response_shape(value)
+        schema_started = perf_counter()
         content = self._structured_content(value, provider_requests)
+        schema_ms = (perf_counter() - schema_started) * 1000
         usage = value.get("usage") or {}
         input_details = usage.get("input_tokens_details") or {}
         content["provider_metadata_reference"] = (
@@ -416,12 +434,23 @@ class OpenAIResponsesHTTPClient:
         }
         input_units, output_units = self._usage(value)
         try:
-            return validate_provider_output(
+            validation_started = perf_counter()
+            validated = validate_provider_output(
                 content,
                 provider_requests=provider_requests,
                 input_units=input_units,
                 output_units=output_units,
             )
+            validation_ms = (perf_counter() - validation_started) * 1000
+            logger.info(
+                "openai_response_timing correlation_id=%s model=%s dispatch_headers_ms=%.3f "
+                "body_read_ms=%.3f json_parse_ms=%.3f schema_extract_ms=%.3f "
+                "validation_ms=%.3f total_ms=%.3f provider_requests=%s",
+                context["correlation_id"], model, dispatch_ms, read_ms, json_ms,
+                schema_ms, validation_ms, (perf_counter() - request_started) * 1000,
+                provider_requests,
+            )
+            return validated
         except ProviderError as exc:
             self._log_response_shape(
                 value,

@@ -598,7 +598,6 @@ def ai_turn(
         ) from exc
     usage = UsageService(session)
     tutor = get_tutor(principal.learner.preferred_tutor_id or "ananya")
-    provider = request.app.state.llm_provider
     turn_key = idempotency_key or request.state.request_id
     attempts = AITurnAttemptRepository(session)
     previous_attempt = attempts.latest_completed(conversation.id)
@@ -607,6 +606,16 @@ def ai_turn(
         if previous_attempt is not None else None
     )
     learner_intent = classify_learner_intent(learner_message, previous_result)
+    complex_intents = {
+        LearnerIntent.EXPLANATION,
+        LearnerIntent.GUIDED_ROLEPLAY,
+        LearnerIntent.LANGUAGE_CHANGE,
+    }
+    configured_provider = getattr(request.app.state, "llm_default_provider", None)
+    provider_was_overridden = request.app.state.llm_provider is not configured_provider
+    provider = request.app.state.llm_provider
+    if learner_intent not in complex_intents and not provider_was_overridden:
+        provider = getattr(request.app.state, "llm_fast_provider", provider)
     language_decision = resolve_explanation_language(learner_message, default_language_mode)
     if language_decision.persist_mode is not None:
         principal.learner.language_mode = language_decision.persist_mode.value

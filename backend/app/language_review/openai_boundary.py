@@ -109,7 +109,7 @@ class OpenAILanguageReviewHTTPClient:
         reasoning_effort: str,
         max_output_tokens: int,
     ) -> LanguageReviewResult:
-        payload = json.dumps({
+        payload_values = {
             "model": model,
             "instructions": self._instructions(),
             "input": [{"role": "user", "content": self._input(review_request)}],
@@ -121,10 +121,12 @@ class OpenAILanguageReviewHTTPClient:
                     "schema": LANGUAGE_REVIEW_SCHEMA,
                 },
             },
-            "reasoning": {"effort": reasoning_effort},
             "max_output_tokens": max_output_tokens,
             "store": False,
-        }, ensure_ascii=False).encode()
+        }
+        if model.startswith("gpt-5"):
+            payload_values["reasoning"] = {"effort": reasoning_effort}
+        payload = json.dumps(payload_values, ensure_ascii=False).encode()
         outgoing = urllib_request.Request(
             self.endpoint,
             data=payload,

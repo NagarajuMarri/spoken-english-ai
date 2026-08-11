@@ -202,6 +202,37 @@ def test_responses_client_accepts_multiple_output_items_and_nullable_fields(capl
     assert "content_item_types=output_text" in caplog.text
 
 
+def test_fast_non_reasoning_model_omits_reasoning_parameter():
+    captured = {}
+    content = _content()
+    content.pop("provider_metadata_reference")
+    content.pop("usage")
+
+    def opener(outgoing, timeout):
+        assert timeout == 45
+        captured["body"] = json.loads(outgoing.data)
+        return _HTTPResponse({
+            "id": "resp_fast_model",
+            "model": "gpt-4.1-mini-2025-04-14",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": json.dumps(content)}],
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 10},
+        })
+
+    provider = OpenAICompatibleAIProvider(
+        OpenAIResponsesHTTPClient("secret-key", opener),
+        model="gpt-4.1-mini",
+        max_retries=0,
+    )
+    provider.generate(_request())
+
+    assert captured["body"]["model"] == "gpt-4.1-mini"
+    assert "reasoning" not in captured["body"]
+
+
 def test_responses_client_classifies_refusal_separately_without_logging_content(caplog):
     caplog.set_level(logging.INFO, logger="spoken_english.openai_responses")
     refusal_text = "private refusal explanation"
@@ -844,3 +875,10 @@ def test_llm_provider_configuration_fails_closed_outside_tests():
     assert provider.name == "openai-compatible"
     assert provider.reasoning_effort == "minimal"
     assert provider.max_output_tokens == 1024
+    fast_provider = build_llm_provider(Settings(
+        environment="test",
+        llm_provider="openai",
+        openai_api_key="test-key",
+        _env_file=None,
+    ), fast=True)
+    assert fast_provider.model == "gpt-4.1-mini"

@@ -82,6 +82,8 @@ def create_app(settings=None) -> FastAPI:
         application.state.password_reset_job_queue,
     )
     application.state.llm_provider = build_llm_provider(settings)
+    application.state.llm_default_provider = application.state.llm_provider
+    application.state.llm_fast_provider = build_llm_provider(settings, fast=True)
     application.state.speech_to_text_provider = build_speech_to_text_provider(settings)
     application.state.text_to_speech_provider = build_text_to_speech_provider(settings)
     application.state.language_review_provider = build_language_review_provider(settings)
