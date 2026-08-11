@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import secrets
 import urllib.error
 import urllib.request
@@ -14,6 +15,7 @@ from backend.app.db.session import get_db
 from backend.app.services.conversations import ConversationService
 
 router = APIRouter(prefix="/api/v1/realtime", tags=["realtime"])
+logger = logging.getLogger("spoken_english.realtime")
 
 
 @router.get("/capability")
@@ -105,6 +107,7 @@ async def create_realtime_call(
         with urllib.request.urlopen(upstream, timeout=settings.openai_realtime_connect_timeout_seconds) as result:
             answer = result.read(settings.realtime_sdp_max_bytes)
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+        logger.warning("realtime_connection_failed request_id=%s upstream_status=%s", getattr(request.state, "request_id", "unknown"), getattr(exc, "code", "connection"))
         raise AppError(status.HTTP_503_SERVICE_UNAVAILABLE, "realtime_unavailable", "Live voice is temporarily unavailable. Use text mode or retry.", retryable=True) from exc
     if not answer or b"v=" not in answer[:100]:
         raise AppError(status.HTTP_502_BAD_GATEWAY, "realtime_invalid_answer", "Live voice is temporarily unavailable. Use text mode or retry.", retryable=True)

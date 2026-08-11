@@ -41,10 +41,6 @@ header{display:flex;align-items:center;gap:1rem;padding:1rem 4vw;border-bottom:1
 .thinking .thinking-dots{display:flex}.thinking-dots i{display:block;width:8px;height:8px;border-radius:50%;background:#fff;animation:thinking-dot 1s ease-in-out infinite}.thinking-dots i:nth-child(2){animation-delay:.15s}.thinking-dots i:nth-child(3){animation-delay:.3s}
 .speaking .speaking-wave{display:flex;height:34px}.speaking-wave i{display:block;width:4px;height:10px;border-radius:4px;background:#b9f0dd;animation:speaking-bar .55s ease-in-out infinite alternate}.speaking-wave i:nth-child(2),.speaking-wave i:nth-child(4){animation-delay:.11s}.speaking-wave i:nth-child(3){animation-delay:.22s}
 .avatar-sync-evidence{margin:.9rem auto 0;max-width:500px;padding:.65rem .8rem;border-radius:12px;background:#edf1ec;color:#36534c;line-height:1.35}.avatar-sync-evidence small{color:#536761}
-.three-avatar-canvas{position:absolute;z-index:1;inset:0;display:block;width:100%;height:100%;background:radial-gradient(circle at 50% 28%,#f9eee3 0,#d9e9e4 48%,#89b2a8 100%)}
-.avatar[data-renderer="three"]{background:#a8cfc4}
-.avatar[data-renderer="three"]::after{content:"";position:absolute;z-index:2;inset:auto 0 0;height:22%;pointer-events:none;background:linear-gradient(transparent,#15352f2b)}
-.avatar[data-renderer="three"] figcaption{z-index:4}
 .start-conversation-gate{max-width:520px;margin:0 auto;padding:1.15rem 1.35rem;border:1px solid #b8cfc6;border-radius:18px;background:#f7fbf8;text-align:center}.start-conversation-gate strong{display:block;font:700 1.2rem Georgia,serif}.start-conversation-gate p{margin:.55rem 0 1rem;color:#536761}.start-conversation-gate button{min-width:210px}.voice-control-dock.prestart{display:block}.voice-control-dock.prestart .tutor-audio{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 @keyframes natural-blink{0%,45%,49%,100%{height:0}47%{height:2.2%}}
 @keyframes listening-pulse{50%{box-shadow:0 0 0 5px #fffdf8,0 0 0 14px #c84e3344}}

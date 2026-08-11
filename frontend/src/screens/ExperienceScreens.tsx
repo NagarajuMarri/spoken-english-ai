@@ -239,7 +239,7 @@ export function ConversationScreen({
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [feedback, setFeedback] = useState({ grammar: "", incorrect: "", corrected: "", words: [] as string[], telugu: "" });
   const [consent, setConsent] = useState(false);
-  const [realtimeAvailable, setRealtimeAvailable] = useState(false);
+  const [realtimeAvailable, setRealtimeAvailable] = useState<boolean | null>(null);
   const reduced = usePrefersReducedMotion();
   const {
     presentation,
@@ -399,12 +399,12 @@ export function ConversationScreen({
   }, [dispatch, id, lastExpression]);
 
   useEffect(() => {
-    if (!id || !openingTurnId || !openingPrompt || openingSpeechRequested.current === openingTurnId) return;
+    if (realtimeAvailable !== false || !id || !openingTurnId || !openingPrompt || openingSpeechRequested.current === openingTurnId) return;
     openingSpeechRequested.current = openingTurnId;
     setLastSpeechTurn(openingTurnId);
     setSpokenText(openingPrompt);
     void loadSpeech(openingTurnId, "NEUTRAL");
-  }, [id, loadSpeech, openingPrompt, openingTurnId]);
+  }, [id, loadSpeech, openingPrompt, openingTurnId, realtimeAvailable]);
 
   const startConversation = async () => {
     if (conversationStarted || startBusyRef.current) return;
@@ -417,10 +417,15 @@ export function ConversationScreen({
     setConsent(true);
     try {
       stopAudio();
-      if (realtimeAvailable && typeof RTCPeerConnection !== "undefined" && await realtime.start(id, selectedLanguageMode, activeLesson?.lesson.id)) {
-        setAudioError("");
-        setConversationStarted(true);
-        setGreetingCompleted(true);
+      if (realtimeAvailable && typeof RTCPeerConnection !== "undefined") {
+        if (await realtime.start(id, selectedLanguageMode, activeLesson?.lesson.id)) {
+          setAudioError("");
+          setConversationStarted(true);
+          setGreetingCompleted(true);
+          return;
+        }
+        setRealtimeAvailable(false);
+        setAudioError("Hands-free voice could not connect. A standard voice fallback is preparing; select Start conversation to retry.");
         return;
       }
       const started = await playAudio();
@@ -709,7 +714,7 @@ export function ConversationScreen({
             {!conversationStarted ? <section className="start-conversation-gate" aria-label="Start live lesson">
               <strong>{speech ? `${tutor.display_name} is ready.` : `Preparing ${tutor.display_name}…`}</strong>
               <p>Start once to allow microphone processing and continue hands-free. You can end or mute anytime.</p>
-              <button type="button" disabled={!id || !speech || !avatarReady || audioBusy || startBusy} onClick={() => void startConversation()}>
+              <button type="button" disabled={!id || realtimeAvailable === null || (!realtimeAvailable && !speech) || !avatarReady || audioBusy || startBusy} onClick={() => void startConversation()}>
                 {startBusy ? "Starting…" : "Start conversation"}
               </button>
               {audioError && !speech && <button type="button" className="secondary" onClick={continueWithoutOpeningAudio}>Continue without audio</button>}
