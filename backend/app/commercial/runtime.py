@@ -50,15 +50,76 @@ class RuntimeEntitlementService:
                 0,
                 ceil((self._aware(subscription.current_period_end) - self.now).total_seconds() / 86_400),
             )
+        active_features = [
+            "AI tutor conversations",
+            "40 structured English lessons",
+            "Progress and practice history",
+        ]
+        if entitlements.pronunciation_coaching:
+            active_features.extend(("Pronunciation coaching", "Vocabulary coaching"))
+        plans = [
+            {
+                "code": PlanId.FREE.value,
+                "name": "Free",
+                "price_inr": 0,
+                "billing_period": "No charge",
+                "features": [
+                    f"{self.config.free_daily_conversations} AI tutor conversations each day",
+                    f"{self.config.free_daily_voice_minutes} voice minutes each day",
+                    "40 structured English lessons",
+                    "Basic progress tracking",
+                ],
+            },
+            {
+                "code": PlanId.PREMIUM_MONTHLY.value,
+                "name": "Premium Monthly",
+                "price_inr": self.config.monthly_price_inr,
+                "billing_period": "per month",
+                "features": [
+                    f"Up to {self.config.premium_fair_use_daily_requests} tutor requests each day",
+                    f"{self.config.premium_voice_minutes} voice minutes each day",
+                    "All structured lessons and tutor choices",
+                    "Detailed progress and conversation history",
+                    "Pronunciation and vocabulary coaching",
+                ],
+            },
+            {
+                "code": PlanId.PREMIUM_YEARLY.value,
+                "name": "Premium Yearly",
+                "price_inr": self.config.yearly_price_inr,
+                "billing_period": "per year",
+                "features": [
+                    "Everything in Premium Monthly",
+                    f"{self.config.premium_voice_minutes} voice minutes each day",
+                    "One annual billing period",
+                ],
+            },
+        ]
         return {
             "plan_id": plan.value,
+            "plan_name": next(item["name"] for item in plans if item["code"] == plan.value),
             "status": public_status,
             "trial_remaining_days": remaining_days,
             "payment_mode": payment_mode,
+            "started_at": (
+                self._aware(subscription.trial_started_at or subscription.created_at).isoformat()
+                if subscription is not None else None
+            ),
+            "current_period_end": (
+                self._aware(subscription.current_period_end).isoformat()
+                if subscription is not None else None
+            ),
             "entitlements": {
                 "daily_conversations": entitlements.maximum_daily_conversations,
                 "voice_minutes": entitlements.voice_minutes,
+                "progress_history": entitlements.progress_analytics or plan == PlanId.FREE,
+                "conversation_history": entitlements.conversation_history,
             },
+            "active_features": active_features,
+            "available_plans": plans,
+            "can_start_trial": subscription is None,
+            "can_preview_upgrade": payment_mode == "test",
+            "payment_notice": "Closed-beta payment preview only. No real subscription or charge will be created.",
             "fair_use": "Daily limits are measured and enforced by the server; text review remains available when voice allowance ends.",
         }
 

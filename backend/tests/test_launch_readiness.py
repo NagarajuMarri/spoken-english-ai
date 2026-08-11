@@ -65,14 +65,24 @@ def test_subscription_uses_configured_entitlements_and_expires_trial(client, lea
 
     free = client.get("/api/v1/launch/subscription")
     assert free.status_code == 200
-    assert free.json()["entitlements"] == {"daily_conversations": 7, "voice_minutes": 9}
+    assert free.json()["entitlements"] == {
+        "daily_conversations": 7,
+        "voice_minutes": 9,
+        "progress_history": True,
+        "conversation_history": False,
+    }
 
     started = client.post("/api/v1/launch/subscription/trial")
     assert started.status_code == 201
     trial = client.get("/api/v1/launch/subscription").json()
     assert trial["status"] == "TRIAL"
     assert trial["trial_remaining_days"] == client.app.state.settings.commercial_trial_days
-    assert trial["entitlements"] == {"daily_conversations": 41, "voice_minutes": 88}
+    assert trial["entitlements"] == {
+        "daily_conversations": 41,
+        "voice_minutes": 88,
+        "progress_history": True,
+        "conversation_history": True,
+    }
     assert client.post("/api/v1/launch/subscription/trial").status_code == 409
 
     with client.app.state.session_factory() as session:
@@ -85,7 +95,12 @@ def test_subscription_uses_configured_entitlements_and_expires_trial(client, lea
     expired = client.get("/api/v1/launch/subscription").json()
     assert expired["status"] == "EXPIRED"
     assert expired["trial_remaining_days"] == 0
-    assert expired["entitlements"] == {"daily_conversations": 7, "voice_minutes": 9}
+    assert expired["entitlements"] == {
+        "daily_conversations": 7,
+        "voice_minutes": 9,
+        "progress_history": False,
+        "conversation_history": False,
+    }
     with client.app.state.session_factory() as session:
         assert session.scalar(select(CommercialAuditEvent).where(
             CommercialAuditEvent.action == "TRIAL_EXPIRED"
@@ -108,6 +123,8 @@ def test_past_due_active_subscription_loses_premium_entitlements(client, learner
     assert body["entitlements"] == {
         "daily_conversations": client.app.state.commercial_service.config.free_daily_conversations,
         "voice_minutes": client.app.state.commercial_service.config.free_daily_voice_minutes,
+        "progress_history": False,
+        "conversation_history": False,
     }
     with client.app.state.session_factory() as session:
         item = session.scalar(select(CommercialSubscription))
