@@ -257,7 +257,22 @@ export function ConversationScreen({
     attachAudioTransport(player);
   }, [attachAudioTransport]);
   const realtimePlaybackId = useRef("realtime-ananya");
-  const realtime = useRealtimeVoice();
+  const handleRealtimeEvent = useCallback((event: { type: string; itemId?: string }) => {
+    if (event.type !== "conversation.item.input_audio_transcription.completed" || !event.itemId || !id) return;
+    const learnerItemId = event.itemId;
+    void (async () => {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        try {
+          const result = await api.realtimeTurn(id, learnerItemId);
+          if (result.analysis_status !== "COMPLETED") continue;
+          setFeedback((current) => ({ ...current, grammar: result.correction_summary || "" }));
+          return;
+        } catch { /* The durable event or its background analysis may not be visible yet. */ }
+      }
+    })();
+  }, [id]);
+  const realtime = useRealtimeVoice(handleRealtimeEvent);
   useEffect(() => {
     if (realtime.state === "listening") dispatch({ type: "MICROPHONE_STARTED" });
     if (realtime.state === "thinking") dispatch({ type: "TUTOR_PROCESSING_STARTED" });
@@ -267,6 +282,11 @@ export function ConversationScreen({
       dispatch({ type: "AUDIO_PLAYBACK_STARTED", playbackId: realtimePlaybackId.current });
     }
   }, [dispatch, realtime.state]);
+  useEffect(() => {
+    if (realtime.state !== "error" || !realtime.error) return;
+    setAudioError(realtime.error);
+    setRealtimeAvailable(false);
+  }, [realtime.error, realtime.state]);
   const conversationSessionKey = `${account.learner_id}:${tutor.tutor_id}`;
 
   useEffect(() => {

@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import type { LanguageMode } from "../models";
 
 export type RealtimeVoiceState = "idle" | "connecting" | "listening" | "thinking" | "speaking" | "reconnecting" | "error";
-export interface RealtimeVoiceEvent { type:string; transcript?:string; responseId?:string; at:number }
+export interface RealtimeVoiceEvent { type:string; transcript?:string; responseId?:string; itemId?:string; at:number }
 type Context={conversationId:string;languageMode:LanguageMode;lessonId?:string};
 const MAX_RECONNECTS=2;
 const RECONNECT_DELAYS=[400,900];
@@ -46,7 +46,7 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
         if(type==="conversation.item.input_audio_transcription.completed"&&itemId&&transcript){lastLearnerItem.current=itemId;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"learner_transcript",learner_item_id:itemId,transcript})).then(()=>undefined).catch(()=>undefined)}
         if(type==="response.output_audio_transcript.done"&&lastLearnerItem.current&&responseId&&transcript){const learnerItem=lastLearnerItem.current;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"tutor_transcript",learner_item_id:learnerItem,response_id:responseId,transcript})).then(()=>undefined).catch(()=>undefined)}
         if((type==="response.cancelled"||(type==="response.done"&&(event.response as {status?:string}|undefined)?.status==="cancelled"))&&lastLearnerItem.current){const learnerItem=lastLearnerItem.current;persistence.current=persistence.current.then(()=>api.realtimeEvent(ctx.conversationId,{event_type:"tutor_interrupted",learner_item_id:learnerItem,response_id:responseId})).then(()=>undefined).catch(()=>undefined)}
-        eventCallback.current?.({type,transcript,responseId,at:performance.now()});
+        eventCallback.current?.({type,transcript,responseId,itemId,at:performance.now()});
       };
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);const answerSdp=await api.realtimeCall(ctx.conversationId,ctx.languageMode,ctx.lessonId,offer.sdp??"");
       if(run!==generation.current){release();return false}await pc.setRemoteDescription({type:"answer",sdp:answerSdp});setState("listening");return true;
@@ -55,7 +55,7 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
 
   const scheduleReconnect=useCallback(()=>{
     const ctx=context.current;if(!ctx||reconnectTimer.current)return;
-    if(reconnects.current>=MAX_RECONNECTS){release();context.current=undefined;setState("error");setError("Hands-free voice disconnected. Retry or use text mode.");return}
+    if(reconnects.current>=MAX_RECONNECTS){release();context.current=undefined;setState("error");setError("Live voice is temporarily unavailable. Continue in standard voice or Text mode.");return}
     const attempt=reconnects.current++;setState("reconnecting");release();const run=++generation.current;
     reconnectTimer.current=setTimeout(async()=>{reconnectTimer.current=undefined;const ok=await connect(ctx,false,run);if(!ok&&run===generation.current)scheduleReconnect()},RECONNECT_DELAYS[attempt]);
   },[connect,release]);

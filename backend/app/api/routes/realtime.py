@@ -15,7 +15,7 @@ from backend.app.core.operations import enforce_rate_limit
 from backend.app.core.security import Principal, current_principal, ensure_owner
 from backend.app.db.session import get_db
 from backend.app.integrations.llm import RuleBasedLLMProvider
-from backend.app.models import RealtimeTurn
+from backend.app.models import ConversationMessage, RealtimeTurn
 from backend.app.repositories.conversations import ConversationRepository, TurnSequenceConflict
 from backend.app.services.conversations import ConversationService
 from backend.app.unicode_safety import UnicodeSafetyError, normalize_input_text, normalize_output_text
@@ -41,7 +41,13 @@ def _analyse_realtime_turn(session_factory, turn_id: str) -> None:
             result = RuleBasedLLMProvider().generate_tutor_response(turn.learner_transcript, False)
             turn.correction_summary = result.correction
             turn.analysis_status = "COMPLETED"
+            if turn.conversation_message_id:
+                message = db.get(ConversationMessage, turn.conversation_message_id)
+                if message is not None:
+                    message.correction_summary = turn.correction_summary
             db.commit()
+            if turn.tutor_status == "COMPLETED":
+                _mirror_completed_turn(db, turn)
         except Exception:
             db.rollback()
             logger.exception("realtime_turn_analysis_failed turn_id=%s", turn_id)
@@ -121,6 +127,29 @@ def persist_realtime_event(
             db.commit()
             _mirror_completed_turn(db, turn)
     return {"accepted": True, "turn_id": turn.id, "analysis_status": turn.analysis_status}
+
+
+@router.get("/turns/{learner_item_id}")
+def get_realtime_turn(
+    learner_item_id: str,
+    conversation_id: str = Query(min_length=1, max_length=100),
+    principal: Principal = Depends(current_principal),
+    db: Session = Depends(get_db),
+):
+    conversation = ConversationService(db).get(conversation_id)
+    ensure_owner(conversation.learner_id, principal)
+    turn = db.scalar(select(RealtimeTurn).where(
+        RealtimeTurn.conversation_id == conversation_id,
+        RealtimeTurn.learner_item_id == learner_item_id,
+    ))
+    if turn is None:
+        raise AppError(status.HTTP_404_NOT_FOUND, "realtime_turn_not_found", "The live turn is still being processed.", retryable=True)
+    return {
+        "turn_id": turn.id,
+        "analysis_status": turn.analysis_status,
+        "correction_summary": turn.correction_summary,
+        "tutor_status": turn.tutor_status,
+    }
 
 
 @router.get("/capability")

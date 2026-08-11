@@ -84,4 +84,13 @@ describe("hands-free realtime voice",()=>{
     expect(api.realtimeCall).toHaveBeenCalledTimes(2);act(()=>FakePeer.last.channel.onopen?.());expect(FakePeer.last.channel.sent).toHaveLength(0);
     expect(FakePeer.instances).toHaveLength(2);vi.useRealTimers();
   });
+
+  it("stops after two reconnect attempts with a degraded-mode message",async()=>{
+    vi.useFakeTimers();vi.spyOn(api,"realtimeCall").mockResolvedValueOnce("v=0\r\no=answer").mockRejectedValue(new Error("offline"));
+    const{result}=renderHook(()=>useRealtimeVoice());await act(async()=>{await result.current.start("conversation-1","ENGLISH")});
+    act(()=>{FakePeer.last.connectionState="failed";FakePeer.last.onconnectionstatechange?.()});
+    await act(async()=>{await vi.runAllTimersAsync()});
+    expect(result.current.state).toBe("error");
+    expect(api.realtimeCall).toHaveBeenCalledTimes(3);expect(result.current.error).toContain("standard voice or Text mode");vi.useRealTimers();
+  });
 });
