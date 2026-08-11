@@ -194,10 +194,10 @@ test("real MediaRecorder bytes become a transcript and learner message", async (
   await page.goto("/app/conversation");
   await page.getByLabel(/consent to voice processing/).check();
   await page.getByRole("button", { name: "Start microphone" }).click();
-  await expect(page.getByText("Listening", { exact: true })).toBeAttached({ timeout: 30_000 });
+  await expect(page.getByText(/Listening — pause when you finish/)).toBeAttached({ timeout: 30_000 });
   await expect(page.locator(".avatar")).toHaveAttribute("data-state", "LISTENING");
   await page.waitForTimeout(750);
-  await page.getByRole("button", { name: "Stop and transcribe" }).click();
+  await page.getByRole("button", { name: "Stop and transcribe now" }).click();
   await expect(page.getByLabel("Latest recognized transcript")).toContainText("I practise English every morning.");
   expect(capturedBytes).toBeGreaterThan(0);
   expect(submitted).toBe("I practise English every morning.");

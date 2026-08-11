@@ -578,7 +578,7 @@ export function ConversationScreen({
     unavailable: "Microphone unavailable",
     idle: "Microphone ready",
     requesting_permission: "Waiting for microphone permission",
-    recording: "Listening",
+    recording: "Listening — pause when you finish and I’ll respond",
     processing: "Processing speech",
     denied: "Microphone permission denied",
     no_speech: "No speech detected",
@@ -690,10 +690,10 @@ export function ConversationScreen({
             </section> : <fieldset className="microphone-controls">
               <legend>Speak to {tutor.display_name}</legend>
               <label className="voice-consent"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /> I consent to voice processing for this turn</label>
-              <p className={practiceMode === "VOICE" ? "sr-only" : "microphone-state"} aria-live="polite">{microphoneStatus}</p>
+              <p className="microphone-state" aria-live="polite">{microphoneStatus}</p>
               <div className="microphone-actions">
                 <button aria-label={startMicrophoneLabel} disabled={!consent || !id || turnBusy || transcriptionBusy || mic.state === "recording" || mic.state === "processing"} onClick={() => void startMicrophone()}>{mic.state === "denied" ? "Retry microphone" : "🎤 Speak"}</button>
-                <button aria-label="Stop and transcribe" disabled={mic.state !== "recording"} onClick={mic.stop}>■ Stop</button>
+                <button aria-label="Stop and transcribe now" disabled={mic.state !== "recording"} onClick={mic.stop}>■ Respond now</button>
                 <button aria-label="Cancel recording" disabled={mic.state !== "recording"} onClick={cancelMicrophone}>Cancel</button>
               </div>
               {microphoneError && <p role="alert">{microphoneError} {mic.state === "denied" && "Enable microphone access in your browser settings, then retry."}</p>}

@@ -216,20 +216,18 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
       const experience = page.locator(".conversation-experience");
       const lesson = page.getByRole("region", { name: "Ananya live lesson" });
       const avatar = page.locator(".avatar");
-      const canvas = page.getByTestId("ananya-3d-canvas");
+      const portrait = avatar.getByRole("img", { name: /friendly Indian-English tutor/ });
       const exchange = page.getByRole("region", { name: "Current conversation" });
       const dock = page.locator(".voice-control-dock");
       const start = page.getByRole("button", { name: "Start conversation" });
 
       await expect(page.getByText("A confident morning routine")).toBeVisible();
       await expect(page.getByLabel("Current tutor response")).toContainText(openingPrompt, { timeout: 30_000 });
-      await expect(avatar).toHaveAttribute("data-renderer", "three", { timeout: 30_000 });
-      await expect(avatar).toHaveAttribute("data-renderer-profile", "lite", { timeout: 30_000 });
-      await expect(canvas).toBeVisible();
-      expect(await canvas.evaluate((element) => Boolean(
-        (element as HTMLCanvasElement).getContext("webgl2")
-          ?? (element as HTMLCanvasElement).getContext("webgl"),
-      ))).toBe(true);
+      await expect(avatar).toHaveAttribute("data-renderer", "portrait", { timeout: 30_000 });
+      await expect(avatar).toHaveAttribute("data-renderer-profile", "portrait", { timeout: 30_000 });
+      await expect(portrait).toBeVisible();
+      await expect(portrait).toHaveAttribute("src", "/tutors/ananya-2d-v2.png");
+      await expect(page.locator("canvas")).toHaveCount(0);
       if (width === 390) {
         const modeSwitchBox = await page.locator(".practice-mode-switch").boundingBox();
         const lessonContextBox = await page.locator(".lesson-context").boundingBox();
@@ -257,7 +255,7 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
 
       const microphone = page.getByRole("group", { name: "Speak to Ananya" });
       const startMicrophone = page.getByRole("button", { name: "Start microphone" });
-      const stopMicrophone = page.getByRole("button", { name: "Stop and transcribe" });
+      const stopMicrophone = page.getByRole("button", { name: "Stop and transcribe now" });
       const replay = page.getByRole("button", { name: "Replay tutor voice" });
       const mute = page.getByRole("button", { name: "Mute tutor voice" });
       await expect(microphone).toBeVisible();
@@ -297,49 +295,23 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
       await page.getByRole("button", { name: "Voice mode" }).click();
       expect(await page.evaluate(() => window.__speakmateMediaPlayCalls?.length ?? -1)).toBe(1);
       expect(apiProbe.speechRequests()).toBe(1);
-      await expect.poll(async () => page.evaluate(() => window.__speakmateThreeMetrics
-        ?.some((metric) => metric.event === "renderer_performance") ?? false), { timeout: 10_000 }).toBe(true);
-      const rendererPerformance = await page.evaluate(() => window.__speakmateThreeMetrics
-        ?.find((metric) => metric.event === "renderer_performance"));
-      expect(rendererPerformance?.average_fps).toBeGreaterThan(0);
-      expect(rendererPerformance?.average_fps).toBeLessThanOrEqual(35);
-      console.log(`RC1_3D_${viewportName.toUpperCase()}_PERFORMANCE`, rendererPerformance);
+      expect(await portrait.evaluate((image) => (image as HTMLImageElement).complete)).toBe(true);
     });
   }
 
-  test("desktop loads the bundled Ananya GLB into a real WebGL canvas", async ({ page }) => {
+  test("desktop loads the polished Ananya portrait without a WebGL dependency", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await installDeterministicMedia(page, 8);
     await installAuthenticatedApi(page);
-    const modelResponsePromise = page.waitForResponse((response) => (
-      new URL(response.url()).pathname.endsWith("/models/ananya-mpfb-cc0.glb") && response.ok()
-    ));
-
     await page.goto("/app/conversation");
-    const modelResponse = await modelResponsePromise;
-    expect(Number(modelResponse.headers()["content-length"])).toBeGreaterThan(1_000_000);
-
     const avatar = page.locator(".avatar");
-    const canvas = page.getByTestId("ananya-3d-canvas");
-    await expect(avatar).toHaveAttribute("data-renderer", "three", { timeout: 120_000 });
-    await expect(avatar).toHaveAttribute("data-renderer-profile", "model", { timeout: 120_000 });
-    await expect.poll(async () => page.evaluate(() => window.__speakmateThreeMetrics
-      ?.some((metric) => metric.event === "renderer_performance") ?? false), { timeout: 30_000 }).toBe(true);
-    await expect(canvas).toBeVisible();
-    expect(await canvas.evaluate((element) => Boolean(
-      (element as HTMLCanvasElement).getContext("webgl2")
-        ?? (element as HTMLCanvasElement).getContext("webgl"),
-    ))).toBe(true);
-    const renderedModel = await canvas.screenshot({ path: "test-results/rc1-voice-model.png" });
-    expect(renderedModel.byteLength).toBeGreaterThan(10_000);
-    const modelMetrics = await page.evaluate(() => window.__speakmateThreeMetrics ?? []);
-    expect(modelMetrics.some((metric) => metric.event === "model_loaded" && Number(metric.load_ms) > 0)).toBe(true);
-    expect(modelMetrics.some((metric) => metric.event === "renderer_upgraded" && metric.profile === "model")).toBe(true);
-    console.log("RC1_3D_MODEL_PERFORMANCE", modelMetrics.filter((metric) => (
-      metric.event === "renderer_capability" || metric.event === "renderer_performance"
-        || metric.event === "model_loaded" || metric.event === "renderer_upgraded"
-    )));
+    const portrait = avatar.getByRole("img", { name: /friendly Indian-English tutor/ });
+    await expect(avatar).toHaveAttribute("data-renderer", "portrait");
+    await expect(portrait).toBeVisible();
+    const renderedPortrait = await avatar.screenshot({ path: "test-results/rc1-voice-portrait.png" });
+    expect(renderedPortrait.byteLength).toBeGreaterThan(10_000);
+    await expect(page.locator("canvas")).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Start conversation" })).toBeEnabled();
   });
 });

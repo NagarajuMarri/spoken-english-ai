@@ -47,9 +47,9 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    expect(screen.getByText("Listening", { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText(/Listening — pause when you finish/, { selector: "p" })).toBeInTheDocument();
     await waitFor(()=>expect(screen.getByLabelText(/tutor status: listening/)).toHaveAttribute("data-state", "LISTENING"));
-    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
+    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe now"}));
     await waitFor(()=>expect(api.transcribe).toHaveBeenCalledOnce());
     const capture=vi.mocked(api.transcribe).mock.calls[0][1];
     expect(capture.blob.size).toBeGreaterThan(0);
@@ -70,7 +70,7 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
+    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe now"}));
     expect(await screen.findByRole("alert")).toHaveTextContent("No clear speech was detected.");
     expect(screen.queryByRole("button",{name:"Retry transcription"})).not.toBeInTheDocument();
     expect(screen.queryByRole("button",{name:"Discard recording"})).not.toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
+    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe now"}));
     expect(await screen.findByRole("alert")).toHaveTextContent(error.message);
 
     const firstCall=vi.mocked(api.transcribe).mock.calls[0];
@@ -115,7 +115,7 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
+    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe now"}));
     await userEvent.click(await screen.findByRole("button",{name:"Retry transcription"}));
     await waitFor(()=>expect(screen.getByRole("alert")).toHaveTextContent("No clear speech was detected."));
     expect(screen.queryByRole("button",{name:"Retry transcription"})).not.toBeInTheDocument();
@@ -131,7 +131,7 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(api.conversation).toHaveBeenCalled());
     await userEvent.click(screen.getByRole("checkbox",{name:/consent to voice processing/i}));
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
+    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe now"}));
     await screen.findByRole("button",{name:"Retry transcription"});
     const firstCall=vi.mocked(api.transcribe).mock.calls[0];
 
@@ -139,7 +139,7 @@ describe("voice input customer journey",()=>{
     await waitFor(()=>expect(screen.queryByRole("button",{name:"Retry transcription"})).not.toBeInTheDocument());
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button",{name:"Start microphone"}));
-    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe"}));
+    await userEvent.click(screen.getByRole("button",{name:"Stop and transcribe now"}));
     await waitFor(()=>expect(api.transcribe).toHaveBeenCalledTimes(2));
     const freshCall=vi.mocked(api.transcribe).mock.calls[1];
     expect(freshCall[1].blob).not.toBe(firstCall[1].blob);

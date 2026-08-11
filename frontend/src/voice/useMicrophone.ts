@@ -30,6 +30,9 @@ const ACCEPTED = [
 ];
 const MAX_MS = 60_000;
 const MAX_BYTES = 5 * 1024 * 1024;
+const SILENCE_MS = 1_250;
+const MIN_SPEECH_MS = 220;
+const SPEECH_RMS = 0.025;
 
 function captureAvailable() {
   return navigator.mediaDevices !== undefined && typeof MediaRecorder !== "undefined" && window.isSecureContext !== false;
@@ -43,6 +46,8 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
   const stream = useRef<MediaStream | undefined>(undefined);
   const recorder = useRef<MediaRecorder | undefined>(undefined);
   const timer = useRef<number | undefined>(undefined);
+  const voiceFrame = useRef<number | undefined>(undefined);
+  const audioContext = useRef<AudioContext | undefined>(undefined);
   const chunks = useRef<Blob[]>([]);
   const bytes = useRef(0);
   const startedAt = useRef(0);
@@ -58,7 +63,11 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
 
   const cleanup = useCallback(() => {
     if (timer.current !== undefined) window.clearInterval(timer.current);
+    if (voiceFrame.current !== undefined) window.cancelAnimationFrame(voiceFrame.current);
     timer.current = undefined;
+    voiceFrame.current = undefined;
+    void audioContext.current?.close();
+    audioContext.current = undefined;
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = undefined;
     recorder.current = undefined;
@@ -183,6 +192,41 @@ export function useMicrophone(consent: boolean, onCaptured?: (capture: CapturedA
       next.start(250);
       setElapsed(0);
       setState("recording");
+
+      const AudioContextConstructor = window.AudioContext;
+      if (AudioContextConstructor) {
+        const context = new AudioContextConstructor();
+        audioContext.current = context;
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 512;
+        context.createMediaStreamSource(stream.current).connect(analyser);
+        const samples = new Uint8Array(analyser.fftSize);
+        let heardSpeech = false;
+        let speechStartedAt = 0;
+        let lastVoiceAt = performance.now();
+        const listenForSilence = () => {
+          if (next.state !== "recording") return;
+          analyser.getByteTimeDomainData(samples);
+          let energy = 0;
+          for (const sample of samples) {
+            const normalized = (sample - 128) / 128;
+            energy += normalized * normalized;
+          }
+          const now = performance.now();
+          const rms = Math.sqrt(energy / samples.length);
+          if (rms >= SPEECH_RMS) {
+            if (!heardSpeech) speechStartedAt = now;
+            heardSpeech = true;
+            lastVoiceAt = now;
+          }
+          if (heardSpeech && now - speechStartedAt >= MIN_SPEECH_MS && now - lastVoiceAt >= SILENCE_MS) {
+            stop();
+            return;
+          }
+          voiceFrame.current = window.requestAnimationFrame(listenForSilence);
+        };
+        voiceFrame.current = window.requestAnimationFrame(listenForSilence);
+      }
       timer.current = window.setInterval(() => {
         const duration = Date.now() - startedAt.current;
         setElapsed(Math.min(MAX_MS, duration));
