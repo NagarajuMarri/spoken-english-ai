@@ -8,12 +8,14 @@ test("live registration, logout, login, restoration, and safe rejection", async 
   await assertSafeLiveTarget(request);
   const email = `live-acceptance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = "StrongPassword123!";
+  const mobile = `9${String(Date.now()).slice(-9)}`;
   const invitationCode = process.env.LIVE_AUTH_INVITE ?? process.env.LIVE_REGISTRATION_INVITE;
   if (!invitationCode) throw new Error("LIVE_AUTH_INVITE or LIVE_REGISTRATION_INVITE is required");
 
   await page.goto("/register");
   await page.getByLabel("Name").fill("Live Acceptance");
   await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Indian mobile number").fill(mobile);
   await page.getByLabel("Password").fill(password);
   await page.getByLabel("Closed-beta invitation code (if provided)").fill(invitationCode);
   await page.getByLabel(/Terms and Privacy/).check();
@@ -34,9 +36,15 @@ test("live registration, logout, login, restoration, and safe rejection", async 
   await expect(page.getByText("Ready for today’s conversation?")).toBeVisible();
 
   await page.getByRole("button", { name: "Log out" }).click();
+  await page.getByLabel("Email").fill(mobile);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Login" }).click();
+  await expect(page.getByText("Ready for today’s conversation?")).toBeVisible();
+  await page.getByRole("button", { name: "Log out" }).click();
   await page.getByRole("button", { name: "Create a new account" }).click();
   await page.getByLabel("Name").fill("Duplicate");
   await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Indian mobile number").fill(`8${String(Date.now()).slice(-9)}`);
   await page.getByLabel("Password").fill(password);
   await page.getByLabel("Closed-beta invitation code (if provided)").fill(invitationCode);
   await page.getByLabel(/Terms and Privacy/).check();

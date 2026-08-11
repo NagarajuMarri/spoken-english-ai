@@ -25,7 +25,7 @@ test.setTimeout(1_800_000);
 test("30 spoken turns meet Realtime latency and language gates",async({page,request})=>{
   await assertSafeLiveTarget(request);
   const key=process.env.SPOKEN_ENGLISH_OPENAI_API_KEY;if(!key)throw new Error("OpenAI key is required");
-  const registered=await request.post("/api/v1/auth/register",{data:{display_name:"Realtime Corpus",email:`realtime-corpus-${Date.now()}@example.com`,password:"StrongPassword123!",invitation_code:process.env.LIVE_REGISTRATION_INVITE,terms_privacy_accepted:true}});
+  const registered=await request.post("/api/v1/auth/register",{data:{display_name:"Realtime Corpus",email:`realtime-corpus-${Date.now()}@example.com`,mobile_number:`9${String(Date.now()).slice(-9)}`,password:"StrongPassword123!",invitation_code:process.env.LIVE_REGISTRATION_INVITE,terms_privacy_accepted:true}});
   expect(registered.status()).toBe(201);const account=await registered.json() as {tokens:{access_token:string;refresh_token:string;token_type:string;expires_in:number}};
   await request.put("/api/v1/tutors/preference",{headers:{Authorization:`Bearer ${account.tokens.access_token}`},data:{tutor_id:"ananya",language_mode:"ENGLISH_TELUGU"}});
   await page.addInitScript(tokens=>{

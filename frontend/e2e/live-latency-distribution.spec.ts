@@ -19,6 +19,7 @@ test("30-turn live latency distribution has no silent or duplicate turns", async
   const registration = await request.post("/api/v1/auth/register", { data: {
     display_name: "Latency Distribution",
     email,
+    mobile_number: `8${String(Date.now()).slice(-9)}`,
     password: "StrongPassword123!",
     invitation_code: invitationCode,
     terms_privacy_accepted: true,
