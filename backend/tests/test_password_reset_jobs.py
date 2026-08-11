@@ -111,8 +111,8 @@ class RecordingDelivery:
         self.failure_text = failure_text
         self.calls = []
 
-    def deliver(self, recipient, reset_url):
-        self.calls.append((recipient, reset_url))
+    def deliver(self, recipient, verification_code):
+        self.calls.append((recipient, verification_code))
         if len(self.calls) <= self.failures:
             raise RuntimeError(self.failure_text)
 
@@ -128,7 +128,7 @@ def _register(client, email="queued-reset@example.com"):
     return response.json()
 
 
-def _reset_record(client, raw_token="private-worker-reset-token-value"):
+def _reset_record(client, raw_token="123456"):
     _register(client)
     with client.app.state.session_factory() as session:
         user = session.scalar(select(UserAccount).where(
@@ -136,14 +136,13 @@ def _reset_record(client, raw_token="private-worker-reset-token-value"):
         ))
         reset = PasswordResetToken(
             user_id=user.id,
-            token_hash=hash_password_reset_token(raw_token),
+            token_hash=hash_password_reset_token(f"{user.id}:{raw_token}"),
             expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
         )
         session.add(reset)
         session.commit()
         reset_id = reset.id
-    reset_url = f"http://localhost:5173/reset-password#token={raw_token}"
-    return reset_id, reset_url, raw_token
+    return reset_id, raw_token, raw_token
 
 
 def _handler(client, delivery):
@@ -196,7 +195,7 @@ def test_request_path_enqueues_without_smtp_and_applies_same_response_floor(
     client.app.state.password_reset_dispatch.dispatch(
         reset.id,
         "queued-reset@example.com",
-        payload["payload"]["reset_url"],
+        payload["payload"]["verification_code"],
     )
     assert len(redis.lists[queue.queue_key]) == 1
 

@@ -24,6 +24,19 @@ def normalize_email(email: str) -> str:
     return email.strip().casefold()
 
 
+def normalize_indian_mobile(value: str) -> str:
+    compact = "".join(character for character in value.strip() if character not in " -()")
+    if compact.startswith("+"):
+        digits = compact[1:]
+    else:
+        digits = compact
+    if len(digits) == 10:
+        digits = "91" + digits
+    if len(digits) != 12 or not digits.startswith("91") or digits[2] not in "6789" or not digits.isdigit():
+        raise ValueError("invalid Indian mobile number")
+    return "+" + digits
+
+
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 

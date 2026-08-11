@@ -15,6 +15,7 @@ from backend.app.core.security import (
     hash_password_reset_token,
     hash_refresh_token,
     normalize_email,
+    normalize_indian_mobile,
     privacy_minimised_network_key,
     utc_now,
     verify_password,
@@ -103,6 +104,10 @@ class AuthService:
 
     def register(self, data):
         email = normalize_email(str(data.email))
+        try:
+            mobile_number = normalize_indian_mobile(data.mobile_number)
+        except ValueError as exc:
+            raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_mobile_number", "Enter a valid Indian mobile number.") from exc
         if not data.terms_privacy_accepted:
             raise AppError(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -123,7 +128,11 @@ class AuthService:
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "weak_password", "Password does not meet requirements.")
         if len(data.password.encode("utf-8")) > self.settings.password_maximum_bytes:
             raise AppError(status.HTTP_422_UNPROCESSABLE_ENTITY, "password_too_long", "Password does not meet requirements.")
-        user = UserAccount(email=email, password_hash=hash_password(data.password))
+        if self.session.scalar(select(UserAccount.id).where(UserAccount.email == email)) is not None:
+            raise AppError(status.HTTP_409_CONFLICT, "duplicate_email", "An account with this email exists.")
+        if self.session.scalar(select(UserAccount.id).where(UserAccount.mobile_number == mobile_number)) is not None:
+            raise AppError(status.HTTP_409_CONFLICT, "duplicate_mobile_number", "An account with this mobile number exists.")
+        user = UserAccount(email=email, mobile_number=mobile_number, password_hash=hash_password(data.password))
         try:
             self.session.add(user)
             self.session.flush()
@@ -144,8 +153,13 @@ class AuthService:
         return payload
 
     def login(self, data):
-        email = normalize_email(str(data.email))
-        keys = (hashlib_key(email), privacy_minimised_network_key(self.request))
+        identifier = data.identifier.strip()
+        is_email = "@" in identifier
+        try:
+            normalized = normalize_email(identifier) if is_email else normalize_indian_mobile(identifier)
+        except ValueError:
+            normalized = identifier.casefold()
+        keys = (hashlib_key(normalized), privacy_minimised_network_key(self.request))
         throttler = self.request.app.state.login_throttler
         try:
             for key in keys:
@@ -154,13 +168,14 @@ class AuthService:
             self._audit("LOGIN_THROTTLED", outcome="BLOCKED", reason="login_throttled")
             self.request.app.state.metrics.increment("login_throttled")
             raise
-        user = self.session.scalar(select(UserAccount).where(UserAccount.email == email))
+        field = UserAccount.email if is_email else UserAccount.mobile_number
+        user = self.session.scalar(select(UserAccount).where(field == normalized))
         if user is None or user.status != "ACTIVE" or not verify_password(data.password, user.password_hash):
             for key in keys:
                 throttler.failed(key)
             self._audit("LOGIN_FAILED", user, "FAILED", "invalid_credentials")
             self.request.app.state.metrics.increment("login_failed")
-            raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_credentials", "Invalid email or password.")
+            raise AppError(status.HTTP_401_UNAUTHORIZED, "invalid_credentials", "Invalid email or mobile number or password.")
         for key in keys:
             throttler.succeeded(key)
         user.last_login_at = utc_now()
@@ -253,9 +268,7 @@ class AuthService:
     def request_password_reset(self, data):
         started_at = time.monotonic()
         email = normalize_email(str(data.email))
-        neutral = {
-            "message": "If an account matches that email, password reset instructions have been sent."
-        }
+        neutral = {"message": "If an account exists for this email, we've sent a verification code."}
         user = self.session.scalar(
             select(UserAccount).where(UserAccount.email == email, UserAccount.status == "ACTIVE")
         )
@@ -268,29 +281,34 @@ class AuthService:
             return neutral
 
         now = utc_now()
-        for previous in self.session.scalars(
+        active = list(self.session.scalars(
             select(PasswordResetToken).where(
                 PasswordResetToken.user_id == user.id,
                 PasswordResetToken.used_at.is_(None),
-            )
-        ):
+            ).order_by(PasswordResetToken.created_at.desc())
+        ))
+        if active:
+            created_at = active[0].created_at.replace(tzinfo=active[0].created_at.tzinfo or now.tzinfo)
+            if (now - created_at).total_seconds() < self.settings.password_reset_resend_cooldown_seconds:
+                enforce_password_reset_response_floor(started_at, self.settings.password_reset_minimum_response_milliseconds)
+                return neutral
+        for previous in active:
             previous.used_at = now
-        raw = secrets.token_urlsafe(48)
+        code = f"{secrets.randbelow(1_000_000):06d}"
         reset = PasswordResetToken(
             user_id=user.id,
-            token_hash=hash_password_reset_token(raw),
+            token_hash=hash_password_reset_token(f"{user.id}:{code}"),
             created_at=now,
             expires_at=now + timedelta(minutes=self.settings.password_reset_token_lifetime_minutes),
         )
         self.session.add(reset)
         self._audit_event("PASSWORD_RESET_REQUESTED", user)
         self.session.commit()
-        reset_url = f"{self.settings.public_frontend_url.rstrip('/')}/reset-password#token={raw}"
         try:
             self.request.app.state.password_reset_dispatch.dispatch(
                 reset.id,
                 user.email,
-                reset_url,
+                code,
             )
         except Exception:
             reset.used_at = utc_now()
@@ -302,13 +320,13 @@ class AuthService:
         )
         return neutral
 
-    def validate_password_reset_token(self, raw: str):
-        self._valid_password_reset_token(raw)
+    def validate_password_reset_token(self, email: str, code: str):
+        self._valid_password_reset_code(email, code)
         return {"valid": True}
 
     def reset_password(self, data):
         self._validate_password_policy(data.new_password)
-        reset = self._valid_password_reset_token(data.token, lock=True)
+        reset = self._valid_password_reset_code(str(data.email), data.code, lock=True)
         now = utc_now()
         user = self.session.get(UserAccount, reset.user_id)
         if user is None or user.status != "ACTIVE":
@@ -338,21 +356,32 @@ class AuthService:
             raise
         return {"message": "Your password has been updated. Sign in with your new password."}
 
-    def _valid_password_reset_token(self, raw: str, *, lock: bool = False):
+    def _valid_password_reset_code(self, email: str, code: str, *, lock: bool = False):
+        user = self.session.scalar(select(UserAccount).where(UserAccount.email == normalize_email(email)))
+        if user is None:
+            raise AppError(status.HTTP_400_BAD_REQUEST, "invalid_reset_code", "This password reset code is invalid or expired.")
         statement = select(PasswordResetToken).where(
-            PasswordResetToken.token_hash == hash_password_reset_token(raw)
-        )
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).order_by(PasswordResetToken.created_at.desc())
         if lock:
             statement = statement.with_for_update()
         reset = self.session.scalar(statement)
         now = utc_now()
         if reset is None:
-            raise AppError(status.HTTP_400_BAD_REQUEST, "invalid_reset_token", "This password reset link is invalid.")
-        if reset.used_at is not None:
-            raise AppError(status.HTTP_400_BAD_REQUEST, "used_reset_token", "This password reset link has already been used.")
+            raise AppError(status.HTTP_400_BAD_REQUEST, "invalid_reset_code", "This password reset code is invalid or expired.")
         expires_at = reset.expires_at.replace(tzinfo=reset.expires_at.tzinfo or now.tzinfo)
         if expires_at <= now:
-            raise AppError(status.HTTP_400_BAD_REQUEST, "expired_reset_token", "This password reset link has expired.")
+            reset.used_at = now
+            self.session.commit()
+            raise AppError(status.HTTP_400_BAD_REQUEST, "expired_reset_code", "This password reset code is invalid or expired.")
+        candidate = hash_password_reset_token(f"{user.id}:{code}")
+        if not secrets.compare_digest(candidate, reset.token_hash):
+            reset.verification_attempts += 1
+            if reset.verification_attempts >= self.settings.password_reset_code_max_attempts:
+                reset.used_at = now
+            self.session.commit()
+            raise AppError(status.HTTP_400_BAD_REQUEST, "invalid_reset_code", "This password reset code is invalid or expired.")
         return reset
 
     def _validate_password_policy(self, password: str) -> None:
@@ -366,6 +395,7 @@ class AuthService:
         payload = {
             "id": user.id,
             "email": user.email,
+            "mobile_number": user.mobile_number,
             "status": user.status,
             "email_verified": user.email_verified,
             "created_at": user.created_at,

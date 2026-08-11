@@ -3,9 +3,11 @@ from sqlalchemy import func, select
 from backend.app.core.config import Settings
 from backend.app.main import create_app
 from backend.app.models import BetaFeedback, BetaWaitlistEntry, UserAccount
+import hashlib
 
 def registration(email="learner@example.com", invitation_code=None):
-    return {"email":email,"password":"StrongPassword123!","display_name":"Anusha","invitation_code":invitation_code,"terms_privacy_accepted":True}
+    digits = str(int(hashlib.sha256(email.encode()).hexdigest()[:10], 16) % 1_000_000_000).zfill(9)
+    return {"email":email,"mobile_number":"9"+digits,"password":"StrongPassword123!","display_name":"Anusha","invitation_code":invitation_code,"terms_privacy_accepted":True}
 
 def test_closed_beta_access_paths_and_waitlist(tmp_path):
     settings=Settings(database_url=f"sqlite:///{(tmp_path/'beta.db').as_posix()}",environment="test",jwt_secret="test-signing-secret-at-least-32-bytes-long",auto_create_tables=True,closed_beta_enabled=True,beta_invite_codes="ALPHA,BETA",beta_allowlist="allowed@example.com",founder_emails="founder@example.com",_env_file=None)

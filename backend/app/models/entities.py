@@ -40,6 +40,7 @@ class UserAccount(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    mobile_number: Mapped[str | None] = mapped_column(String(16), unique=True, index=True, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE", index=True)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -78,6 +79,7 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class SecurityAuditEvent(Base):

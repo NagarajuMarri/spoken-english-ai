@@ -59,8 +59,8 @@ def test_smtp_delivery_uses_verified_tls_auth_and_redacted_telemetry(monkeypatch
     monkeypatch.setattr(delivery_module.smtplib, "SMTP", FakeSMTP)
     caplog.set_level(logging.INFO, logger="spoken_english.password_reset_delivery")
     recipient = "private-learner@example.test"
-    token = "private-reset-token-value-that-must-not-be-logged"
-    reset_url = f"https://test.speakmate.in/reset-password#token={token}"
+    token = "123456"
+    reset_url = token
 
     SmtpPasswordResetDelivery(smtp_settings()).deliver(recipient, reset_url)
 
@@ -74,7 +74,7 @@ def test_smtp_delivery_uses_verified_tls_auth_and_redacted_telemetry(monkeypatch
     assert tls_context.check_hostname is True
     assert tls_context.verify_mode == ssl.CERT_REQUIRED
     assert smtp.calls[4] == ("login", "smtp-user", "smtp-password-for-transport-test")
-    assert smtp.message["Subject"] == "Reset your SpeakMate password"
+    assert smtp.message["Subject"] == "SpeakMate password reset code"
     assert smtp.message["From"] == "SpeakMate <no-reply@test.speakmate.in>"
     assert smtp.message["To"] == recipient
     assert reset_url in smtp.message.get_content()
@@ -97,8 +97,8 @@ def test_smtp_delivery_failure_logs_only_safe_error_class(monkeypatch, caplog):
     monkeypatch.setattr(delivery_module.smtplib, "SMTP", FailingSMTP)
     caplog.set_level(logging.WARNING, logger="spoken_english.password_reset_delivery")
     recipient = "private-learner@example.test"
-    token = "private-failed-reset-token-value"
-    reset_url = f"https://test.speakmate.in/reset-password#token={token}"
+    token = "654321"
+    reset_url = token
 
     with pytest.raises(RuntimeError, match="sensitive transport detail"):
         SmtpPasswordResetDelivery(smtp_settings()).deliver(recipient, reset_url)

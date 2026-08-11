@@ -9,7 +9,7 @@ PASSWORD_RESET_EMAIL_JOB_KIND = "password_reset_email"
 
 
 class PasswordResetDispatch(Protocol):
-    def dispatch(self, reset_token_id: str, recipient: str, reset_url: str) -> None: ...
+    def dispatch(self, reset_token_id: str, recipient: str, verification_code: str) -> None: ...
 
 
 class DirectPasswordResetDispatch:
@@ -18,9 +18,9 @@ class DirectPasswordResetDispatch:
     def __init__(self, delivery) -> None:
         self.delivery = delivery
 
-    def dispatch(self, reset_token_id: str, recipient: str, reset_url: str) -> None:
+    def dispatch(self, reset_token_id: str, recipient: str, verification_code: str) -> None:
         _ = reset_token_id
-        self.delivery.deliver(recipient, reset_url)
+        self.delivery.deliver(recipient, verification_code)
 
 
 class RedisPasswordResetDispatch:
@@ -37,13 +37,13 @@ class RedisPasswordResetDispatch:
         self.maximum_attempts = maximum_attempts
         self.idempotency_ttl_seconds = idempotency_ttl_seconds
 
-    def dispatch(self, reset_token_id: str, recipient: str, reset_url: str) -> None:
+    def dispatch(self, reset_token_id: str, recipient: str, verification_code: str) -> None:
         _ = recipient
         job = Job(
             kind=PASSWORD_RESET_EMAIL_JOB_KIND,
             payload={
                 "password_reset_token_id": reset_token_id,
-                "reset_url": reset_url,
+                "verification_code": verification_code,
             },
             idempotency_key=f"password-reset-email:{reset_token_id}",
             max_attempts=self.maximum_attempts,

@@ -92,7 +92,7 @@ def test_learner_persists_across_clients(tmp_path):
     ))
     with TestClient(first_app) as first:
         registered = first.post("/api/v1/auth/register", json={
-            "email": "persist@example.com", "password": "StrongPassword123!",
+            "email": "persist@example.com", "mobile_number": "9876543210", "password": "StrongPassword123!",
                 "display_name": "Persistent",
                 "terms_privacy_accepted": True,
         }).json()

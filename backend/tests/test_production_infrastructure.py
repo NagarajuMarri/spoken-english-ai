@@ -147,12 +147,12 @@ def test_readiness_rejects_stamped_head_with_legacy_authentication_schema():
 
 
 def _install_compatible_schema(connection, revision=ALEMBIC_HEAD_REVISION):
-    connection.execute(text("CREATE TABLE user_accounts (session_epoch INTEGER NOT NULL)"))
+    connection.execute(text("CREATE TABLE user_accounts (session_epoch INTEGER NOT NULL, mobile_number VARCHAR(16))"))
     connection.execute(text("CREATE TABLE learners (user_account_id VARCHAR(36))"))
     connection.execute(text("CREATE TABLE refresh_tokens (family_id VARCHAR(36), parent_token_id VARCHAR(36))"))
     connection.execute(text(
         "CREATE TABLE password_reset_tokens ("
-        "user_id VARCHAR(36), token_hash VARCHAR(64), expires_at DATETIME, used_at DATETIME)"
+        "user_id VARCHAR(36), token_hash VARCHAR(64), expires_at DATETIME, used_at DATETIME, verification_attempts INTEGER NOT NULL)"
     ))
     connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
     connection.execute(text("INSERT INTO alembic_version VALUES (:revision)"), {"revision": revision})

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import secrets
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -31,14 +29,14 @@ class PasswordResetEmailJobHandler:
         self.public_frontend_url = public_frontend_url.rstrip("/")
 
     def deliver(self, payload: dict[str, str]) -> None:
-        reset_id, reset_url = self._payload(payload)
+        reset_id, verification_code = self._payload(payload)
         with self.session_factory() as session:
-            reset, user = self._active_reset(session, reset_id, reset_url)
+            reset, user = self._active_reset(session, reset_id, verification_code)
             if self._has_audit(session, reset.id, "PASSWORD_RESET_DELIVERY_SUCCEEDED"):
                 return
             recipient = user.email
 
-        self.delivery.deliver(recipient, reset_url)
+        self.delivery.deliver(recipient, verification_code)
 
         with self.session_factory() as session:
             stored_reset = session.get(PasswordResetToken, reset_id)
@@ -84,7 +82,7 @@ class PasswordResetEmailJobHandler:
         self,
         session: Session,
         reset_id: str,
-        reset_url: str,
+        verification_code: str,
     ) -> tuple[PasswordResetToken, UserAccount]:
         reset = session.get(PasswordResetToken, reset_id)
         if reset is None or reset.used_at is not None:
@@ -95,30 +93,13 @@ class PasswordResetEmailJobHandler:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at <= now:
             raise PasswordResetJobPermanentError("Password-reset work has expired.")
-        self._validate_reset_url(reset, reset_url)
         user = session.get(UserAccount, reset.user_id)
         if user is None or user.status != "ACTIVE":
             raise PasswordResetJobPermanentError("Password-reset account is unavailable.")
+        candidate_hash = hash_password_reset_token(f"{user.id}:{verification_code}")
+        if candidate_hash != reset.token_hash:
+            raise PasswordResetJobPermanentError("Password-reset code is invalid.")
         return reset, user
-
-    def _validate_reset_url(self, reset: PasswordResetToken, reset_url: str) -> None:
-        actual = urlsplit(reset_url)
-        expected = urlsplit(self.public_frontend_url)
-        expected_path = f"{expected.path.rstrip('/')}/reset-password"
-        if (
-            actual.scheme != expected.scheme
-            or actual.netloc != expected.netloc
-            or actual.path != expected_path
-            or actual.query
-        ):
-            raise PasswordResetJobPermanentError("Password-reset destination is invalid.")
-        fragment = parse_qs(actual.fragment, keep_blank_values=True)
-        raw_values = fragment.get("token", [])
-        if len(raw_values) != 1 or len(fragment) != 1:
-            raise PasswordResetJobPermanentError("Password-reset token is invalid.")
-        candidate_hash = hash_password_reset_token(raw_values[0])
-        if not secrets.compare_digest(candidate_hash, reset.token_hash):
-            raise PasswordResetJobPermanentError("Password-reset token is invalid.")
 
     @staticmethod
     def _has_audit(session: Session, reset_id: str, event_type: str) -> bool:
@@ -133,10 +114,10 @@ class PasswordResetEmailJobHandler:
     @classmethod
     def _payload(cls, payload: dict[str, str]) -> tuple[str, str]:
         reset_id = cls._reset_id(payload)
-        reset_url = payload.get("reset_url")
-        if not isinstance(reset_url, str) or not reset_url:
-            raise PasswordResetJobPermanentError("Password-reset destination is missing.")
-        return reset_id, reset_url
+        verification_code = payload.get("verification_code")
+        if not isinstance(verification_code, str) or len(verification_code) != 6 or not verification_code.isdigit():
+            raise PasswordResetJobPermanentError("Password-reset code is missing.")
+        return reset_id, verification_code
 
     @staticmethod
     def _reset_id(payload: dict[str, str]) -> str:

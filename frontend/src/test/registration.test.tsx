@@ -17,6 +17,7 @@ async function fillRegistration() {
   await user.type(screen.getByLabelText("Name"), "New Learner");
   await user.type(screen.getByLabelText("Closed-beta invitation code (if provided)"), "BETA");
   await user.type(screen.getByLabelText("Email"), "new-learner@example.invalid");
+  await user.type(screen.getByLabelText("Indian mobile number"), "9876543210");
   await user.type(screen.getByLabelText("Password"), "StrongPassword123!");
   await user.click(screen.getByRole("checkbox"));
   return user;
@@ -31,6 +32,7 @@ describe("closed-beta registration", () => {
     await waitFor(() => expect(register).toHaveBeenCalledWith({
       display_name: "New Learner",
       email: "new-learner@example.invalid",
+      mobile_number: "9876543210",
       password: "StrongPassword123!",
       invitation_code: "BETA",
       terms_privacy_accepted: true,

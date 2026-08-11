@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     refresh_token_lifetime_days: int = 30
     password_minimum_length: int = 12
     password_maximum_bytes: int = 72
-    password_reset_token_lifetime_minutes: int = 30
+    password_reset_token_lifetime_minutes: int = 10
+    password_reset_code_max_attempts: int = 5
+    password_reset_resend_cooldown_seconds: int = 60
     password_reset_minimum_response_milliseconds: int = 250
     password_reset_job_max_attempts: int = 3
     password_reset_job_idempotency_ttl_seconds: int = 3_600

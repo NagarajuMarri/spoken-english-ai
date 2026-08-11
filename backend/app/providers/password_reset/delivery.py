@@ -12,7 +12,7 @@ logger = logging.getLogger("spoken_english.password_reset_delivery")
 
 
 def _record_smtp_delivery(started_at: float, outcome: str, error_type: str | None = None) -> None:
-    """Emit operational evidence without recipient, reset URL, token, or message content."""
+    """Emit operational evidence without recipient, code, or message content."""
     record = {
         "event_name": "password_reset_delivery_completed",
         "provider": "smtp",
@@ -21,12 +21,11 @@ def _record_smtp_delivery(started_at: float, outcome: str, error_type: str | Non
     }
     if error_type:
         record["error_type"] = error_type
-    log = logger.info if outcome == "SUCCEEDED" else logger.warning
-    log(json.dumps(record, separators=(",", ":")))
+    (logger.info if outcome == "SUCCEEDED" else logger.warning)(json.dumps(record, separators=(",", ":")))
 
 
 class DisabledPasswordResetDelivery:
-    def deliver(self, recipient: str, reset_url: str) -> None:
+    def deliver(self, recipient: str, verification_code: str) -> None:
         raise RuntimeError("Password-reset delivery is not configured.")
 
 
@@ -36,21 +35,21 @@ class InMemoryPasswordResetDelivery:
     def __init__(self) -> None:
         self.deliveries: list[dict[str, str]] = []
 
-    def deliver(self, recipient: str, reset_url: str) -> None:
-        self.deliveries.append({"recipient": recipient, "reset_url": reset_url})
+    def deliver(self, recipient: str, verification_code: str) -> None:
+        self.deliveries.append({"recipient": recipient, "verification_code": verification_code})
 
 
 class DevelopmentFilePasswordResetDelivery:
-    """Local-only outbox. The reset URL is written to a mode-0600 file, never logs."""
+    """Local-only outbox. The code is written to a mode-0600 file, never logs."""
 
     def __init__(self, path: str) -> None:
         self.path = Path(path)
 
-    def deliver(self, recipient: str, reset_url: str) -> None:
+    def deliver(self, recipient: str, verification_code: str) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(descriptor, "a", encoding="utf-8") as outbox:
-            outbox.write(json.dumps({"recipient": recipient, "reset_url": reset_url}, separators=(",", ":")) + "\n")
+            outbox.write(json.dumps({"recipient": recipient, "verification_code": verification_code}, separators=(",", ":")) + "\n")
         os.chmod(self.path, 0o600)
 
 
@@ -58,23 +57,20 @@ class SmtpPasswordResetDelivery:
     def __init__(self, settings) -> None:
         self.settings = settings
 
-    def deliver(self, recipient: str, reset_url: str) -> None:
+    def deliver(self, recipient: str, verification_code: str) -> None:
         started_at = time.perf_counter()
         try:
             message = EmailMessage()
-            message["Subject"] = "Reset your SpeakMate password"
+            message["Subject"] = "SpeakMate password reset code"
             message["From"] = self.settings.password_reset_email_from
             message["To"] = recipient
             message.set_content(
-                "Use this single-use link to choose a new password. "
-                f"It expires soon:\n\n{reset_url}\n\nIf you did not request this, ignore this email."
+                "Hello,\n\nYour SpeakMate password reset code is "
+                f"{verification_code}. It expires in 10 minutes and can be used once.\n\n"
+                "If you did not request this, ignore this email."
             )
             tls_context = ssl.create_default_context()
-            with smtplib.SMTP(
-                self.settings.smtp_host,
-                self.settings.smtp_port,
-                timeout=self.settings.smtp_timeout_seconds,
-            ) as client:
+            with smtplib.SMTP(self.settings.smtp_host, self.settings.smtp_port, timeout=self.settings.smtp_timeout_seconds) as client:
                 client.ehlo()
                 client.starttls(context=tls_context)
                 client.ehlo()

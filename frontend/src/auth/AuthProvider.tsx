@@ -3,15 +3,15 @@ import { api, configureSession } from "../api/client";
 import type { Account, TokenPair } from "../models";
 import { sessionStore } from "./session-store";
 
-interface AuthValue { status:"restoring"|"authenticated"|"anonymous"; account:Account|null; login:(email:string,password:string)=>Promise<void>; register:(name:string,email:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean)=>Promise<void>; logout:()=>Promise<void>; logoutAll:()=>Promise<void> }
+interface AuthValue { status:"restoring"|"authenticated"|"anonymous"; account:Account|null; login:(identifier:string,password:string)=>Promise<void>; register:(name:string,email:string,mobileNumber:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean)=>Promise<void>; logout:()=>Promise<void>; logoutAll:()=>Promise<void> }
 const Context=createContext<AuthValue|null>(null);
 export function AuthProvider({children}:{children:ReactNode}) {
   const [tokens,setTokens]=useState<TokenPair|null>(()=>sessionStore.read()); const [account,setAccount]=useState<Account|null>(null); const [status,setStatus]=useState<AuthValue["status"]>(tokens?"restoring":"anonymous");
   const save=useCallback((next:TokenPair)=>{sessionStore.write(next);setTokens(next)},[]); const clear=useCallback((expectedRefreshToken?:string)=>{const current=sessionStore.read();if(expectedRefreshToken&&current&&current.refresh_token!==expectedRefreshToken)return;sessionStore.clear();setTokens(null);setAccount(null);setStatus("anonymous")},[]);
   useEffect(()=>configureSession({get:()=>sessionStore.read(),update:save,clear}),[save,clear]);
   useEffect(()=>{if(!tokens){setStatus("anonymous");return}let active=true;api.me().then(value=>{if(active){setAccount(value);setStatus("authenticated")}}).catch(()=>{if(active)clear()});return()=>{active=false}},[tokens,clear]);
-  async function login(email:string,password:string){const pair=await api.login(email,password);save(pair);setAccount(await api.me());setStatus("authenticated")}
-  async function register(name:string,email:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean){const result=await api.register({display_name:name,email,password,invitation_code:invitationCode||undefined,terms_privacy_accepted:termsPrivacyAccepted});save(result.tokens);setAccount(result);setStatus("authenticated")}
+  async function login(identifier:string,password:string){const pair=await api.login(identifier,password);save(pair);setAccount(await api.me());setStatus("authenticated")}
+  async function register(name:string,email:string,mobileNumber:string,password:string,invitationCode:string|undefined,termsPrivacyAccepted:boolean){const result=await api.register({display_name:name,email,mobile_number:mobileNumber,password,invitation_code:invitationCode||undefined,terms_privacy_accepted:termsPrivacyAccepted});save(result.tokens);setAccount(result);setStatus("authenticated")}
   async function logout(){const current=sessionStore.read();try{if(current)await api.logout(current.refresh_token)}finally{clear(current?.refresh_token)}}
   async function logoutAll(){const current=sessionStore.read();try{await api.logoutAll()}finally{clear(current?.refresh_token)}}
   return <Context.Provider value={{status,account,login,register,logout,logoutAll}}>{children}</Context.Provider>

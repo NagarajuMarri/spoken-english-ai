@@ -151,11 +151,11 @@ async function endSession(initialRefreshToken:string,allDevices=false):Promise<v
   }
 }
 export const api={
-  register:(body:{email:string;password:string;display_name:string;invitation_code?:string;terms_privacy_accepted:boolean})=>raw<Account&{tokens:TokenPair}>("/api/v1/auth/register",{method:"POST",body:JSON.stringify(body)}),
-  login:(email:string,password:string)=>raw<TokenPair>("/api/v1/auth/login",{method:"POST",body:JSON.stringify({email,password})}),
+  register:(body:{email:string;mobile_number:string;password:string;display_name:string;invitation_code?:string;terms_privacy_accepted:boolean})=>raw<Account&{tokens:TokenPair}>("/api/v1/auth/register",{method:"POST",body:JSON.stringify(body)}),
+  login:(identifier:string,password:string)=>raw<TokenPair>("/api/v1/auth/login",{method:"POST",body:JSON.stringify({identifier,password})}),
   requestPasswordReset:(email:string)=>raw<{message:string}>("/api/v1/auth/password-reset/request",{method:"POST",body:JSON.stringify({email})}),
-  validatePasswordReset:(token:string)=>raw<{valid:boolean}>("/api/v1/auth/password-reset/validate",{method:"POST",body:JSON.stringify({token})}),
-  confirmPasswordReset:async(token:string,new_password:string)=>{const session=hooks.get();const result=await raw<{message:string}>("/api/v1/auth/password-reset/confirm",{method:"POST",body:JSON.stringify({token,new_password})});const current=hooks.get();if(session&&current&&(current.refresh_token===session.refresh_token||(lastRotation?.from===session.refresh_token&&lastRotation.to===current.refresh_token)))hooks.clear(current.refresh_token);return result},
+  validatePasswordReset:(email:string,code:string)=>raw<{valid:boolean}>("/api/v1/auth/password-reset/validate",{method:"POST",body:JSON.stringify({email,code})}),
+  confirmPasswordReset:async(email:string,code:string,new_password?:string)=>{const session=hooks.get();const result=await raw<{message:string}>("/api/v1/auth/password-reset/confirm",{method:"POST",body:JSON.stringify({email,code,new_password:new_password??code})});const current=hooks.get();if(session&&current&&(current.refresh_token===session.refresh_token||(lastRotation?.from===session.refresh_token&&lastRotation.to===current.refresh_token)))hooks.clear(current.refresh_token);return result},
   me:()=>raw<Account>("/api/v1/auth/me"),
   logout:(refreshToken:string)=>endSession(refreshToken),
   logoutAll:()=>{const current=hooks.get();return current?endSession(current.refresh_token,true):Promise.resolve()},

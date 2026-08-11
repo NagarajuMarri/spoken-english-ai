@@ -105,9 +105,8 @@ def test_login_success_invalid_credentials_and_disabled_account(client):
 def _request_reset(client, email="user@example.com"):
     response = client.post("/api/v1/auth/password-reset/request", json={"email": email})
     deliveries = client.app.state.password_reset_delivery.deliveries
-    reset_url = deliveries[-1]["reset_url"] if deliveries else ""
-    token = reset_url.split("token=", 1)[1] if "token=" in reset_url else ""
-    return response, token
+    code = deliveries[-1]["verification_code"] if deliveries else ""
+    return response, code
 
 
 def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplog, monkeypatch):
@@ -126,10 +125,7 @@ def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplo
     assert neutral.status_code == unknown.status_code == 200
     assert neutral.json() == unknown.json()
     assert response_floors == [0, 0]
-    assert raw_token and len(raw_token) >= 32
-    reset_url = client.app.state.password_reset_delivery.deliveries[0]["reset_url"]
-    assert "/reset-password#token=" in reset_url
-    assert "/reset-password?token=" not in reset_url
+    assert len(raw_token) == 6 and raw_token.isdigit()
 
     with client.app.state.session_factory() as db:
         reset = db.scalar(select(PasswordResetToken))
@@ -138,10 +134,10 @@ def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplo
         account = db.scalar(select(UserAccount).where(UserAccount.email == "user@example.com"))
         assert verify_password(PASSWORD, account.password_hash)
 
-    assert client.post("/api/v1/auth/password-reset/validate", json={"token": raw_token}).json() == {"valid": True}
+    assert client.post("/api/v1/auth/password-reset/validate", json={"email": "user@example.com", "code": raw_token}).json() == {"valid": True}
     new_password = "NewStrongPassword456!"
     changed = client.post("/api/v1/auth/password-reset/confirm", json={
-        "token": raw_token, "new_password": new_password,
+        "email": "user@example.com", "code": raw_token, "new_password": new_password,
     })
     assert changed.status_code == 200
     assert client.post("/api/v1/auth/login", json={
@@ -155,10 +151,10 @@ def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplo
         "Authorization": f"Bearer {registered['tokens']['access_token']}"
     }).status_code == 401
     reused = client.post("/api/v1/auth/password-reset/confirm", json={
-        "token": raw_token, "new_password": "AnotherStrongPassword789!",
+        "email": "user@example.com", "code": raw_token, "new_password": "AnotherStrongPassword789!",
     })
     assert reused.status_code == 400
-    assert reused.json()["error"]["code"] == "used_reset_token"
+    assert reused.json()["error"]["code"] == "invalid_reset_code"
     with client.app.state.session_factory() as db:
         reset = db.scalar(select(PasswordResetToken))
         assert reset.used_at is not None
@@ -174,11 +170,11 @@ def test_password_reset_is_neutral_single_use_and_revokes_sessions(client, caplo
 def test_password_reset_rejects_invalid_expired_and_weak_tokens(client):
     register(client)
     _, raw_token = _request_reset(client)
-    invalid = client.post("/api/v1/auth/password-reset/validate", json={"token": "x" * 48})
+    invalid = client.post("/api/v1/auth/password-reset/validate", json={"email": "user@example.com", "code": "000000"})
     assert invalid.status_code == 400
-    assert invalid.json()["error"]["code"] == "invalid_reset_token"
+    assert invalid.json()["error"]["code"] == "invalid_reset_code"
     weak = client.post("/api/v1/auth/password-reset/confirm", json={
-        "token": raw_token, "new_password": "short",
+        "email": "user@example.com", "code": raw_token, "new_password": "short",
     })
     assert weak.status_code == 422
     assert weak.json()["error"]["code"] == "weak_password"
@@ -186,9 +182,9 @@ def test_password_reset_rejects_invalid_expired_and_weak_tokens(client):
         reset = db.scalar(select(PasswordResetToken))
         reset.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         db.commit()
-    expired = client.post("/api/v1/auth/password-reset/validate", json={"token": raw_token})
+    expired = client.post("/api/v1/auth/password-reset/validate", json={"email": "user@example.com", "code": raw_token})
     assert expired.status_code == 400
-    assert expired.json()["error"]["code"] == "expired_reset_token"
+    assert expired.json()["error"]["code"] == "expired_reset_code"
 
 
 def test_password_reset_requests_are_rate_limited_per_email(client):
@@ -213,12 +209,12 @@ def test_password_reset_requests_are_rate_limited_per_email(client):
 )
 def test_password_reset_token_attempts_are_rate_limited_by_network(client, path):
     for index in range(20):
-        body = {"token": f"invalid-token-{index:02d}-with-safe-minimum-length-value"}
+        body = {"email": "unknown@example.com", "code": f"{index:06d}"}
         if path.endswith("/confirm"):
             body["new_password"] = "NewStrongPassword456!"
         assert client.post(path, json=body).status_code == 400
 
-    limited_body = {"token": "another-distinct-invalid-token-with-safe-minimum-length"}
+    limited_body = {"email": "unknown@example.com", "code": "999999"}
     if path.endswith("/confirm"):
         limited_body["new_password"] = "NewStrongPassword456!"
     limited = client.post(path, json=limited_body)
@@ -264,7 +260,7 @@ def test_password_reset_rolls_back_password_token_and_session_revocation(client,
     monkeypatch.setattr(auth_service, "hash_password", fail_hashing)
     try:
         client.post("/api/v1/auth/password-reset/confirm", json={
-            "token": raw_token, "new_password": "NewStrongPassword456!",
+            "email": "user@example.com", "code": raw_token, "new_password": "NewStrongPassword456!",
         })
     except RuntimeError:
         pass

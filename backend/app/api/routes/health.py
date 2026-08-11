@@ -9,10 +9,10 @@ from backend.app.db.schema import ALEMBIC_HEAD_REVISION
 router = APIRouter(tags=["system"])
 
 REQUIRED_AUTH_SCHEMA = {
-    "user_accounts": {"session_epoch"},
+    "user_accounts": {"session_epoch", "mobile_number"},
     "learners": {"user_account_id"},
     "refresh_tokens": {"family_id", "parent_token_id"},
-    "password_reset_tokens": {"user_id", "token_hash", "expires_at", "used_at"},
+    "password_reset_tokens": {"user_id", "token_hash", "expires_at", "used_at", "verification_attempts"},
 }
 
 

@@ -32,8 +32,8 @@ def register(data: RegisterRequest, request: Request, session: Session = Depends
 
 @router.post("/login", response_model=TokenPair)
 def login(data: LoginRequest, request: Request, session: Session = Depends(get_db)):
-    from backend.app.core.security import normalize_email, privacy_minimised_network_key
-    enforce_rate_limit(request, "login_email", privacy_key(normalize_email(str(data.email))))
+    from backend.app.core.security import privacy_minimised_network_key
+    enforce_rate_limit(request, "login_email", privacy_key(data.identifier.strip().casefold()))
     enforce_rate_limit(request, "login_network", privacy_minimised_network_key(request))
     return AuthService(session, request).login(data)
 
@@ -52,15 +52,15 @@ def validate_password_reset_token(
 ):
     from backend.app.core.security import privacy_minimised_network_key
     enforce_rate_limit(request, "password_reset_attempt_network", privacy_minimised_network_key(request))
-    enforce_rate_limit(request, "password_reset_attempt", privacy_key(data.token))
-    return AuthService(session, request).validate_password_reset_token(data.token)
+    enforce_rate_limit(request, "password_reset_attempt", privacy_key(f"{data.email}:{data.code}"))
+    return AuthService(session, request).validate_password_reset_token(str(data.email), data.code)
 
 
 @router.post("/password-reset/confirm", response_model=PasswordResetConfirmResponse)
 def confirm_password_reset(data: PasswordResetConfirm, request: Request, session: Session = Depends(get_db)):
     from backend.app.core.security import privacy_minimised_network_key
     enforce_rate_limit(request, "password_reset_attempt_network", privacy_minimised_network_key(request))
-    enforce_rate_limit(request, "password_reset_attempt", privacy_key(data.token))
+    enforce_rate_limit(request, "password_reset_attempt", privacy_key(f"{data.email}:{data.code}"))
     return AuthService(session, request).reset_password(data)
 
 

@@ -1,8 +1,22 @@
 import pytest
 from fastapi.testclient import TestClient
+import hashlib
 
 from backend.app.core.config import Settings
 from backend.app.main import create_app
+
+
+class AuthCompatibleTestClient(TestClient):
+    """Keep legacy fixtures valid while the production registration API requires mobile."""
+
+    def post(self, url, *args, **kwargs):
+        body = kwargs.get("json")
+        if url == "/api/v1/auth/register" and isinstance(body, dict) and "mobile_number" not in body:
+            body = dict(body)
+            suffix = int(hashlib.sha256(str(body.get("email", "test")).encode()).hexdigest()[:8], 16) % 10_000_000_000
+            body["mobile_number"] = f"+91{suffix:010d}"[:3] + "9" + f"{suffix:010d}"[1:]
+            kwargs["json"] = body
+        return super().post(url, *args, **kwargs)
 
 
 @pytest.fixture
@@ -23,7 +37,7 @@ def client(tmp_path):
         _env_file=None,
     )
     app = create_app(settings)
-    with TestClient(app) as test_client:
+    with AuthCompatibleTestClient(app) as test_client:
         yield test_client
     app.state.engine.dispose()
 

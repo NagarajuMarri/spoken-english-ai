@@ -1,6 +1,6 @@
 """Database schema identifiers shared by runtime readiness and version evidence."""
 
-ALEMBIC_HEAD_REVISION = "0019_realtime_turns"
+ALEMBIC_HEAD_REVISION = "0020_auth_mobile_reset_codes"
 
 
 def ensure_no_duplicate_subscriptions(connection) -> None:
