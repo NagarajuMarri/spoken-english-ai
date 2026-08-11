@@ -8,7 +8,7 @@ test("live Realtime establishes one hands-free WebRTC session and produces tutor
   await assertSafeLiveTarget(request);
   const email=`live-realtime-${Date.now()}@example.com`;
   const registered=await request.post("/api/v1/auth/register",{data:{
-    display_name:"Realtime Acceptance",email,password:"StrongPassword123!",
+    display_name:"Realtime Acceptance",email,mobile_number:`6${String(Date.now()).slice(-9)}`,password:"StrongPassword123!",
     invitation_code:process.env.LIVE_REGISTRATION_INVITE,terms_privacy_accepted:true,
   }});
   expect(registered.status()).toBe(201);
