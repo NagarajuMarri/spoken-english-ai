@@ -2,15 +2,11 @@ import { useEffect, type MutableRefObject } from "react";
 import { createRendererFrame, type TutorPlaybackSignal } from "../avatar/renderer";
 import type { TutorPresentation } from "../avatar/machine";
 import type { Tutor } from "../models";
-
-const ANANYA_PORTRAIT = "/tutors/ananya-2d-v2.png";
+import { tutorPortrait } from "../tutors/identity";
 
 function PortraitVisual({ tutor }: { tutor: Tutor }) {
-  const source = tutor.tutor_id === "ananya" ? ANANYA_PORTRAIT : tutor.avatar_profile;
   return <>
-    <div className="portrait-motion">
-      <img src={source} alt={`${tutor.display_name}, your friendly Indian-English tutor`} />
-    </div>
+    <img src={tutorPortrait(tutor)} alt={`${tutor.display_name}, your friendly Indian-English tutor`} />
     <span className="state-aura" aria-hidden="true" />
     <span className="listening-wave" aria-hidden="true"><i /><i /><i /><i /><i /></span>
     <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>

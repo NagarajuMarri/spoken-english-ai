@@ -6,6 +6,7 @@ import { Avatar } from "../components/Avatar";
 import type { Account, CurriculumLesson, Dashboard, LanguageMode, Tutor, TutorSpeech, VoiceTranscription } from "../models";
 import { useSpeakMateMultimediaRuntime } from "../multimedia";
 import { useRouter } from "../routes/router";
+import { tutorPortrait } from "../tutors/identity";
 import {
   createConversationLatencyTrace,
   emitConversationLatency,
@@ -66,7 +67,7 @@ export function DashboardScreen({ data, tutor }: { data: Dashboard; tutor: Tutor
       <h1>Ready for today’s conversation?</h1>
       <div className="dashboard-grid">
         <article className="hero-card">
-          <img src={tutor.avatar_profile} alt={`${tutor.display_name}, your tutor`} />
+          <img src={tutorPortrait(tutor)} alt={`${tutor.display_name}, your tutor`} />
           <div>
             <h2>{tutor.display_name}</h2>
             <p>{tutor.teaching_style}</p>
@@ -150,7 +151,7 @@ export function SettingsScreen({ data, tutor, onChange }: { data: Dashboard; tut
     <section className="page">
       <h1>Make practice feel like yours.</h1>
       <article className="settings-card">
-        <img src={tutor.avatar_profile} alt="" />
+        <img src={tutorPortrait(tutor)} alt="" />
         <div><h2>{tutor.display_name}</h2><p>{voiceDescription}</p><button onClick={onChange}>Change tutor</button></div>
       </article>
       <p><strong>Subscription:</strong> {plan} · {status}.</p>

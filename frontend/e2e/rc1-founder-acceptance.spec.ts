@@ -226,7 +226,7 @@ test.describe("RC1 founder acceptance: live Ananya voice lesson", () => {
       await expect(avatar).toHaveAttribute("data-renderer", "portrait", { timeout: 30_000 });
       await expect(avatar).toHaveAttribute("data-renderer-profile", "portrait", { timeout: 30_000 });
       await expect(portrait).toBeVisible();
-      await expect(portrait).toHaveAttribute("src", "/tutors/ananya-2d-v2.png");
+      await expect(portrait).toHaveAttribute("src", "/tutors/ananya.jpg");
       await expect(page.locator("canvas")).toHaveCount(0);
       if (width === 390) {
         const modeSwitchBox = await page.locator(".practice-mode-switch").boundingBox();
