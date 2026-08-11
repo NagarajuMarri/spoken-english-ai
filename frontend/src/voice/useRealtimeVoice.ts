@@ -13,6 +13,7 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
   const [error,setError]=useState("");
   const peer=useRef<RTCPeerConnection|undefined>(undefined);const stream=useRef<MediaStream|undefined>(undefined);const audio=useRef<HTMLAudioElement|undefined>(undefined);const channel=useRef<RTCDataChannel|undefined>(undefined);
   const context=useRef<Context|undefined>(undefined);const reconnects=useRef(0);const generation=useRef(0);const reconnectTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const idleTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const maximumTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);const idleMilliseconds=useRef(300_000);
   const scheduleReconnectRef=useRef<()=>void>(()=>undefined);
   const eventCallback=useRef(onEvent);const lastLearnerItem=useRef<string|undefined>(undefined);const persistence=useRef(Promise.resolve());
   useEffect(()=>{eventCallback.current=onEvent},[onEvent]);
@@ -24,9 +25,11 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
   },[]);
   const stop=useCallback(()=>{
     generation.current+=1;if(reconnectTimer.current)clearTimeout(reconnectTimer.current);reconnectTimer.current=undefined;
+    if(idleTimer.current)clearTimeout(idleTimer.current);if(maximumTimer.current)clearTimeout(maximumTimer.current);idleTimer.current=undefined;maximumTimer.current=undefined;
     context.current=undefined;reconnects.current=0;lastLearnerItem.current=undefined;release();setState("idle");
   },[release]);
   useEffect(()=>stop,[stop]);
+  const recordActivity=useCallback(()=>{if(idleTimer.current)clearTimeout(idleTimer.current);idleTimer.current=setTimeout(stop,idleMilliseconds.current)},[stop]);
 
   const connect=useCallback(async(ctx:Context,sendGreeting:boolean,run:number):Promise<boolean>=>{
     try{
@@ -40,6 +43,7 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
       dc.onopen=()=>{if(sendGreeting&&run===generation.current)dc.send(JSON.stringify({type:"response.create",response:{instructions:"Greet the learner warmly in one short sentence, then ask the current lesson question."}}))};
       dc.onmessage=message=>{
         if(run!==generation.current)return;let event:Record<string,unknown>;try{event=JSON.parse(String(message.data)) as Record<string,unknown>}catch{return}
+        recordActivity();
         const type=String(event.type??"");if(type==="input_audio_buffer.speech_started")setState("listening");if(type==="input_audio_buffer.speech_stopped")setState("thinking");
         if(type==="response.output_audio.delta")setState("speaking");if(type==="response.output_audio.done"||type==="response.done")setState("listening");
         const transcript=typeof event.transcript==="string"?event.transcript:undefined;const responseId=typeof event.response_id==="string"?event.response_id:undefined;
@@ -52,7 +56,7 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);const answerSdp=await api.realtimeCall(ctx.conversationId,ctx.languageMode,ctx.lessonId,offer.sdp??"");
       if(run!==generation.current){release();return false}await pc.setRemoteDescription({type:"answer",sdp:answerSdp});setState("listening");return true;
     }catch{release();return false}
-  },[release]);
+  },[recordActivity,release]);
 
   const scheduleReconnect=useCallback(()=>{
     const ctx=context.current;if(!ctx||reconnectTimer.current)return;
@@ -64,8 +68,9 @@ export function useRealtimeVoice(onEvent?: (event: RealtimeVoiceEvent) => void) 
 
   const start=useCallback(async(conversationId:string,languageMode:LanguageMode,lessonId?:string)=>{
     if(peer.current||context.current)return;const ctx={conversationId,languageMode,lessonId};context.current=ctx;reconnects.current=0;setState("connecting");setError("");const run=++generation.current;
+    try{const limits=await api.realtimeCapability();idleMilliseconds.current=(limits.idle_session_seconds??300)*1000;maximumTimer.current=setTimeout(stop,(limits.maximum_session_seconds??1_800)*1000);recordActivity()}catch{maximumTimer.current=setTimeout(stop,1_800_000);recordActivity()}
     const ok=await connect(ctx,true,run);if(!ok&&run===generation.current){context.current=undefined;setState("error");setError("Hands-free voice could not connect. Retry or use text mode.")}return ok;
-  },[connect]);
+  },[connect,recordActivity,stop]);
   useEffect(()=>{const pc=peer.current;if(!pc)return;pc.onconnectionstatechange=()=>{if(pc===peer.current&&(pc.connectionState==="failed"||pc.connectionState==="disconnected"))scheduleReconnect()}},[state,scheduleReconnect]);
   const mute=useCallback((muted:boolean)=>stream.current?.getAudioTracks().forEach(track=>{track.enabled=!muted}),[]);
   return{state,error,start,stop,mute,active:state!=="idle"&&state!=="error"};

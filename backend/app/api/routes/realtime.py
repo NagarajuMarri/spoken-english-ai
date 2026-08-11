@@ -155,7 +155,7 @@ def get_realtime_turn(
 @router.get("/capability")
 def realtime_capability(request: Request, _: Principal = Depends(current_principal)):
     settings = request.app.state.settings
-    return {"enabled": bool(settings.realtime_voice_enabled and settings.openai_api_key)}
+    return {"enabled": bool(settings.realtime_voice_enabled and settings.openai_api_key), "maximum_session_seconds": settings.realtime_max_session_seconds, "idle_session_seconds": settings.realtime_idle_session_seconds}
 
 
 def _instructions(language_mode: str, lesson_id: str | None) -> str:

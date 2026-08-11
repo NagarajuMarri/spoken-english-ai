@@ -74,12 +74,13 @@ def test_realtime_call_requires_authentication(client):
     assert response.status_code == 401
 
 
-def test_realtime_capability_exposes_only_availability(client, learner):
-    assert client.get("/api/v1/realtime/capability").json() == {"enabled": False}
+def test_realtime_capability_exposes_availability_and_session_limits(client, learner):
+    expected = {"maximum_session_seconds": 1800, "idle_session_seconds": 300}
+    assert client.get("/api/v1/realtime/capability").json() == {"enabled": False, **expected}
     client.app.state.settings.realtime_voice_enabled = True
     client.app.state.settings.openai_api_key = "sk-never-expose-this"
     response = client.get("/api/v1/realtime/capability")
-    assert response.json() == {"enabled": True}
+    assert response.json() == {"enabled": True, **expected}
     assert "sk-never" not in response.text
 
 

@@ -121,6 +121,7 @@ describe("production Nginx security boundary", () => {
     expect(liveAuthAcceptance.match(/await assertSafeLiveTarget\(request\);/g)).toHaveLength(1);
     expect(registrationAcceptance.match(/await assertSafeLiveTarget\(request\);/g)).toHaveLength(2);
     expect(passwordResetAcceptance.match(/await assertSafeLiveTarget\(request\);/g)).toHaveLength(1);
-    expect(passwordResetAcceptance).toContain("assertSameOrigin(delivery.reset_url, page.url());");
+    expect(passwordResetAcceptance).toContain("verification_code:string");
+    expect(passwordResetAcceptance).not.toContain("reset_url");
   });
 });

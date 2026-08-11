@@ -85,11 +85,17 @@ describe("hands-free realtime voice",()=>{
     expect(FakePeer.instances).toHaveLength(2);vi.useRealTimers();
   });
 
+  it("closes an abandoned provider session at the configured idle limit",async()=>{
+    vi.useFakeTimers();vi.spyOn(api,"realtimeCapability").mockResolvedValue({enabled:true,idle_session_seconds:60,maximum_session_seconds:300});vi.spyOn(api,"realtimeCall").mockResolvedValue("v=0\r\no=answer");
+    const{result}=renderHook(()=>useRealtimeVoice());await act(async()=>{await result.current.start("conversation-1","ENGLISH")});
+    expect(result.current.active).toBe(true);await act(async()=>{await vi.advanceTimersByTimeAsync(60_000)});expect(result.current.state).toBe("idle");expect(stopTrack).toHaveBeenCalled();vi.useRealTimers();
+  });
+
   it("stops after two reconnect attempts with a degraded-mode message",async()=>{
     vi.useFakeTimers();vi.spyOn(api,"realtimeCall").mockResolvedValueOnce("v=0\r\no=answer").mockRejectedValue(new Error("offline"));
     const{result}=renderHook(()=>useRealtimeVoice());await act(async()=>{await result.current.start("conversation-1","ENGLISH")});
     act(()=>{FakePeer.last.connectionState="failed";FakePeer.last.onconnectionstatechange?.()});
-    await act(async()=>{await vi.runAllTimersAsync()});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1_300)});
     expect(result.current.state).toBe("error");
     expect(api.realtimeCall).toHaveBeenCalledTimes(3);expect(result.current.error).toContain("standard voice or Text mode");vi.useRealTimers();
   });

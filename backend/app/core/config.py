@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     realtime_vad_prefix_padding_ms: int = 300
     realtime_vad_silence_ms: int = 500
     realtime_sdp_max_bytes: int = 100_000
+    realtime_max_session_seconds: int = 1_800
+    realtime_idle_session_seconds: int = 300
     tracing_enabled: bool = False
     maintenance_mode: bool = False
     product_name: str = "SpeakMate"
@@ -190,6 +192,10 @@ class Settings(BaseSettings):
             raise ValueError("openai_tts_speed must be between 0.5 and 2")
         if not 5 <= self.openai_realtime_connect_timeout_seconds <= 30:
             raise ValueError("openai_realtime_connect_timeout_seconds must be between 5 and 30")
+        if not 300 <= self.realtime_max_session_seconds <= 14_400:
+            raise ValueError("realtime_max_session_seconds must be between 300 and 14400")
+        if not 60 <= self.realtime_idle_session_seconds < self.realtime_max_session_seconds:
+            raise ValueError("realtime_idle_session_seconds must be shorter than the maximum session")
         if not 0 <= self.realtime_vad_threshold <= 1:
             raise ValueError("realtime_vad_threshold must be between 0 and 1")
         if not 200 <= self.realtime_vad_prefix_padding_ms <= 1_000:
