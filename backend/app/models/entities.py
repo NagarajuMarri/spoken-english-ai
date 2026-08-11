@@ -136,6 +136,29 @@ class ConversationMessage(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
+class RealtimeTurn(Base):
+    __tablename__ = "realtime_turns"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "learner_item_id", name="uq_realtime_learner_item"),
+        UniqueConstraint("conversation_id", "tutor_response_id", name="uq_realtime_tutor_response"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    learner_item_id: Mapped[str] = mapped_column(String(100))
+    tutor_response_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    learner_transcript: Mapped[str] = mapped_column(Text)
+    tutor_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tutor_status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    correction_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    conversation_message_id: Mapped[str | None] = mapped_column(
+        ForeignKey("conversation_messages.id", ondelete="SET NULL"), unique=True, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
 class AITurnAttempt(Base):
     __tablename__ = "ai_turn_attempts"
     __table_args__ = (UniqueConstraint("conversation_id", "idempotency_key"),)

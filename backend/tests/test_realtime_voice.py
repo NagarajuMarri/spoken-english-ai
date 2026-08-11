@@ -1,4 +1,7 @@
 import json
+from sqlalchemy import select
+
+from backend.app.models import ConversationMessage, RealtimeTurn
 
 
 class _RealtimeResponse:
@@ -77,3 +80,55 @@ def test_realtime_capability_exposes_only_availability(client, learner):
     response = client.get("/api/v1/realtime/capability")
     assert response.json() == {"enabled": True}
     assert "sk-never" not in response.text
+
+
+def test_realtime_transcripts_are_exactly_once_and_feed_conversation_history(client, conversation):
+    endpoint = f"/api/v1/realtime/events?conversation_id={conversation['id']}"
+    learner_event = {
+        "event_type": "learner_transcript",
+        "learner_item_id": "item-1",
+        "transcript": "I goes to work every day.",
+    }
+    first = client.post(endpoint, json=learner_event)
+    duplicate = client.post(endpoint, json=learner_event)
+    assert first.status_code == duplicate.status_code == 202
+
+    tutor_event = {
+        "event_type": "tutor_transcript",
+        "learner_item_id": "item-1",
+        "response_id": "response-1",
+        "transcript": "Say: I go to work every day.",
+    }
+    assert client.post(endpoint, json=tutor_event).status_code == 202
+    assert client.post(endpoint, json=tutor_event).status_code == 202
+
+    with client.app.state.session_factory() as db:
+        turns = list(db.scalars(select(RealtimeTurn)))
+        messages = list(db.scalars(select(ConversationMessage).where(
+            ConversationMessage.conversation_id == conversation["id"]
+        )))
+    assert len(turns) == 1
+    assert turns[0].analysis_status == "COMPLETED"
+    assert turns[0].tutor_status == "COMPLETED"
+    assert len(messages) == 1
+    assert messages[0].learner_text == learner_event["transcript"]
+
+
+def test_interrupted_realtime_output_is_not_counted_even_if_stale_done_arrives(client, conversation):
+    endpoint = f"/api/v1/realtime/events?conversation_id={conversation['id']}"
+    assert client.post(endpoint, json={
+        "event_type": "learner_transcript", "learner_item_id": "item-2", "transcript": "Please help me."
+    }).status_code == 202
+    assert client.post(endpoint, json={
+        "event_type": "tutor_interrupted", "learner_item_id": "item-2", "response_id": "response-2"
+    }).status_code == 202
+    assert client.post(endpoint, json={
+        "event_type": "tutor_transcript", "learner_item_id": "item-2", "response_id": "response-2", "transcript": "Stale partial answer."
+    }).status_code == 202
+    with client.app.state.session_factory() as db:
+        turn = db.scalar(select(RealtimeTurn).where(RealtimeTurn.learner_item_id == "item-2"))
+        count = len(list(db.scalars(select(ConversationMessage).where(
+            ConversationMessage.conversation_id == conversation["id"]
+        ))))
+    assert turn is not None and turn.tutor_status == "INTERRUPTED"
+    assert count == 0

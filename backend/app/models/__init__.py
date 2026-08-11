@@ -1,6 +1,7 @@
 from backend.app.models.entities import (
     Conversation,
     ConversationMessage,
+    RealtimeTurn,
     AITurnAttempt,
     TTSSynthesisAttempt,
     VoiceTranscriptionAttempt,
@@ -30,6 +31,7 @@ __all__ = [
     "Learner",
     "Conversation",
     "ConversationMessage",
+    "RealtimeTurn",
     "AITurnAttempt",
     "TTSSynthesisAttempt",
     "VoiceTranscriptionAttempt",
